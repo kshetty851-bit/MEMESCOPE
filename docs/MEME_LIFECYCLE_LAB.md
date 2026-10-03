@@ -180,3 +180,83 @@ exist and report `DISABLED` until authorised access is configured.
   `Unavailable("no_source")` everywhere.
 * No train/validation/test split is meaningful until enough forward data
   exists; experiments say so.
+
+## API response contract (Phase 1–4)
+
+Money, prices and ratios are JSON **strings** (Decimal) or `null`. A derived
+value that could not be computed is a `Measured` object, never `0`:
+
+```jsonc
+// Measured
+{ "value": "4.7" | null, "unavailable_reason": "no_source" | null }
+
+// SourceHealth
+{ "source": "gdelt", "label": "GDELT (news)",
+  "status": "available|unavailable|disabled|error|stale|partial|never_collected",
+  "reason": "disabled_by_config" | null, "last_run_at": iso | null,
+  "data_class": "forward|backfill", "observations_24h": 12 | null }
+```
+
+`GET /overview`
+```jsonc
+{ "lab_enabled": true, "real_trading": false, "mode": "authoritative",
+  "forward_start": iso | null, "forward_days": 3.5 | null,
+  "portfolio": { "run_id": str | null, "as_of": iso | null, "starting_capital": "1000",
+    "equity": str|null, "cash": str|null, "deployed": str|null, "realized_pnl": str|null,
+    "unrealized_pnl": str|null, "roi": str|null, "drawdown": str|null,
+    "trades": 0, "open_positions": 0, "sample_label": "insufficient (<25)",
+    "unavailable_reason": "no_forward_run_yet" | null },
+  "experiment": { "experiment_key": str, "split_meaningful": false, "split_note": str,
+    "train": [iso, iso], "validation": [iso, iso], "test": [iso, iso] } | null,
+  "sources": [SourceHealth], "tracked_memes": 0, "linked_tokens": 0,
+  "notes": ["Only forward data collected since <forward_start> counts toward the verdict."] }
+```
+
+`GET /health` → `{ "generated_at": iso, "sources": [SourceHealth] }`
+
+`GET /memes` → `{ "generated_at": iso, "items": [MemeRow] }`
+```jsonc
+// MemeRow
+{ "slug": "frogceo", "display_name": "FROGCEO",
+  "tokens": [{ "mint": str, "symbol": str|null, "name": str|null, "link_method": "manual",
+               "confidence": "0.8", "linked_at": iso }],
+  "primary_mint": str | null, "token_age_seconds": 345600 | null, "age_bucket": "3-7d",
+  "market_cap": str|null, "liquidity_usd": str|null, "volume_1h": str|null,
+  "price_change_1h": str|null,
+  "attention": { "mentions_1h": Measured, "mentions_24h": Measured, "velocity": Measured,
+                 "acceleration": Measured, "baseline_multiple": Measured,
+                 "platform_count": Measured },
+  "lifecycle_state": "reviving", "market_activity": Measured,   // volume_growth
+  "data_freshness_seconds": 120 | null, "paper_status": "none|open|closed",
+  "contains_backfill": false }
+```
+
+`GET /memes/{slug}`
+```jsonc
+{ "meme": { "slug", "display_name", "description", "tracking_started_at",
+            "wikipedia_title", "gdelt_query" },
+  "aliases": [{ "alias", "kind", "added_at" }],
+  "links": [{ "mint", "method", "confidence", "linked_at", "unlinked_at" }],
+  "series": {                                   // hourly buckets, ascending
+    "attention": [{ "t": iso, "value": str|null }],   // null = unavailable, not 0
+    "price":     [{ "t": iso, "value": str|null }],
+    "volume":    [{ "t": iso, "value": str|null }],
+    "per_source": { "gdelt": [{ "t", "value" }], ... },
+    "backfill_before": iso | null },            // points before this are exploratory
+  "markers": [{ "t": iso, "kind": "attention_spike|revival|wave|paper_entry|paper_exit|token_launch|...",
+                "label": str, "event_type": str|null, "mint": str|null }],
+  "events": [{ "event_type", "detected_at", "mint", "divergence_case", "lifecycle_state",
+               "mode", "contains_backfill", "returns": { "5m": Measured, ..., "24h": Measured },
+               "price_at_detection": str|null, "run_up_before_detection": Measured }],
+  "trades": [{ "trade_key", "mint", "entry_at", "entry_price", "size_usd", "exit_at",
+               "exit_price", "exit_reason", "pnl_usd", "return_pct", "status",
+               "entry_reason", "evidence_timeline": [{ "at", "kind", "detail" }] }],
+  "data_label": "authoritative|exploratory", "contains_backfill": bool,
+  "sources": [SourceHealth] }
+```
+
+`GET /experiments` → `{ "items": [{ "experiment_key", "hypothesis", "arm", "mode",
+"spec_hash", "created_at", "data_cutoff", "train", "validation", "test",
+"split_meaningful", "split_note", "status" }] }`
+
+`GET /runs/{id}` → `{ "run": {...}, "metrics": {...}, "snapshots": [...], "trades": [...] }`
