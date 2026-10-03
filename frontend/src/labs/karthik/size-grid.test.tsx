@@ -13,6 +13,7 @@ const book = {
   whatif: {
     floors: [{ floor_usd: 75_000, book: true, replayed_below: false }],
     sizes: [{ ticket_usd: 10, capital_usd: 20, current: false, cells: [cell("26.00", "6.00", "30.00")] }],
+    wide_from: "2026-09-30T20:00:00+00:00",
     sizes_wide: [{ ticket_usd: 10, capital_usd: 100, current: false, cells: [cell("106.00", "6.00", "6.00")] }],
   },
 } as unknown as KarthikBook;
@@ -20,10 +21,11 @@ const book = {
 describe("If each trade had been", () => {
   it("adds a second table on ten times the money, showing the balance", () => {
     render(<SizeGrid data={book} />);
-    expect(screen.getByText("If each trade had been — on 10x the money")).toBeInTheDocument();
+    expect(screen.getByText(/If each trade had been — on 10x the money, from 1 Oct/)).toBeInTheDocument();
     const wide = screen.getByTestId("size-grid-wide");
     expect(wide).toHaveTextContent("$10 on $100");
     expect(wide).toHaveTextContent("$106.00+$6.00 (+6.0%)");
+    expect(wide).toHaveTextContent("Each cell is its own book from 1 Oct");
   });
 
   it("keeps the first table as it was", () => {

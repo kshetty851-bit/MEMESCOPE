@@ -290,17 +290,20 @@ export function SizeGrid({ data }: { data: KarthikBook }) {
       {/* Karthik, 2026-10-03: the same sizes on ten times the money, shown
           as the balance each would have now. */}
       {w.sizes_wide?.length ? (
-        <GridPanel data={data} title="If each trade had been — on 10x the money"
-                   rows={w.sizes_wide} value testId="size-grid-wide" />
+        <GridPanel data={data}
+                   title={`If each trade had been — on 10x the money${w.wide_from ? `, from ${day(w.wide_from)}` : ""}`}
+                   rows={w.sizes_wide} value from={w.wide_from} testId="size-grid-wide" />
       ) : null}
     </>
   );
 }
 
-function GridPanel({ data, title, rows, value = false, testId }: {
+function GridPanel({ data, title, rows, value = false, from, testId }: {
   data: KarthikBook;
   title: string;
   rows: KarthikBook["whatif"]["sizes"];
+  /** When the table counts from, if not the book's start. */
+  from?: string;
   /** Show each cell as the balance now, with the change under it. */
   value?: boolean;
   testId?: string;
@@ -358,7 +361,7 @@ function GridPanel({ data, title, rows, value = false, testId }: {
           </tbody>
         </table>
         <p className="mt-2 text-[11px] leading-relaxed text-ink-dim">
-          Each cell is its own book from {day(data.started_at)} at that size, one trade at a
+          Each cell is its own book from {day(from ?? data.started_at)} at that size, one trade at a
           time, buying only pools at or above that floor. Hover a cell for its trades, rugs
           and lowest balance. A look back, not a test.
         </p>
