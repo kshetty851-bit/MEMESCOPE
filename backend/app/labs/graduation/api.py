@@ -1814,8 +1814,10 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     # Every $75k+ signal his arm took: what the grid beside the book reads.
     signals = rows
     # The book counts only its pool range (KARTHIK_BOOK_POOLS, 2026-09-26).
+    # Since 2026-10-03 it reaches below $75k, so it reads his $50-75k arm too.
     lo, hi = config.KARTHIK_BOOK_POOLS
-    every = [r for r in signals if lo <= float(r.liq_open_usd or 0)
+    every = [r for r in sorted([*small, *signals], key=lambda r: r.opened_at)
+             if lo <= float(r.liq_open_usd or 0)
              and (hi is None or float(r.liq_open_usd or 0) < hi)]
     rows = _one_at_a_time(every)
     walk = _funded_walk(

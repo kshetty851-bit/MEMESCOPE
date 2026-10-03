@@ -1060,15 +1060,17 @@ FRESH_BOOKS: tuple[FreshBookSpec, ...] = (
     # trades at the new size.
     # RESIZED 2026-09-27 to $100 at $50 a trade, at his request: the size he
     # means to start the real wallet on.
+    # RESIZED 2026-10-03 to $500 at $50, with the book moved to $50k+ pools
+    # (KARTHIK_BOOK_POOLS): at $100 the $50k+ book went broke on 24 Sep.
     FreshBookSpec("KARTHIK_QUIET_5M", datetime(2026, 9, 23, 12, 0, tzinfo=UTC),
-                  Decimal(100), Decimal(50)),
+                  Decimal(500), Decimal(50)),
 )
 
 #: When Karthik's book changed size, and what it was before. The new size was
 #: chosen AFTER its first day was seen, so everything before this moment is in
 #: sample for the size and the page says so; only what follows is a fair test.
-KARTHIK_RESIZED_AT = datetime(2026, 9, 27, 5, 9, tzinfo=UTC)
-KARTHIK_PREVIOUS_SIZE = (Decimal(400), Decimal(200))
+KARTHIK_RESIZED_AT = datetime(2026, 10, 3, 12, 30, tzinfo=UTC)
+KARTHIK_PREVIOUS_SIZE = (Decimal(100), Decimal(50))
 
 #: When Karthik's book became ONE TRADE AT A TIME (his request, after WOTF).
 #: Replayed from the book's first day, so everything before this is a look
@@ -1084,8 +1086,11 @@ KARTHIK_ONE_AT_A_TIME_AT = datetime(2026, 9, 25, 15, 20, tzinfo=UTC)
 #: pool, so the checks beside the book keep showing the sizes it leaves out.
 #: BACK TO $75k AND UP on 2026-09-27, at his request, with the book resized to
 #: $100 at $50 (the $150k+ range ran 26 Sep 19:00 UTC to this moment).
-KARTHIK_BOOK_POOLS: tuple[int, int | None] = (75_000, None)
-KARTHIK_BOOK_POOLS_AT = datetime(2026, 9, 27, 5, 9, tzinfo=UTC)
+#: $50k AND UP from 2026-10-03, at his request ("show main 50k instead of
+#: 75k"): the $50-75k slice comes from KARTHIK_Q50_5M, his rule on those pools,
+#: whose trades before 26 Sep were rebuilt by replay.
+KARTHIK_BOOK_POOLS: tuple[int, int | None] = (50_000, None)
+KARTHIK_BOOK_POOLS_AT = datetime(2026, 10, 3, 12, 30, tzinfo=UTC)
 
 #: Never buy a coin more than this long after it graduated (Karthik,
 #: 2026-09-27, after EVO). EVO was bought 186s after graduating, the slowest
