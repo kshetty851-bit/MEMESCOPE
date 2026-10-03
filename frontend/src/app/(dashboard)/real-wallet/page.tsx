@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
@@ -17,6 +18,13 @@ import {
 } from "@/components/real-wallet/trades";
 import { useAuth } from "@/hooks/use-auth";
 import { ApiError, api } from "@/lib/api-client";
+
+/** The Checkpoint office, loaded after the page so HQ's drawings stay out of
+ *  this page's bundle (see "bundle isolation" in hq.test.tsx). */
+const CheckpointLive = dynamic(
+  () => import("@/components/hq/checkpoint").then((m) => m.CheckpointLive),
+  { ssr: false },
+);
 
 /**
  * The real wallet: what it holds, what it trades, and the two switches.
@@ -1129,7 +1137,9 @@ export default function RealWalletPage() {
   const chosen = chosenStrategy(autotrade.data, pick);
   return (
     <main>
-      <p className="text-label text-accent">
+      {/* The thirty pre-buy checks, live, on top (Karthik, 2026-10-03). */}
+      <CheckpointLive />
+      <p className="mt-6 text-label text-accent">
         Real wallet · {(data?.network ?? "—").toUpperCase()}
       </p>
       <h1 className="mt-2 text-3xl font-medium text-ink">Real wallet</h1>

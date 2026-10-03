@@ -1,5 +1,6 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { Fragment, useEffect, useState } from "react";
 
 import { RugsPreventedLive } from "@/components/rugs-prevented";
@@ -12,6 +13,13 @@ import type {
   KarthikBook, KarthikDay, KarthikFlows, KarthikTrade, KarthikWhatIfLine, PumpfunDay,
   WalletProfit,
 } from "./types";
+
+/** The Checkpoint office, loaded after the page so HQ's drawings stay out of
+ *  this page's bundle (see "bundle isolation" in hq.test.tsx). */
+const CheckpointLive = dynamic(
+  () => import("@/components/hq/checkpoint").then((m) => m.CheckpointLive),
+  { ssr: false },
+);
 
 /**
  * KARTHIK'S LAB — ONE BOOK, PAPER ONLY.
@@ -784,6 +792,8 @@ export function KarthikLabPage() {
 
   return (
     <div className="min-w-0 space-y-4">
+      {/* The thirty pre-buy checks, live, on top (Karthik, 2026-10-03). */}
+      <CheckpointLive />
       {/* Two columns from 1150px: the counts and their boxes on the right, and
           the header grows to fit them rather than lying over the rule book. */}
       <div className="grid gap-x-8 gap-y-2 min-[1150px]:grid-cols-[minmax(0,1fr)_auto]">
