@@ -91,7 +91,8 @@ export interface KarthikWhatIf {
   /** The grid's pool floors, left to right. `book` marks this book's own
    *  floor; `replayed_below` marks floors that include the $25-75k pools the
    *  book skips (rebuilt from price snapshots before those arms went live). */
-  floors: { floor_usd: number; book: boolean; replayed_below: boolean }[];
+  /** `cap_usd` set = a band ($100k-$150k, 2026-10-03), not a floor. */
+  floors: { floor_usd: number; cap_usd?: number | null; book: boolean; replayed_below: boolean }[];
   /** One row per trade size, on the balance it is paired with; one cell per
    *  floor, each its own one-at-a-time walk from the book's start. */
   sizes: { ticket_usd: number; capital_usd: number; current: boolean; cells: KarthikWhatIfLine[] }[];

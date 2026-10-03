@@ -11,10 +11,11 @@ const cell = (balance: string, pnl: string, pct: string) => ({
 const book = {
   started_at: "2026-09-23T12:00:00Z",
   whatif: {
-    floors: [{ floor_usd: 75_000, book: true, replayed_below: false }],
-    sizes: [{ ticket_usd: 10, capital_usd: 20, current: false, cells: [cell("26.00", "6.00", "30.00")] }],
+    floors: [{ floor_usd: 75_000, book: true, replayed_below: false },
+             { floor_usd: 100_000, cap_usd: 150_000, book: false, replayed_below: false }],
+    sizes: [{ ticket_usd: 10, capital_usd: 20, current: false, cells: [cell("26.00", "6.00", "30.00"), cell("24.00", "4.00", "20.00")] }],
     wide_from: "2026-09-30T20:00:00+00:00",
-    sizes_wide: [{ ticket_usd: 10, capital_usd: 100, current: false, cells: [cell("106.00", "6.00", "6.00")] }],
+    sizes_wide: [{ ticket_usd: 10, capital_usd: 100, current: false, cells: [cell("106.00", "6.00", "6.00"), cell("104.00", "4.00", "4.00")] }],
   },
 } as unknown as KarthikBook;
 
@@ -26,6 +27,8 @@ describe("If each trade had been", () => {
     expect(wide).toHaveTextContent("$10 on $100");
     expect(wide).toHaveTextContent("$106.00+$6.00 (+6.0%)");
     expect(wide).toHaveTextContent("Each cell is its own book from 1 Oct");
+    expect(wide).toHaveTextContent("$100k–$150k");
+    expect(wide).toHaveTextContent("$104.00+$4.00 (+4.0%)");
   });
 
   it("keeps the first table as it was", () => {

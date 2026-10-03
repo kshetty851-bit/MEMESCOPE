@@ -309,7 +309,10 @@ function GridPanel({ data, title, rows, value = false, from, testId }: {
   testId?: string;
 }) {
   const w = data.whatif;
-  const k = (n: number) => `$${Math.round(n / 1000)}k+`;
+  const k = (n: number) => `$${Math.round(n / 1000)}k`;
+  const col = (f: KarthikBook["whatif"]["floors"][number]) =>
+    f.cap_usd ? `${k(f.floor_usd)}–${k(f.cap_usd)}` : `${k(f.floor_usd)}+`;
+  const key = (f: KarthikBook["whatif"]["floors"][number]) => `${f.floor_usd}-${f.cap_usd ?? ""}`;
   return (
     <Panel>
       <PanelHeader>
@@ -322,10 +325,10 @@ function GridPanel({ data, title, rows, value = false, from, testId }: {
               <th className="py-1 pr-3 text-left font-normal">size</th>
               {w.floors.map((f) => (
                 <th
-                  key={f.floor_usd}
+                  key={key(f)}
                   className={`py-1 px-2 text-right font-normal ${f.book ? "rounded-t-md bg-accent/10 text-accent" : ""}`}
                 >
-                  {k(f.floor_usd)}
+                  {col(f)}
                   {f.replayed_below ? "*" : ""}
                   {f.book ? <div className="text-[10px] normal-case tracking-normal">this book</div> : null}
                 </th>
@@ -342,7 +345,7 @@ function GridPanel({ data, title, rows, value = false, from, testId }: {
                 </td>
                 {s.cells.map((c, i) => (
                   <td
-                    key={w.floors[i]!.floor_usd}
+                    key={key(w.floors[i]!)}
                     className={`whitespace-nowrap py-1.5 px-2 text-right ${w.floors[i]!.book ? "bg-accent/10" : ""}`}
                     title={`${c.trades} trades · ${c.rugs} rugs · lowest ${usd(c.lowest_usd)}`}
                   >
