@@ -1,12 +1,25 @@
-import { act, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import fs from "node:fs";
+import path from "node:path";
+
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import type * as ApiClientModule from "@/lib/api-client";
+import { api } from "@/lib/api-client";
 
 import { EMPLOYEES } from "@/lib/hq/employees";
 import {
   ROBOTS, robotIndexFor, stoppedBy, type Checkpoint, type LiveBelt,
 } from "@/lib/hq/checkpoint";
 
-import { CheckpointOffice } from "./checkpoint";
+import { CheckpointLive, CheckpointOffice } from "./checkpoint";
+
+vi.mock("@/lib/api-client", async (importOriginal) => ({
+  ...(await importOriginal<typeof ApiClientModule>()),
+  api: { get: vi.fn(), post: vi.fn() },
+}));
 
 const data: Checkpoint = {
   stopped_by: {
@@ -125,5 +138,44 @@ describe("the Checkpoint office, live", () => {
     render(<CheckpointOffice data={data} live={{ now: live.now, coins: [] }}
                              motionOverride={false} now={now} />);
     expect(screen.getByTestId("cp-live-list")).toHaveTextContent("waiting for the next one");
+  });
+});
+
+describe("the floor it is drawn at (Karthik, 2026-10-03)", () => {
+  function wrapper({ children }: { children: ReactNode }) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  }
+  const paths = () => vi.mocked(api.get).mock.calls.map(([p]) => p as string).sort();
+
+  afterEach(() => vi.clearAllMocks());
+
+  it("asks for exactly what it always did when no floor is passed (HQ, Real wallet)", async () => {
+    vi.mocked(api.get).mockReturnValue(new Promise(() => {}));
+    render(<CheckpointLive />, { wrapper });
+    await waitFor(() => expect(paths()).toEqual(
+      ["/real-wallet/checkpoint", "/real-wallet/checkpoint/live"]));
+    expect(screen.getByTestId("cp-bot-depth")).toHaveAccessibleName(
+      "Diego (Depth): The pool holds at least $75,000");
+  });
+
+  it("asks for the $50k rule when Karthik's Lab passes it, and says $50,000", async () => {
+    vi.mocked(api.get).mockReturnValue(new Promise(() => {}));
+    render(<CheckpointLive floorUsd={50_000} />, { wrapper });
+    await waitFor(() => expect(paths()).toEqual(
+      ["/real-wallet/checkpoint/live?floor=50000", "/real-wallet/checkpoint?floor=50000"]));
+    fireEvent.click(screen.getByTestId("cp-bot-depth"));
+    expect(screen.getByTestId("cp-detail")).toHaveTextContent("The pool holds at least $50,000");
+    expect(screen.getByTestId("cp-detail")).not.toHaveTextContent("$75,000");
+  });
+
+  it("is passed only by Karthik's Lab: HQ and the Real wallet draw the $75k rule", () => {
+    const root = path.resolve(__dirname, "../..");
+    const uses = (file: string) =>
+      fs.readFileSync(path.join(root, file), "utf8").match(/<CheckpointLive[^>]*\/>/g);
+    expect(uses("labs/karthik/page.tsx")).toEqual(["<CheckpointLive floorUsd={50_000} />"]);
+    expect(uses("app/(dashboard)/hq/page.tsx")).toEqual(
+      ["<CheckpointLive />", "<CheckpointLive />"]);
+    expect(uses("app/(dashboard)/real-wallet/page.tsx")).toEqual(["<CheckpointLive />"]);
   });
 });

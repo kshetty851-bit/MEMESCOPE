@@ -304,3 +304,83 @@ async def test_the_checkpoint_counts_real_refusals_and_feeds_the_latest_coins(
         ("stopped", None, "POSITION_TOO_LARGE_FOR_LIQUIDITY"),
         ("stopped", "RUGGY", "linked_to_recent_rug")]
     assert "Mint" not in r.text and "OwnerWallet" not in r.text
+
+
+async def test_the_checkpoint_is_drawn_at_75k_unless_his_lab_asks_for_50k(
+        app, db_session, monkeypatch):
+    """Karthik, 2026-10-03: "in karthik lab only show as 50k pool". His Lab
+    asks for floor=50000; HQ and the Real wallet ask for nothing and keep the
+    main wallet's $75k rule. Any other floor is refused, not rounded."""
+    import uuid
+    from datetime import UTC, datetime, timedelta
+    from decimal import Decimal
+
+    from app.labs.graduation.models import (
+        GradMigration,
+        GradOperator,
+        GradPaperPosition,
+        GradPostgradSample,
+        GradToken,
+    )
+    from app.models.real_wallet_safety import RealWalletSafetyEvaluation
+
+    monkeypatch.setattr(settings, "REAL_WALLET_PUBLIC_KEY", "OwnerWallet1111")
+    now = datetime.now(UTC)
+    one = Decimal(1)
+    grad = now - timedelta(seconds=90)
+    db_session.add_all([
+        # A $60k pool a rug block refused: his rule's, not the main wallet's.
+        GradOperator(mint="MintSixty", pool="P1", entry_at=now - timedelta(minutes=30),
+                     price_native=one, depth_usd=Decimal(60_000), label_due_at=now,
+                     blocked_reason="same_name_as_recent_rug"),
+        # A $60k quiet coin his $50-75k book bought, and a safety check of it
+        # that is not the main wallet's (USER 1 buys these pools).
+        GradMigration(mint="MintQuiet", ts=grad),
+        GradPostgradSample(ts=grad + timedelta(seconds=30), mint="MintQuiet",
+                           source="dexscreener", liquidity_usd=Decimal(60_000)),
+        GradPaperPosition(
+            id=uuid.uuid4(), book="KARTHIK_Q50_5M", mint="MintQuiet", symbol="QUIET",
+            opened_at=grad + timedelta(seconds=35), open_quote=Decimal("0.0005"),
+            open_fill=Decimal("0.0005"), notional_usd=Decimal(100),
+            notional_quote=Decimal(1), sol_usd_at_open=Decimal(100), tokens=Decimal(2000),
+            peak_quote=Decimal("0.0005"), last_quote=Decimal("0.0005")),
+        RealWalletSafetyEvaluation(
+            mint_address="MintQuiet", decision="ALLOW", trade_size_usd=Decimal(50),
+            policy_version="v", provenance={}, evaluated_at=grad + timedelta(seconds=40),
+            reason_codes=[]),
+        GradToken(mint="MintQuiet", symbol="QUIET", first_seen_at=now),
+        # The same pool, which nothing bought or checked.
+        GradMigration(mint="MintPlain", ts=grad - timedelta(seconds=1)),
+        GradPostgradSample(ts=grad + timedelta(seconds=30), mint="MintPlain",
+                           source="dexscreener", liquidity_usd=Decimal(60_000)),
+        GradToken(mint="MintPlain", symbol="PLAIN", first_seen_at=now),
+    ])
+    await db_session.flush()
+    app.dependency_overrides[get_optional_user] = lambda: None
+    base = f"{settings.API_V1_PREFIX}/real-wallet/checkpoint"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
+        default, at75, at50 = [(await client.get(base + q)).json()
+                               for q in ("", "?floor=75000", "?floor=50000")]
+        assert default == at75
+        assert "same_name_as_recent_rug" not in default["stopped_by"]
+        assert at50["stopped_by"]["same_name_as_recent_rug"] == 1
+
+        lives = [(await client.get(f"{base}/live{q}")).json()["coins"]
+                 for q in ("", "?floor=75000", "?floor=50000")]
+        # `now` differs per call; the coins are what must not.
+        assert lives[0] == lives[1]
+        assert [(c["symbol"], c["status"], c["robot"], c["note"]) for c in lives[0]
+                if c["symbol"] == "PLAIN"] == [
+            ("PLAIN", "stopped", "depth", "pool $60,000, under $75,000")]
+        assert [(c["symbol"], c["status"], c["robot"], c["note"]) for c in lives[2]] == [
+            ("QUIET", "stopped", None,
+             "passed the $50,000 rule; the main wallet buys $75,000+ pools only"),
+            ("PLAIN", "checking", "hush", "checking the pool is quiet")]
+
+        for q in ("?floor=60000", "?floor=50k", "?floor=0"):
+            assert (await client.get(base + q)).status_code == 422
+            assert (await client.get(f"{base}/live{q}")).status_code == 422
+    # Every floor the API accepts has its books, or the belt would answer 500.
+    from app.real_wallet import api as real_api
+    from app.real_wallet import checkpoint_live
+    assert set(real_api.CHECKPOINT_FLOORS) == set(checkpoint_live.QUIET_BOOKS)

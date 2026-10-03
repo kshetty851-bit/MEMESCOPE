@@ -15,6 +15,20 @@ import type {
 
 export type StageId = "rule" | "gate" | "safety";
 
+/**
+ * The pool rule the Checkpoint is drawn for (Karthik, 2026-10-03: "in karthik
+ * lab only show as 50k pool"). $75k is the main wallet's, and what HQ and the
+ * Real wallet show; his Lab asks for his book's $50k. The API refuses others.
+ */
+export type CheckpointFloor = 50_000 | 75_000;
+export const DEFAULT_FLOOR: CheckpointFloor = 75_000;
+
+/** An endpoint's path at a floor: unchanged at the default, so HQ's and the
+ *  Real wallet's requests are exactly what they were. */
+export function atFloor(path: string, floorUsd: CheckpointFloor): string {
+  return floorUsd === DEFAULT_FLOOR ? path : `${path}?floor=${floorUsd}`;
+}
+
 export interface Robot {
   id: string;
   name: string;
@@ -84,6 +98,14 @@ export interface Checkpoint {
   safety_checked: number;
   safety_allowed: number;
   feed: CheckpointEvent[];
+}
+
+/** What a robot checks, at the floor the page is drawn for: only Depth's
+ *  line names the pool floor. */
+export function jobOf(robot: Robot, floorUsd: CheckpointFloor = DEFAULT_FLOOR): string {
+  return robot.id === "depth"
+    ? `The pool holds at least $${floorUsd.toLocaleString("en-US")}`
+    : robot.job;
 }
 
 const BY_CODE = new Map(ROBOTS.flatMap((r, i) => r.codes.map((c) => [c, i] as const)));
