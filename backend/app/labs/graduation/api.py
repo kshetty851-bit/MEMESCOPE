@@ -1448,6 +1448,15 @@ KARTHIK_GRID_COLUMNS = ((25_000, None), (50_000, None), (75_000, None),
 KARTHIK_BAND_BOOKS = ("KARTHIK_Q25_5M", "KARTHIK_Q50_5M")
 
 
+def _opened_order(row: Any) -> tuple[datetime, str]:
+    """Open time, then mint. Replayed rows share their sample's timestamp, so
+    two coins can open in the same instant; one trade at a time takes the
+    first, and without the mint the database's row order decided which --
+    the book's figures moved between two reads of the same data (2026-10-03).
+    """
+    return (row.opened_at, row.mint)
+
+
 def _one_at_a_time(rows: Sequence[Any]) -> list[Any]:
     """Karthik's rule since 25 Sep, applied from the book's first day: buy only
     when nothing is held. A signal that arrives while a trade is open is let
@@ -1513,7 +1522,7 @@ def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
     $75k+ signals his arm took; `small` is the same rule on $25-75k pools
     (`KARTHIK_BAND_BOOKS`). Nothing here changes what the book trades.
     """
-    signals = sorted([*small, *rows], key=lambda r: r.opened_at)
+    signals = sorted([*small, *rows], key=_opened_order)
 
     def cell(col: tuple[int, int | None], size: float, capital: float,
              since: datetime | None = None) -> dict[str, Any]:
@@ -1819,7 +1828,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     # The book counts only its pool range (KARTHIK_BOOK_POOLS, 2026-09-26).
     # Since 2026-10-03 it reaches below $75k, so it reads his $50-75k arm too.
     lo, hi = config.KARTHIK_BOOK_POOLS
-    every = [r for r in sorted([*small, *signals], key=lambda r: r.opened_at)
+    every = [r for r in sorted([*small, *signals], key=_opened_order)
              if lo <= float(r.liq_open_usd or 0)
              and (hi is None or float(r.liq_open_usd or 0) < hi)]
     rows = _one_at_a_time(every)

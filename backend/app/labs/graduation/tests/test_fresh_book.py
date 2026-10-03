@@ -427,3 +427,17 @@ async def test_a_coin_bought_more_than_two_minutes_after_graduating_never_happen
     assert book["max_entry_age_s"] == 120 and book["quiet_max_txs"] == 100
     _, now = _grid(book)
     assert now[75_000]["trades"] == 1
+
+
+async def test_coins_opened_in_the_same_instant_are_always_taken_in_one_order() -> None:
+    """Replayed rows share a timestamp; the book must not depend on the order
+    the database returns them in (2026-10-03: its figures moved between reads)."""
+    from app.labs.graduation.api import karthik_book
+
+    start = next(s for s in config.FRESH_BOOKS if s.book == "KARTHIK_QUIET_5M").start
+    at = start + timedelta(hours=1)
+    a, b = _Pos("AAA", at, 0.10), _Pos("BBB", at, -0.90)
+    one = await karthik_book(db=_StubDb([a, b]))  # type: ignore[arg-type]
+    two = await karthik_book(db=_StubDb([b, a]))  # type: ignore[arg-type]
+    assert [t["symbol"] for t in one["trades_list"]] == ["AAA"]
+    assert one["balance_usd"] == two["balance_usd"]
