@@ -57,7 +57,7 @@ export const ROBOTS: readonly Robot[] = [
   { id: "probe", first: "Pablo", stopLine: "Can't verify that pool!", name: "Probe", stage: "safety", job: "Reads the pool's price straight from the chain", codes: ["PROVENANCE_UNVERIFIED", "VENUE_UNSUPPORTED"] },
   { id: "ticker", first: "Tess", stopLine: "These prices are stale!", name: "Ticker", stage: "safety", job: "The market data is fresh", codes: ["MARKET_DATA_STALE", "MARKET_DATA_MISSING"] },
   { id: "sanity", first: "Sana", stopLine: "Numbers don't add up!", name: "Sanity", stage: "safety", job: "Price and liquidity make sense", codes: ["PRICE_INVALID", "LIQUIDITY_INVALID", "TRADING_STATUS_UNSAFE"] },
-  { id: "historian", first: "Henry", stopLine: "This name rugged before!", name: "Historian", stage: "safety", job: "This name never rugged before", codes: ["SYMBOL_RUGGED_BEFORE"] },
+  { id: "historian", first: "Henry", stopLine: "Seen this before!", name: "Historian", stage: "safety", job: "This name never rugged, and the creator has never launched a coin before", codes: ["SYMBOL_RUGGED_BEFORE", "CREATOR_LAUNCHED_BEFORE"] },
   { id: "ledger", first: "Lena", stopLine: "Follow the money — it's dirty!", name: "Ledger", stage: "safety", job: "Checks where the money came from, again", codes: ["LINKED_TO_RECENT_RUG", "KNOWN_RUG_MONEY", "SOURCES_UNREADABLE"] },
   { id: "forge", first: "Farah", stopLine: "They can still mint more!", name: "Forge", stage: "safety", job: "Nobody can mint new tokens", codes: ["MINT_AUTHORITY_ACTIVE"] },
   { id: "frost", first: "Finn", stopLine: "They could freeze us!", name: "Frost", stage: "safety", job: "Nobody can freeze your tokens", codes: ["FREEZE_AUTHORITY_ACTIVE"] },
