@@ -59,6 +59,10 @@ class PolicyState:
     #: measured has not been shown to leave the reserve behind. Ignored for a
     #: SELL, which spends no SOL.
     spend_lamports: int | None = None
+    #: This wallet's own open-position limit, in place of
+    #: `REAL_WALLET_MAX_OPEN_POSITIONS` (a user wallet set to hold several at
+    #: once, `REAL_WALLET_MEMBER_MAX_OPEN`). `None` keeps the platform's.
+    max_open_positions: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -231,7 +235,8 @@ class AutonomousExecutionPolicy:
         # that computes its own amount cannot exceed it by not asking.
         if requested_usd > max_trade:
             reasons.append(PolicyReason.MAX_TRADE_SIZE)
-        if state.open_positions >= settings.REAL_WALLET_MAX_OPEN_POSITIONS:
+        if state.open_positions >= (state.max_open_positions
+                                    or settings.REAL_WALLET_MAX_OPEN_POSITIONS):
             reasons.append(PolicyReason.MAX_OPEN_POSITIONS)
         if state.exposure_usd + requested_usd > max_exposure:
             reasons.append(PolicyReason.MAX_TOTAL_EXPOSURE)

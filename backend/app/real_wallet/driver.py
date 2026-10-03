@@ -70,6 +70,16 @@ class DriverOutcome:
         return out
 
 
+def member_strategy(member: str, nominated: str) -> str:
+    """A user wallet's own strategy (`REAL_WALLET_MEMBER_STRATEGY`), or the
+    owner's nominated one. An entry naming no graduation live arm is ignored
+    rather than trusted: a typo must not invent a strategy."""
+    from app.labs.graduation.live_spec import BY_ID as GRAD_BY_ID
+
+    own = settings.REAL_WALLET_MEMBER_STRATEGY.get(member.upper())
+    return own if own and own.upper() in GRAD_BY_ID else nominated
+
+
 class RealWalletDriver:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -137,7 +147,8 @@ class RealWalletDriver:
                 out[account.member] = "kill_switch_active"
             else:
                 out[account.member] = await self._family_tick(
-                    account, strategy_id=switch.nominated_strategy, now=now,
+                    account, strategy_id=member_strategy(
+                        account.member, switch.nominated_strategy), now=now,
                     peers=[a.wallet for a in accounts if a.band == account.band])
         return out
 
@@ -193,6 +204,7 @@ class RealWalletDriver:
                 equity_usd=equity_usd,
                 side="BUY",
                 spend_lamports=lamports,
+                max_open_positions=settings.REAL_WALLET_MEMBER_MAX_OPEN.get(account.member),
             ),
         )
         if not decision.allowed:
