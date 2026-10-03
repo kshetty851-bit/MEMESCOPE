@@ -1,0 +1,12 @@
+{
+  "synthetic": true,
+  "description": "SYNTHETIC: HTTP 200 with '{}' (no timeline). Expected: UNAVAILABLE no_data_for_window.",
+  "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Pepe%22&mode=timelinevolraw&format=json&timespan=6h",
+  "query": "\"Pepe\"",
+  "retrieved_at": "2026-10-03T12:07:00+00:00",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "body": "{}"
+}

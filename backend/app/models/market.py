@@ -275,25 +275,56 @@ class TokenEnrichmentState(Base, UUIDPrimaryKeyMixin, TimestampMixin):
         ),
     )
 
-class TokenMarketCandle1h(Base):
-    """Hourly downsampled OHLCV candles for long-term charting."""
+class TokenMarketCandle(Base):
+    """OHLCV bars at any resolution, from any source.
 
-    __tablename__ = "token_market_candles_1h"
+    Was `token_market_candles_1h` (migration 0038): hourly only, derived only,
+    and never read or written by anything. The Meme Lifecycle Lab (0112)
+    needed somewhere to keep GeckoTerminal's historical bars, and a second
+    candle table beside an empty first one would have been two answers to one
+    question. So the table was generalised instead: the key gained
+    `resolution_s` and `source`, because a 1-minute GeckoTerminal bar and a
+    derived hourly bar for the same mint and bucket are different facts and
+    must not overwrite each other.
+
+    `data_class` separates what was collected prospectively (`forward`) from
+    what was fetched about the past (`backfill`). A backfilled bar's
+    `retrieved_at` is when MEMESCOPE got it — weeks after `bucket` — which is
+    exactly why it can never count toward an authoritative result.
+    """
+
+    __tablename__ = "token_market_candles"
 
     mint_address: Mapped[str] = mapped_column(String(44), primary_key=True, nullable=False)
-    # The start of the hourly bucket
-    bucket: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True, nullable=False)
+    resolution_s: Mapped[int] = mapped_column(
+        Integer, primary_key=True, nullable=False, default=3600, server_default="3600"
+    )
+    source: Mapped[str] = mapped_column(
+        String(32), primary_key=True, nullable=False, default="derived",
+        server_default="derived",
+    )
+    #: The START of the bar. Its close is known at `bucket + resolution_s`.
+    bucket: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), primary_key=True, nullable=False
+    )
 
     open_price: Mapped[Decimal | None] = mapped_column(PRICE_PRECISION, nullable=True)
     high_price: Mapped[Decimal | None] = mapped_column(PRICE_PRECISION, nullable=True)
     low_price: Mapped[Decimal | None] = mapped_column(PRICE_PRECISION, nullable=True)
     close_price: Mapped[Decimal | None] = mapped_column(PRICE_PRECISION, nullable=True)
-    
+
     close_market_cap: Mapped[Decimal | None] = mapped_column(MONEY_PRECISION, nullable=True)
     close_liquidity_usd: Mapped[Decimal | None] = mapped_column(MONEY_PRECISION, nullable=True)
 
     volume: Mapped[Decimal | None] = mapped_column(MONEY_PRECISION, nullable=True)
 
+    data_class: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="forward", server_default="forward"
+    )
+    retrieved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     __table_args__ = (
-        Index("ix_candles_1h_mint_bucket_desc", "mint_address", bucket.desc()),
+        Index("ix_token_market_candles_mint_bucket_desc", "mint_address", bucket.desc()),
     )

@@ -166,6 +166,15 @@ async def _prune_market_snapshots(days: int) -> int:
     The scan is driven off `ix_snapshots_captured_at` by `ORDER BY
     captured_at`, so each batch walks the oldest rows in index order and stops
     at the limit rather than scanning the table.
+
+    **Meme Lifecycle Lab links are protected while current**, 2026-10-03.
+    The Lab's replay reads a linked token's FORWARD market series to measure
+    what happened around an attention event — weeks after the fact, which is
+    exactly when the seven-day window would already have deleted it. Bounded
+    the same way the position carve-out is: by the link, not forever. An
+    unlinked mint (`unlinked_at` set) loses protection on the next pass, and
+    the population is capped upstream by `MLL_MAX_TRACKED_TOKENS` at a
+    five-minute cadence, which is the design's ~1.5 GB/month budget.
     """
     return await _delete_in_batches(
         """
@@ -175,6 +184,9 @@ async def _prune_market_snapshots(days: int) -> int:
             UNION
             SELECT mint_address FROM lab_positions
              WHERE closed_at IS NULL OR closed_at >= :prot_cutoff
+            UNION
+            SELECT mint_address FROM mll_meme_tokens
+             WHERE unlinked_at IS NULL
         ),
         prot_snaps AS (
             SELECT market_snapshot_id AS id FROM paper_decision_snapshots
@@ -335,13 +347,28 @@ async def _prune_pumpfun_social(days: int) -> int:
 
     The window has to outlast the question being asked of it: reply VELOCITY
     against forward returns needs weeks of consecutive readings, not days.
+
+    **Mints with a current Meme Lifecycle Lab link are kept**, 2026-10-03.
+    The Lab reads pump.fun replies IN PLACE rather than copying them into
+    `mll_attention_observations` — one copy of the truth — so this table is
+    its only record of them, and a linked coin's replies are attention history
+    the replay needs long after this window. Same inline-CTE shape as the
+    market-snapshot carve-out, for the same pooled-connection reason (a temp
+    table vanishes when a batch lands on a different connection).
     """
     return await _delete_in_batches(
         """
+        WITH prot_mints AS (
+            SELECT mint_address FROM mll_meme_tokens
+             WHERE unlinked_at IS NULL
+        )
         DELETE FROM pumpfun_social_snapshots
         WHERE ctid IN (
-            SELECT ctid FROM pumpfun_social_snapshots
-            WHERE observed_at < :cutoff
+            SELECT s.ctid FROM pumpfun_social_snapshots s
+            WHERE s.observed_at < :cutoff
+              AND NOT EXISTS (
+                  SELECT 1 FROM prot_mints p WHERE p.mint_address = s.mint_address
+              )
             LIMIT :batch
         )
         """,

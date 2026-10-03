@@ -169,6 +169,20 @@ from app.models.intelligence import (  # noqa: F401
     Watchlist,
     WatchlistItem,
 )
+from app.models.lifecycle_lab import (  # noqa: F401
+    MllAttentionObservation,
+    MllBacktestRun,
+    MllCollectionRun,
+    MllExperiment,
+    MllMeme,
+    MllMemeAlias,
+    MllMemeEvent,
+    MllMemeToken,
+    MllPaperTrade,
+    MllPortfolioSnapshot,
+    MllReplayCheckpoint,
+)
+from app.models.market import TokenMarketCandle  # noqa: F401
 from app.models.opportunity import (  # noqa: F401
     Opportunity,
     OpportunitySignal,
