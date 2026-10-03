@@ -375,6 +375,9 @@ function GridPanel({ data, title, rows, value = false, from, testId }: {
           Each cell is its own book from {day(from ?? data.started_at)} at that size, one trade at a
           time, buying only pools at or above that floor. Hover a cell for its trades, rugs
           and lowest balance. A look back, not a test.
+          {w.floors.some((f) => f.replayed_below)
+            ? " * includes the $50k–$75k pools, traded by a paper arm on the same rule; its trades before 26 Sep were rebuilt from price history and ran about a point a trade too kind."
+            : null}
         </p>
       </div>
     </Panel>
