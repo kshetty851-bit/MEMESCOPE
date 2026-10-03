@@ -163,10 +163,11 @@ function Days({ days, judgeAt }: { days: KarthikDay[]; judgeAt: string }) {
   if (days.length === 0) return null;
   const guess = day30(days, judgeAt);
   return (
-    <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1">
+    // Wrapped, not scrolled (Karthik, 2026-10-03: "so i dont need to slide").
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(112px,1fr))] gap-2">
       {guess ? (
         <div
-          className="min-w-[132px] shrink-0 rounded-lg border border-dashed border-accent/60 bg-accent/[0.06] p-2"
+          className="rounded-lg border border-dashed border-accent/60 bg-accent/[0.06] p-2"
           data-testid="day-30"
           title={`If every day left is like the average finished day so far (${usd(String(guess.avg))} a day, from ${guess.basedOn} days). At the worst finished day's pace it would be ${usd(String(guess.worstPace))}.`}
         >
@@ -187,7 +188,7 @@ function Days({ days, judgeAt }: { days: KarthikDay[]; judgeAt: string }) {
           <div
             key={d.n}
             data-testid={`day-${d.n}`}
-            className={`min-w-[104px] shrink-0 rounded-lg border p-2 ${
+            className={`rounded-lg border p-2 ${
               d.running ? "border-dashed border-line" : "border-line"
             } bg-ink/[0.02]`}
           >
