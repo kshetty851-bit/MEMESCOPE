@@ -378,7 +378,7 @@ function GridPanel({ data, title, rows, value = false, from, testId }: {
           coin on pools at or above that floor while its balance has money free. Hover a cell for its trades, rugs
           and lowest balance. A look back, not a test.
           {w.floors.some((f) => f.replayed_below)
-            ? " * includes the $25k–$75k pools, traded by paper arms on the same rule; their trades before they went live ($50k–$75k: 26 Sep, $25k–$50k: 3 Oct) were rebuilt from price history and ran about a point a trade too kind."
+            ? " * real-time trades only: the $50k–$75k pools count from 26 Sep and the $25k–$50k pools from 3 Oct, when their paper arms went live. Before that these columns hold only the $75k+ trades."
             : null}
         </p>
       </div>
@@ -839,7 +839,9 @@ export function KarthikLabPage() {
             <b className="text-ink-2">
               Pools {bandLabel(data.pools_usd[0], data.pools_usd[1])} only:
             </b>{" "}
-            chosen on {day(data.pools_since)} and replayed from day 1, so every figure
+            real-time trades only, so the $50k–$75k pools count from 26 Sep, when their
+            paper arm went live; before that the book holds only $75k+ trades. Chosen on{" "}
+            {day(data.pools_since)} and replayed from day 1, so every figure
             here is a look back until then. The table below shows every other floor.
           </p>
         ) : null}

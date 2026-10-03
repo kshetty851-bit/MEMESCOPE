@@ -1811,7 +1811,12 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
                GradPaperPosition.closed_at.is_not(None),
                GradPaperPosition.excluded.is_(None),
                GradPaperPosition.net_return.is_not(None),
-               GradPaperPosition.opened_at >= spec.start)
+               GradPaperPosition.opened_at >= spec.start,
+               # Real-time trades only (Karthik, 2026-10-03: "i want to see
+               # realistic profits"): the replayed rows bought nearly every
+               # quiet coin, ~5x the live pace, at about a point a trade too
+               # kind. So these pools count from the day their arm went live.
+               GradPaperPosition.close_reason.is_distinct_from("replayed"))
         .order_by(GradPaperPosition.opened_at))).all() if _fresh_entry(r)]
     # Every $75k+ signal his arm took: what the grid beside the book reads.
     signals = rows
