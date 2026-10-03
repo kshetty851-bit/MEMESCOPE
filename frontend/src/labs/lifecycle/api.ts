@@ -5,6 +5,9 @@ import type {
   LifecycleOverview,
   MemeDetail,
   MemeList,
+  MemeQuality,
+  QualityReport,
+  ResearchStatus,
 } from "./types";
 
 /**
@@ -30,4 +33,16 @@ export function fetchMemes(): Promise<MemeList> {
 
 export function fetchMeme(slug: string): Promise<MemeDetail> {
   return api.get<MemeDetail>(`${BASE}/memes/${encodeURIComponent(slug)}`);
+}
+
+export function fetchQuality(): Promise<QualityReport> {
+  return api.get<QualityReport>(`${BASE}/quality`);
+}
+
+export function fetchMemeQuality(slug: string): Promise<MemeQuality> {
+  return api.get<MemeQuality>(`${BASE}/memes/${encodeURIComponent(slug)}/quality`);
+}
+
+export function fetchResearchStatus(): Promise<ResearchStatus> {
+  return api.get<ResearchStatus>(`${BASE}/research-status`);
 }

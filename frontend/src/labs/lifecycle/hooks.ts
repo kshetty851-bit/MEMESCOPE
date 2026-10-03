@@ -2,7 +2,15 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-import { fetchHealth, fetchMeme, fetchMemes, fetchOverview } from "./api";
+import {
+  fetchHealth,
+  fetchMeme,
+  fetchMemeQuality,
+  fetchMemes,
+  fetchOverview,
+  fetchQuality,
+  fetchResearchStatus,
+} from "./api";
 
 /**
  * Same cadence and same reasoning as the Graduation Lab's hooks: collection and
@@ -51,6 +59,36 @@ export function useLifecycleMeme(slug: string) {
     queryFn: () => fetchMeme(slug),
     refetchInterval: REFRESH_MS,
     enabled: slug.length > 0,
+    ...LIVE,
+  });
+}
+
+export function useLifecycleQuality() {
+  return useQuery({
+    queryKey: ["lifecycle-lab", "quality"],
+    queryFn: fetchQuality,
+    refetchInterval: REFRESH_MS,
+    ...LIVE,
+  });
+}
+
+export function useLifecycleMemeQuality(slug: string) {
+  return useQuery({
+    queryKey: ["lifecycle-lab", "meme-quality", slug],
+    queryFn: () => fetchMemeQuality(slug),
+    refetchInterval: REFRESH_MS,
+    enabled: slug.length > 0,
+    ...LIVE,
+  });
+}
+
+/** Fallback for an overview that predates `research_status`; off by default. */
+export function useResearchStatus(enabled: boolean) {
+  return useQuery({
+    queryKey: ["lifecycle-lab", "research-status"],
+    queryFn: fetchResearchStatus,
+    refetchInterval: REFRESH_MS,
+    enabled,
     ...LIVE,
   });
 }

@@ -9,9 +9,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 import { shortenAddress } from "@/lib/format";
 
+import { AuditTrail } from "./audit-trail";
+import { DataBoundaryBanner, boundaryKinds } from "./data-boundary-banner";
 import { DataHealthPanel } from "./data-health-panel";
 import {
-  DataClassLabel,
   PaperOnlyBanner,
   agoFromIso,
   formatConfidence,
@@ -24,13 +25,15 @@ import {
   useLifecycleMeme,
   useLifecycleMemes,
   useLifecycleOverview,
+  useResearchStatus,
 } from "./hooks";
 import { MiniSeries } from "./mini-series";
 import { LifecycleOverlayChart } from "./overlay-chart";
 import { OverviewPanel } from "./overview-panel";
 import { RadarTable } from "./radar-table";
+import { ResearchStatusPanel } from "./research-status-panel";
 import { TradesPanel } from "./trades-panel";
-import type { MemeDetail } from "./types";
+import type { LifecycleOverview, MemeDetail } from "./types";
 
 /**
  * MEME LIFECYCLE LAB
@@ -43,6 +46,18 @@ import type { MemeDetail } from "./types";
  * numbers only to print them. Nothing here applies a threshold, estimates a
  * missing value, or words an observation as advice.
  */
+
+/**
+ * The overview carries `research_status`; GET /research-status is only asked
+ * for when an older overview response lacks it, so the panel is never silently
+ * absent. While neither has answered, nothing is drawn rather than a guess.
+ */
+function ResearchStatusSection({ overview }: { overview: LifecycleOverview }) {
+  const fallback = useResearchStatus(!overview.research_status);
+  const status = overview.research_status ?? fallback.data;
+  if (!status) return null;
+  return <ResearchStatusPanel status={status} />;
+}
 
 export function LifecycleLabPage() {
   const overview = useLifecycleOverview();
@@ -78,6 +93,7 @@ export function LifecycleLabPage() {
     return (
       <div className="flex flex-col gap-4 p-6">
         <PaperOnlyBanner />
+        <ResearchStatusSection overview={data} />
         <EmptyState
           title="The Meme Lifecycle Lab is not enabled"
           body="FEATURE_LIFECYCLE_LAB_ENABLED is off, so nothing is being collected. This is not the same as the lab running and finding nothing."
@@ -100,8 +116,15 @@ export function LifecycleLabPage() {
           changed and when it was detected; it ranks nothing.
         </p>
         <PaperOnlyBanner />
+        <Link
+          href="/lifecycle-lab/quality"
+          className="w-fit text-sm text-accent hover:underline"
+        >
+          Data quality →
+        </Link>
       </header>
 
+      <ResearchStatusSection overview={data} />
       <OverviewPanel overview={data} />
       <DataHealthPanel sources={sources} />
 
@@ -216,7 +239,6 @@ function IdentityPanel({ detail }: { detail: MemeDetail }) {
 export function MemeDetailView({ detail }: { detail: MemeDetail }) {
   const { series } = detail;
   const perSource = Object.entries(series.per_source ?? {});
-  const exploratory = detail.data_label === "exploratory" || detail.contains_backfill;
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -228,20 +250,10 @@ export function MemeDetailView({ detail }: { detail: MemeDetail }) {
         <PaperOnlyBanner />
       </header>
 
-      <div
-        role="status"
-        data-testid="data-label-banner"
-        className="flex flex-wrap items-center gap-3 rounded-md border border-line bg-sunken px-3 py-2"
-      >
-        <DataClassLabel dataClass={detail.data_label} />
-        <span className="text-xs text-ink-2">
-          {exploratory
-            ? "This page includes data fetched about the past. It is exploratory and not verdict-grade."
-            : "Only data collected going forward is shown."}
-        </span>
-        {exploratory && detail.data_label === "authoritative" ? (
-          <DataClassLabel dataClass="exploratory" />
-        ) : null}
+      <div data-testid="data-label-banner" className="flex flex-col gap-2">
+        {boundaryKinds(detail.data_label, detail.contains_backfill).map((kind) => (
+          <DataBoundaryBanner key={kind} kind={kind} />
+        ))}
       </div>
 
       <IdentityPanel detail={detail} />
@@ -272,6 +284,7 @@ export function MemeDetailView({ detail }: { detail: MemeDetail }) {
       <EventsTable events={detail.events} />
       <TradesPanel trades={detail.trades} />
       <DataHealthPanel sources={detail.sources} title="Sources for this meme" />
+      <AuditTrail slug={detail.meme.slug} />
     </div>
   );
 }

@@ -9,7 +9,7 @@ import { NAV_GROUPS } from "@/lib/design/nav";
 
 import { DataHealthPanel } from "./data-health-panel";
 import { MeasuredValue } from "./display";
-import { DETAIL, MEMES, OVERVIEW, SOURCES, m } from "./fixtures";
+import { DETAIL, MEMES, MEME_QUALITY, OVERVIEW, SOURCES, m } from "./fixtures";
 import { LifecycleOverlayChart } from "./overlay-chart";
 import { LifecycleLabPage, LifecycleMemeDetailPage } from "./page";
 import { formatNumber } from "./display";
@@ -41,6 +41,7 @@ function routeApi() {
     if (path === "/lifecycle-lab/health") return { generated_at: "x", sources: SOURCES };
     if (path === "/lifecycle-lab/memes") return MEMES;
     if (path === "/lifecycle-lab/memes/frogceo") return DETAIL;
+    if (path === "/lifecycle-lab/memes/frogceo/quality") return MEME_QUALITY;
     throw new Error(`unexpected ${path}`);
   });
 }
@@ -161,8 +162,8 @@ describe("meme detail", () => {
     routeApi();
     render(<LifecycleMemeDetailPage slug="frogceo" />, { wrapper });
     const banner = await screen.findByTestId("data-label-banner");
-    expect(within(banner).getByText("EXPLORATORY (backfill)")).toBeInTheDocument();
-    expect(screen.getByText("2026-10-02 06:00Z")).toBeInTheDocument(); // linked_at
+    expect(within(banner).getByTestId("data-boundary-exploratory")).toBeInTheDocument();
+    expect(screen.getAllByText("2026-10-02 06:00Z").length).toBeGreaterThan(0); // linked_at
     // horizons not yet elapsed are unavailable, not 0%
     const eventsTable = screen.getByRole("table", { name: /Detected events/ });
     expect(within(eventsTable).getAllByText("unavailable").length).toBeGreaterThanOrEqual(2);

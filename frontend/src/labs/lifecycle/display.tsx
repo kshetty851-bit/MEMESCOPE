@@ -133,6 +133,19 @@ export function formatNumber(value: string): string {
   return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
 }
 
+/** A fraction of one as a plain percentage ("0.977" -> "97.7%"), no sign. */
+export function formatPlainPct(value: string): string {
+  return `${(Number(value) * 100).toFixed(1)}%`;
+}
+
+/** "21600" -> "every 6h". Collection cadence, shown verbatim from the server. */
+export function formatInterval(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return "unavailable";
+  if (seconds % 3600 === 0) return `every ${seconds / 3600}h`;
+  if (seconds % 60 === 0) return `every ${seconds / 60}m`;
+  return `every ${seconds}s`;
+}
+
 export function formatConfidence(value: string): string {
   return `${Math.round(Number(value) * 100)}%`;
 }
@@ -192,20 +205,35 @@ export function PaperOnlyBanner() {
   );
 }
 
+/**
+ * Every status gets its own words AND its own look, so the pill never relies on
+ * colour alone: disabled/never_collected are dashed/dotted outlines (nothing was
+ * attempted), unavailable/stale/partial are warm (something was attempted and
+ * fell short, each differently), error is red. No pill renders a number.
+ */
 const STATUS_PILL: Record<
   SourceStatus,
-  { text: string; tone: "safe" | "neutral" | "warn" | "danger" }
+  { text: string; tone: "safe" | "neutral" | "warn" | "danger" | "plasma"; cls?: string }
 > = {
   available: { text: "collecting", tone: "safe" },
-  disabled: { text: "disabled", tone: "neutral" },
+  disabled: { text: "disabled", tone: "neutral", cls: "border-dashed" },
   unavailable: { text: "unavailable", tone: "warn" },
   error: { text: "error", tone: "danger" },
-  stale: { text: "stale", tone: "warn" },
-  partial: { text: "partial", tone: "warn" },
-  never_collected: { text: "never collected", tone: "neutral" },
+  stale: { text: "stale", tone: "warn", cls: "border-dashed" },
+  partial: { text: "partial", tone: "plasma" },
+  never_collected: { text: "never collected", tone: "neutral", cls: "border-dotted italic" },
 };
 
-export function StatusPill({ status }: { status: SourceStatus }) {
-  const spec = STATUS_PILL[status] ?? { text: humanize(status), tone: "neutral" as const };
-  return <Badge tone={spec.tone}>{spec.text}</Badge>;
+export function StatusPill({ status }: { status: SourceStatus | (string & {}) }) {
+  const spec = STATUS_PILL[status as SourceStatus] ?? {
+    text: humanize(status),
+    tone: "neutral" as const,
+  };
+  return (
+    <span data-status={status} className="inline-flex">
+      <Badge tone={spec.tone} className={spec.cls}>
+        {spec.text}
+      </Badge>
+    </span>
+  );
 }

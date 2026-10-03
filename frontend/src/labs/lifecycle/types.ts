@@ -65,6 +65,40 @@ export interface ExperimentSplit {
 
 export type LabMode = "authoritative" | "exploratory";
 
+export type ResearchState =
+  | "NOT_STARTED"
+  | "COLLECTING"
+  | "INSUFFICIENT_DATA"
+  | "READY_FOR_ANALYSIS"
+  | "ANALYZING"
+  | "AUTHORITATIVE_RESULT";
+
+export interface ResearchRequirement {
+  key: string;
+  label: string;
+  threshold: string;
+  /** null = could not be measured; then `met` is false and `reason` says why. */
+  observed: string | null;
+  met: boolean;
+  reason: string | null;
+}
+
+export interface ResearchStatus {
+  state: ResearchState;
+  /**
+   * "UNCERTAIN" in every state except AUTHORITATIVE_RESULT. Typed as string
+   * because the verdict engine is not built yet and its vocabulary is not
+   * part of this phase's contract.
+   */
+  verdict: string;
+  verdict_engine_available: boolean;
+  forward_start: IsoTimestamp | null;
+  forward_days: number | null;
+  experiment_key: string | null;
+  requirements: ResearchRequirement[];
+  explanation: string;
+}
+
 export interface LifecycleOverview {
   lab_enabled: boolean;
   real_trading: boolean;
@@ -77,6 +111,8 @@ export interface LifecycleOverview {
   tracked_memes: number;
   linked_tokens: number;
   notes: string[];
+  /** Same object as GET /research-status (validation phase). */
+  research_status: ResearchStatus;
 }
 
 export interface LifecycleHealth {
@@ -235,4 +271,126 @@ export interface MemeDetail {
   data_label: DataLabel;
   contains_backfill: boolean;
   sources: SourceHealth[];
+}
+
+// ---- validation phase: GET /quality ----------------------------------------
+
+export interface ObservationSplit {
+  forward: number;
+  backfill: number;
+}
+
+export interface SourceCollectionStats {
+  source: string;
+  label: string;
+  runs_24h: number;
+  available: number;
+  unavailable: number;
+  disabled: number;
+  error: number;
+  stale: number;
+  partial: number;
+  /** AVAILABLE / (runs - DISABLED). null when that denominator is zero. */
+  success_rate_24h: DecimalString | null;
+  last_success_at: IsoTimestamp | null;
+  /** A SourceStatus value; kept as string so a new status cannot break the page. */
+  last_status: string | null;
+  last_reason: string | null;
+}
+
+export interface CollectionStats {
+  runs_24h: number;
+  failures_24h: number;
+  success_rate_24h: DecimalString | null;
+  by_source: SourceCollectionStats[];
+}
+
+export interface QualityMemeRef {
+  slug: string;
+  display_name: string;
+}
+
+export interface QualityTokenRef {
+  mint: string;
+  meme_slug: string;
+}
+
+export interface QualityIncompleteToken extends QualityTokenRef {
+  missing: string[];
+}
+
+export interface QualityReport {
+  generated_at: IsoTimestamp;
+  tracked_memes: number;
+  tracked_tokens: number;
+  observations_today: ObservationSplit;
+  observations_week: ObservationSplit;
+  collection: CollectionStats;
+  unavailable_sources: string[];
+  stale_sources: string[];
+  oldest_forward_observation_at: IsoTimestamp | null;
+  newest_forward_observation_at: IsoTimestamp | null;
+  memes_without_observations: QualityMemeRef[];
+  tokens_without_market_history: QualityTokenRef[];
+  tokens_with_incomplete_market_data: QualityIncompleteToken[];
+}
+
+// ---- validation phase: GET /memes/{slug}/quality ---------------------------
+
+/**
+ * `evidence` is named but not shaped by the contract. The renderer accepts a
+ * string, a flat object, or null and never assumes more.
+ */
+export type LinkEvidence = string | Record<string, unknown> | unknown[] | null;
+
+export interface AuditLink extends MemeLink {
+  linked_by: string | null;
+  evidence: LinkEvidence;
+}
+
+export interface AuditSource {
+  source: string;
+  label: string;
+  status: SourceStatus;
+  reason: string | null;
+  first_observation_at: IsoTimestamp | null;
+  latest_observation_at: IsoTimestamp | null;
+  observation_count: number;
+  forward_count: number;
+  backfill_count: number;
+}
+
+export interface AuditMarket {
+  mint: string;
+  first_observation_at: IsoTimestamp | null;
+  latest_observation_at: IsoTimestamp | null;
+  observation_count: number;
+  missing_fields: string[];
+}
+
+export interface AuditAttention {
+  mentions_1h: Measured;
+  velocity: Measured;
+  acceleration: Measured;
+  baseline_multiple: Measured;
+}
+
+export type CollectionPriorityLevel = "low" | "normal" | "high";
+
+export interface CollectionPriority {
+  level: CollectionPriorityLevel | (string & {});
+  interval_seconds: number;
+  reason: string;
+}
+
+export interface MemeQuality {
+  meme: MemeIdentity;
+  aliases: MemeAlias[];
+  links: AuditLink[];
+  sources: AuditSource[];
+  market: AuditMarket[];
+  lifecycle_state: string | null;
+  attention: AuditAttention;
+  divergence_case: string | null;
+  collection_priority: CollectionPriority;
 }
