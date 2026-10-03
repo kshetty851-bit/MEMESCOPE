@@ -5,6 +5,19 @@ run per subject it reported on. A disabled adapter, a failed adapter and an
 adapter that raised all still produce a run: absence is a recorded status, not
 a gap and never a zero.
 
+A *scheduled* pass (``schedule``, built from ``priority.plan_source``) narrows
+what each source is asked about:
+
+* subjects not due are not sent and get no run - their last run stands;
+* subjects due but beyond the request budget get a per-subject
+  ``UNAVAILABLE deferred_budget`` run - never silently dropped;
+* a source with nothing due at all is not called and records nothing this
+  pass. A run means "we asked"; a run claiming to speak for every meme when
+  nobody was asked would be false (``pit`` lets a global run speak for every
+  meme);
+* the global run's ``detail`` carries the plan summary
+  (due / not_due / deferred / planned_requests).
+
 I/O module: run ids are uuid4. Everything it persists goes through the
 ``LabStore`` protocol (implemented by the repository).
 """
@@ -12,8 +25,8 @@ I/O module: run ids are uuid4. Everything it persists goes through the
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable, Sequence
-from dataclasses import replace
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any, Protocol
 
@@ -44,6 +57,18 @@ class LabStore(Protocol):
     async def pumpfun_social_latest_observed_at(self) -> datetime | None: ...
 
 
+@dataclass(frozen=True, slots=True)
+class SourceSchedule:
+    """One source's share of a scheduled pass."""
+
+    #: What the adapter is asked about (meme-keyed: due memes; mint-keyed:
+    #: subjects narrowed to their due mints).
+    subjects: tuple[Subject, ...]
+    #: Subject keys (meme ids or mints) due but beyond the budget.
+    deferred: tuple[str, ...] = ()
+    summary: dict[str, int] = field(default_factory=dict)
+
+
 def _new_id() -> str:
     return str(uuid.uuid4())
 
@@ -56,8 +81,11 @@ async def collect_once(
     now: datetime,
     data_class: DataClass = DataClass.FORWARD,
     clock: Callable[[], datetime] | None = None,
+    schedule: Mapping[Source, SourceSchedule] | None = None,
 ) -> list[CollectionRun]:
-    """One collection pass over every adapter, in source-name order."""
+    """One collection pass over every adapter, in source-name order. A source
+    present in ``schedule`` is asked only about its scheduled subjects (see
+    the module docstring); one absent from it is asked about all of them."""
     runs: list[CollectionRun] = []
     finish = clock or (lambda: now)
     meme_ids = {s.meme.id for s in subjects}
@@ -66,8 +94,9 @@ async def collect_once(
         run_class = (
             data_class if adapter.data_class == DataClass.FORWARD else adapter.data_class
         )
+        planned = None if schedule is None else schedule.get(adapter.source)
         new_runs = await _collect_adapter(
-            repo, adapter, subjects, meme_ids, now, run_class, finish
+            repo, adapter, subjects, meme_ids, now, run_class, finish, planned
         )
         for run in new_runs:
             await repo.record_run(run)
@@ -83,9 +112,12 @@ async def _collect_adapter(
     now: datetime,
     data_class: DataClass,
     finish: Callable[[], datetime],
+    planned: SourceSchedule | None = None,
 ) -> list[CollectionRun]:
     source = adapter.source
     global_id = _new_id()
+    if planned is not None:
+        subjects = planned.subjects
 
     def run(
         run_id: str,
@@ -115,6 +147,20 @@ async def _collect_adapter(
         enabled, why = adapter.enabled()
         if not enabled:
             return [run(global_id, SourceStatus.DISABLED, why or "disabled_by_config")]
+
+        if planned is not None and not planned.subjects:
+            if not planned.deferred:
+                return []  # nothing due: nobody was asked, so nothing to record
+            # Everything due was beyond the budget: the source was not asked.
+            return [
+                run(
+                    global_id,
+                    SourceStatus.UNAVAILABLE,
+                    "deferred_budget",
+                    detail={"schedule": dict(planned.summary)},
+                ),
+                *_deferred_runs(run, planned),
+            ]
 
         if isinstance(adapter, PumpfunRepliesAdapter):
             adapter.set_latest_observed_at(await repo.pumpfun_social_latest_observed_at())
@@ -158,21 +204,47 @@ async def _collect_adapter(
             )
         ]
 
-    detail: dict[str, Any] | None = None
+    detail: dict[str, Any] = dict(result.detail or {})
     if result.market_points:
-        detail = {"candles_upserted": candles, "candles_fetched": len(result.market_points)}
+        detail.update(
+            {"candles_upserted": candles, "candles_fetched": len(result.market_points)}
+        )
+    if planned is not None:
+        detail["schedule"] = dict(planned.summary)
     runs = [
         run(
             global_id,
             result.status,
             result.reason,
             written=sum(written.values()),
-            detail=detail,
+            detail=detail or None,
         )
     ]
     for key in sorted(result.per_subject):
         status, reason = result.per_subject[key]
         runs.append(
-            run(_new_id(), status, reason, subject_key=key, written=written.get(key, 0))
+            run(
+                _new_id(),
+                status,
+                reason,
+                subject_key=key,
+                written=written.get(key, 0),
+                detail=result.per_subject_detail.get(key),
+            )
         )
+    if planned is not None:
+        runs.extend(_deferred_runs(run, planned, skip=frozenset(result.per_subject)))
     return runs
+
+
+def _deferred_runs(
+    run: Callable[..., CollectionRun],
+    planned: SourceSchedule,
+    *,
+    skip: frozenset[str] = frozenset(),
+) -> list[CollectionRun]:
+    """One ``UNAVAILABLE deferred_budget`` run per subject the budget left out."""
+    return [
+        run(_new_id(), SourceStatus.UNAVAILABLE, "deferred_budget", subject_key=key)
+        for key in sorted(set(planned.deferred) - skip)
+    ]

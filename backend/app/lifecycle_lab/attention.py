@@ -36,7 +36,7 @@ linked mints, two platforms) are distinct mentions and are summed.
 Definitions:
 
 "Now" for each series is its newest complete window end (never after as_of,
-and only if within ``max_observation_age``) — see ``LiveSeries``. Below, "the
+and only if within the source's freshness budget) — see ``LiveSeries``. Below, "the
 last hour" means (anchor - 1h, anchor] per series, summed across series.
 
 * ``velocity`` = mentions in the last hour ÷ mentions in the hour before it.
@@ -58,7 +58,7 @@ Pure: no I/O, no clock, no randomness.
 from __future__ import annotations
 
 from bisect import bisect_left
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -80,7 +80,7 @@ from app.lifecycle_lab.domain import (
     Unavailable,
     ValueKind,
 )
-from app.lifecycle_lab.pit import observation_key
+from app.lifecycle_lab.pit import freshness_budgets, observation_key
 
 HOUR = timedelta(hours=1)
 DAY = timedelta(days=1)
@@ -379,7 +379,8 @@ def _no_available_reason(status: dict[Source, SourceAvailability]) -> str:
 @dataclass(frozen=True, slots=True)
 class LiveSeries:
     """A series that may speak for "now": its source is AVAILABLE and its
-    newest window ended within ``max_observation_age`` of as_of.
+    newest window ended within its source's freshness budget of as_of
+    (``state.source_max_age``, as applied by the gate).
 
     ``anchor`` is where "now" is for this series — its newest window end, never
     later than as_of. GDELT publishes a 15-minute bucket about 15 minutes after
@@ -399,7 +400,7 @@ def _live(
     series: dict[SeriesKey, tuple[Window, ...]],
     available: Iterable[Source],
     as_of: datetime,
-    max_age: timedelta,
+    budgets: Mapping[Source, timedelta],
 ) -> dict[SeriesKey, LiveSeries]:
     sources = frozenset(available)
     live: dict[SeriesKey, LiveSeries] = {}
@@ -410,7 +411,7 @@ def _live(
         if not done:
             continue
         newest = max(w.end for w in done)
-        if as_of - newest > max_age:
+        if as_of - newest > budgets[key[0]]:
             continue  # behind by more than the freshness budget: not "now"
         live[key] = LiveSeries(
             windows=tuple(done),
@@ -590,8 +591,18 @@ def _active_last_day(
     return False
 
 
+def _budgets(state: InformationState, cfg: AttentionConfig) -> dict[Source, timedelta]:
+    """The gate's per-source budgets; for a hand-built state without them,
+    the same defaults the gate would have applied."""
+    if state.source_max_age:
+        applied = dict(state.source_max_age)
+        return {s: applied.get(s, cfg.max_observation_age) for s in Source}
+    return freshness_budgets(None, cfg.max_observation_age)
+
+
 def attention_features(state: InformationState, cfg: AttentionConfig) -> AttentionFeatures:
     """Attention at ``state.as_of``. See the module docstring for definitions."""
+    budgets = _budgets(state, cfg)
     as_of = state.as_of
     status = source_status(state)
     series = mention_series(state)
@@ -610,7 +621,7 @@ def attention_features(state: InformationState, cfg: AttentionConfig) -> Attenti
             {k: w for k, w in series.items() if k[0] is source},
             [source],
             as_of,
-            cfg.max_observation_age,
+            budgets,
         )
         per_source[source.value] = {
             "mentions_1h": _mentions_over(own, HOUR),
@@ -637,7 +648,7 @@ def attention_features(state: InformationState, cfg: AttentionConfig) -> Attenti
             contains_backfill=state.contains_backfill,
         )
 
-    live = _live(series, available, as_of, cfg.max_observation_age)
+    live = _live(series, available, as_of, budgets)
     mentions = {name: _mentions_over(live, span) for name, span in MENTION_WINDOWS}
     platforms = sum(1 for s in available if _active_last_day(state, s, series))
 

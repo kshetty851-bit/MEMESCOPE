@@ -245,6 +245,21 @@ PUBLICATION_LAG: dict[Source, timedelta] = {
     Source.X: timedelta(0),
 }
 
+#: Per-source freshness budget: how long after its latest successful run a
+#: source still speaks for "now". Sized to the collection cadence
+#: (``priority.POLICIES``) plus a margin, so a source collected daily or every
+#: 6h is not STALE between legitimate collections — otherwise platform counts
+#: would vary with the scheduler, not with attention.
+SOURCE_MAX_AGE: dict[Source, timedelta] = {
+    Source.WIKIPEDIA: timedelta(hours=30),  # once per UTC day
+    Source.GDELT: timedelta(hours=7),  # LOW priority: every 6h
+    Source.PUMPFUN_REPLIES: timedelta(minutes=30),  # every pass
+    Source.REDDIT: timedelta(hours=2),
+    Source.X: timedelta(hours=2),
+    Source.DEXSCREENER: timedelta(hours=30),  # once per UTC day per mint
+    Source.GECKOTERMINAL: timedelta(hours=30),
+}
+
 
 # --------------------------------------------------------------------------
 # Identity
@@ -438,6 +453,10 @@ class InformationState:
     #: EXPLORATORY-only escape hatch: links treated as known before linked_at.
     #: Every output carrying it is stamped HINDSIGHT. Refused in AUTHORITATIVE.
     hindsight_links: bool = False
+    #: The freshness budget per source the gate applied, sorted by source, so
+    #: attention judges "recent enough" by the same budget as availability.
+    #: Empty for hand-built states: consumers then use ``SOURCE_MAX_AGE``.
+    source_max_age: tuple[tuple[Source, timedelta], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

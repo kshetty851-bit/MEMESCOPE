@@ -1,0 +1,12 @@
+{
+  "synthetic": true,
+  "description": "SYNTHETIC wording, modelled on GDELT's documented plain-text throttle reply (UNVERIFIED - from documentation/memory). Expected: ERROR rate_limited, run stops.",
+  "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Pepe%22&mode=timelinevolraw&format=json&timespan=6h",
+  "query": "\"Pepe\"",
+  "retrieved_at": "2026-10-03T12:07:00+00:00",
+  "status": 200,
+  "headers": {
+    "content-type": "text/html"
+  },
+  "body": "Please limit requests to one every 5 seconds or contact us for larger queries."
+}

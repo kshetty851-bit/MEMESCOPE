@@ -50,6 +50,8 @@ IO_MODULES = {
     "schemas.py",
     "collector.py",
     "enrolment.py",
+    "quality_repository.py",
+    "quality_service.py",
 }
 
 #: Pure modules outside the package the engines may reuse: the paper wallet's

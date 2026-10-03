@@ -227,10 +227,11 @@ def test_straddling_window_is_not_pro_rated() -> None:
 
 
 def test_series_behind_the_freshness_budget_is_not_now() -> None:
-    """A source whose newest window is hours old says nothing about the last
-    hour; reading it as 0 would invent a collapse."""
+    """A source whose newest window is older than its freshness budget (GDELT:
+    7h) says nothing about the last hour; reading it as 0 would invent a
+    collapse."""
     as_of = START + timedelta(days=1)
-    rows = gdelt(START, as_of - timedelta(hours=3), steady, lag=timedelta(0))
+    rows = gdelt(START, as_of - timedelta(hours=8), steady, lag=timedelta(0))
     f = attention_features(state(as_of, rows), CFG)
     assert f.mentions_1h == Unavailable("no_recent_observation")
 
@@ -329,3 +330,35 @@ def test_features_are_identical_for_shuffled_inputs() -> None:
     for _ in range(3):
         rng.shuffle(rows)
         assert attention_features(state(as_of, rows), CFG) == first
+
+
+def test_low_priority_gdelt_cadence_still_speaks_for_now() -> None:
+    """A LOW-priority meme is asked about every 6h. Between collections its
+    newest GDELT window is up to ~6h old; inside the 7h budget it is still the
+    latest knowledge, not an absence — so platform counts track attention,
+    not the scheduler."""
+    as_of = START + timedelta(days=1)
+    rows = gdelt(START, as_of - timedelta(hours=5, minutes=45), steady, lag=timedelta(0))
+    st = information_available_at(
+        as_of=as_of,
+        mode=ResearchMode.AUTHORITATIVE,
+        meme=MEME,
+        aliases=[],
+        links=[],
+        tokens=[],
+        observations=rows,
+        market=[],
+        runs=[
+            CollectionRun(
+                "r",
+                Source.GDELT,
+                SourceStatus.AVAILABLE,
+                as_of - timedelta(hours=6),
+                as_of - timedelta(hours=5, minutes=50),
+                DataClass.FORWARD,
+            )
+        ],
+    )
+    f = attention_features(st, CFG)
+    assert f.mentions_1h == Decimal(12)
+    assert f.platform_count == Decimal(1)

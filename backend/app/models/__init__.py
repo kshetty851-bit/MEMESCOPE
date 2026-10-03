@@ -180,6 +180,7 @@ from app.models.lifecycle_lab import (  # noqa: F401
     MllMemeToken,
     MllPaperTrade,
     MllPortfolioSnapshot,
+    MllReplayCheckpoint,
 )
 from app.models.market import TokenMarketCandle  # noqa: F401
 from app.models.opportunity import (  # noqa: F401

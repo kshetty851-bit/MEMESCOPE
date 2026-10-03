@@ -28,6 +28,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any, cast
 
+import sqlalchemy as sa
 from sqlalchemy import (
     CursorResult,
     DateTime,
@@ -40,11 +41,15 @@ from sqlalchemy import (
     select,
     update,
 )
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.lifecycle_lab import checkpoint as checkpoint_engine
 from app.lifecycle_lab.domain import (
+    ACCUMULATING_METRICS,
+    PUBLICATION_LAG,
     TIMELINESS_HORIZONS,
     AliasKind,
     CollectionRun,
@@ -57,6 +62,7 @@ from app.lifecycle_lab.domain import (
     MemeTokenLink,
     Metric,
     Observation,
+    ResearchMode,
     Source,
     SourceStatus,
     Timeliness,
@@ -76,6 +82,7 @@ from app.models.lifecycle_lab import (
     MllMemeToken,
     MllPaperTrade,
     MllPortfolioSnapshot,
+    MllReplayCheckpoint,
 )
 from app.models.market import (
     LANE_NORMAL,
@@ -1280,3 +1287,321 @@ class LifecycleLabRepository:
             update(MllMemeEvent).where(MllMemeEvent.id == _uuid(event_id)).values(**values)
         )
         await self.session.flush()
+
+    # ------------------------------------------------------------------
+    # Replay checkpoints (app/lifecycle_lab/checkpoint.py)
+    # ------------------------------------------------------------------
+
+    async def input_watermarks(
+        self,
+        *,
+        meme_ids: Sequence[str],
+        at: datetime,
+        mode: ResearchMode,
+        since: datetime | None,
+        hindsight_links: bool = False,
+    ) -> checkpoint_engine.Watermarks:
+        """``checkpoint.input_watermarks`` computed in SQL: per meme and kind of
+        row, ``count(*)`` and the sum of a 60-bit MD5 prefix of the canonical
+        row key, over rows whose knowledge time is ``<= at``.
+
+        One aggregate statement; no row leaves the database. The key
+        expressions below reproduce ``checkpoint.*_key`` byte for byte, and
+        ``tests/integration/test_mll_checkpoint_service.py`` holds the two
+        together against rows loaded through this repository.
+        """
+        out = checkpoint_engine.empty_watermarks(sorted(meme_ids))
+        if not meme_ids:
+            return out
+        uuids = [_uuid(m) for m in meme_ids]
+        authoritative = mode is ResearchMode.AUTHORITATIVE
+        forward = DataClass.FORWARD.value
+
+        lk_where: list[Any] = [MllMemeToken.meme_id.in_(uuids)]
+        if not hindsight_links:
+            lk_where.append(MllMemeToken.linked_at <= at)
+        lk = select(MllMemeToken).where(*lk_where).cte("wm_links")
+        mm = select(lk.c.meme_id, lk.c.mint_address).distinct().cte("wm_mints")
+
+        o = MllAttentionObservation
+        if authoritative:
+            obs_known = and_(o.data_class == forward, o.retrieved_at <= at)
+        else:
+            lag = sa.case(
+                {
+                    s.value: sa.literal(v, sa.Interval())
+                    for s, v in sorted(PUBLICATION_LAG.items(), key=lambda kv: kv[0].value)
+                },
+                value=o.source,
+                else_=sa.literal(timedelta(0), sa.Interval()),
+            )
+            obs_known = or_(
+                and_(
+                    or_(
+                        o.data_class == forward,
+                        o.metric.in_(sorted(m.value for m in ACCUMULATING_METRICS)),
+                    ),
+                    o.retrieved_at <= at,
+                ),
+                and_(
+                    o.data_class == DataClass.BACKFILL.value,
+                    o.metric.not_in(sorted(m.value for m in ACCUMULATING_METRICS)),
+                    func.least(
+                        o.retrieved_at, func.least(o.source_timestamp, o.observed_at) + lag
+                    )
+                    <= at,
+                ),
+            )
+        obs_where = [obs_known]
+        if since is not None:
+            obs_where.append(o.observed_at >= since)
+        obs_key = _wm_key(
+            o.source,
+            o.metric,
+            o.value_kind,
+            o.data_class,
+            _wm_text(o.meme_id),
+            _wm_text(o.mint_address),
+            _wm_text(o.query),
+            _wm_ts(o.window_start),
+            _wm_ts(o.window_end),
+            _wm_ts(o.source_timestamp),
+            _wm_ts(o.observed_at),
+            _wm_ts(o.retrieved_at),
+            _wm_num(o.raw_value),
+            _wm_num(o.normalized_value),
+            _wm_num(o.confidence),
+        )
+
+        p = PumpfunSocialSnapshot
+        pump_where = [p.reply_count.is_not(None), p.observed_at <= at]
+        if since is not None:
+            pump_where.append(p.observed_at >= since)
+        pump_key = _wm_key(
+            sa.literal(Source.PUMPFUN_REPLIES.value),
+            sa.literal(Metric.REPLIES_TOTAL.value),
+            sa.literal(ValueKind.CUMULATIVE.value),
+            sa.literal(forward),
+            sa.literal(""),
+            p.mint_address,
+            p.source_sort,
+            sa.literal(""),
+            sa.literal(""),
+            _wm_ts(p.observed_at),
+            _wm_ts(p.observed_at),
+            _wm_ts(p.observed_at),
+            _wm_text(p.reply_count),
+            sa.literal(""),
+            sa.literal("1"),
+        )
+
+        s = TokenMarketSnapshot
+        snap_where = [s.captured_at <= at, s.suspect.is_(False)]
+        if since is not None:
+            snap_where.append(s.captured_at >= since)
+        snap_key = _wm_key(
+            s.mint_address,
+            _wm_ts(s.captured_at),
+            _wm_ts(s.captured_at),
+            sa.literal(forward),
+            sa.literal("token_market_snapshots"),
+            _wm_num(s.price_usd),
+            _wm_num(s.market_cap),
+            _wm_num(s.liquidity_usd),
+            _wm_num(s.volume_5m),
+            _wm_num(s.volume_1h),
+            _wm_num(s.volume_24h),
+            _wm_text(s.buy_count_24h),
+            _wm_text(s.sell_count_24h),
+            sa.literal(""),
+            sa.literal(""),
+        )
+
+        r = MllCollectionRun
+        run_where = [r.finished_at <= at]
+        if since is not None:
+            run_where.append(r.finished_at >= since)
+        if authoritative:
+            run_where.append(r.data_class == forward)
+        run_key = _wm_key(
+            _wm_text(r.id),
+            r.source,
+            r.status,
+            r.data_class,
+            _wm_ts(r.started_at),
+            _wm_ts(r.finished_at),
+            _wm_text(r.reason),
+        )
+
+        def part(meme: Any, kind: str, key: Any) -> Select[Any]:
+            return select(
+                sa.cast(meme, sa.Text).label("subject"),
+                sa.literal(kind).label("kind"),
+                key.label("k"),
+            )
+
+        m, a, t = MllMeme, MllMemeAlias, DiscoveredToken
+        parts: list[Select[Any]] = [
+            part(
+                m.id,
+                "meme",
+                _wm_key(
+                    _wm_text(m.id),
+                    m.slug,
+                    m.display_name,
+                    _wm_ts(m.tracking_started_at),
+                    _wm_text(m.wikipedia_title),
+                    _wm_text(m.gdelt_query),
+                ),
+            ).where(m.id.in_(uuids)),
+            part(a.meme_id, "alias", _wm_key(a.alias, a.kind, _wm_ts(a.added_at))).where(
+                a.meme_id.in_(uuids), a.added_at <= at
+            ),
+            part(
+                lk.c.meme_id,
+                "link",
+                _wm_key(
+                    lk.c.mint_address,
+                    lk.c.method,
+                    _wm_num(lk.c.confidence),
+                    _wm_ts(lk.c.linked_at),
+                    sa.case(
+                        (lk.c.unlinked_at <= at, _wm_ts(lk.c.unlinked_at)),
+                        else_=sa.literal(""),
+                    ),
+                ),
+            ),
+            part(
+                mm.c.meme_id,
+                "token",
+                _wm_key(
+                    t.mint_address,
+                    _wm_text(t.name),
+                    _wm_text(t.symbol),
+                    _wm_ts(t.block_time),
+                    _wm_ts(t.discovered_at),
+                    _wm_text(t.creator_address),
+                ),
+            ).join(t, t.mint_address == mm.c.mint_address),
+            part(o.meme_id, "obs", obs_key).where(o.meme_id.in_(uuids), *obs_where),
+            part(mm.c.meme_id, "obs", obs_key)
+            .join(o, and_(o.mint_address == mm.c.mint_address, o.meme_id.is_(None)))
+            .where(*obs_where),
+            part(mm.c.meme_id, "obs", pump_key)
+            .join(p, p.mint_address == mm.c.mint_address)
+            .where(*pump_where),
+            part(mm.c.meme_id, "market", snap_key)
+            .join(s, s.mint_address == mm.c.mint_address)
+            .where(*snap_where),
+            part(r.meme_id, "run", run_key).where(r.meme_id.in_(uuids), *run_where),
+            part(mm.c.meme_id, "run", run_key)
+            .join(r, and_(r.mint_address == mm.c.mint_address, r.meme_id.is_(None)))
+            .where(*run_where),
+            part(sa.literal(checkpoint_engine.GLOBAL_KEY), "run", run_key).where(
+                r.meme_id.is_(None), r.mint_address.is_(None), *run_where
+            ),
+        ]
+        if not authoritative:
+            c = TokenMarketCandle
+            close = c.bucket + func.make_interval(0, 0, 0, 0, 0, 0, c.resolution_s)
+            candle_where: list[Any] = [c.data_class == DataClass.BACKFILL.value, close <= at]
+            if since is not None:
+                candle_where.append(close >= since)
+            candle_key = _wm_key(
+                c.mint_address,
+                _wm_ts(close),
+                _wm_ts(close),
+                sa.literal(DataClass.BACKFILL.value),
+                c.source,
+                _wm_num(c.close_price),
+                _wm_num(c.close_market_cap),
+                _wm_num(c.close_liquidity_usd),
+                sa.literal(""),
+                sa.literal(""),
+                sa.literal(""),
+                sa.literal(""),
+                sa.literal(""),
+                _wm_num(c.volume),
+                _wm_text(c.resolution_s),
+            )
+            parts.append(
+                part(mm.c.meme_id, "market", candle_key)
+                .join(c, c.mint_address == mm.c.mint_address)
+                .where(*candle_where)
+            )
+
+        rows = sa.union_all(*parts).subquery("wm_rows")
+        hashed = sa.cast(
+            sa.cast(
+                sa.literal("x") + func.substr(func.md5(rows.c.k), 1, 15), postgresql.BIT(60)
+            ),
+            sa.BigInteger,
+        )
+        stmt = (
+            select(
+                rows.c.subject,
+                rows.c.kind,
+                func.count(),
+                sa.cast(func.sum(hashed), sa.Text),
+            )
+            .group_by(rows.c.subject, rows.c.kind)
+            .order_by(rows.c.subject, rows.c.kind)
+        )
+        for subject, kind, count, total in (await self.session.execute(stmt)).all():
+            if subject in out:
+                out[subject][kind] = checkpoint_engine.digest_part(int(count), int(total))
+        return out
+
+    async def get_checkpoint(self, scope_key: str) -> dict[str, Any] | None:
+        row = await self.session.scalar(
+            select(MllReplayCheckpoint).where(MllReplayCheckpoint.scope_key == scope_key)
+        )
+        return None if row is None else _row_dict(row)
+
+    async def save_checkpoint(self, values: Mapping[str, Any]) -> None:
+        """The scope's one current checkpoint: inserted, or replaced whole."""
+        row = dict(values)
+        for key in ("experiment_id", "backtest_run_id"):
+            row[key] = _uuid(row[key])
+        stmt = pg_insert(MllReplayCheckpoint).values(**row)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["scope_key"],
+            set_={k: stmt.excluded[k] for k in row if k != "scope_key"}
+            | {"updated_at": func.now()},
+        )
+        await self.session.execute(stmt)
+        await self.session.flush()
+
+    async def delete_checkpoint(self, scope_key: str) -> None:
+        await self.session.execute(
+            sa.delete(MllReplayCheckpoint).where(MllReplayCheckpoint.scope_key == scope_key)
+        )
+        await self.session.flush()
+
+
+# --------------------------------------------------------------------------
+# Canonical key fragments for `input_watermarks` — each mirrors a
+# `checkpoint.canon_*` function. NULL becomes '', so every key has the same
+# number of `|`-separated fields whatever is missing.
+# --------------------------------------------------------------------------
+
+
+def _wm_ts(column: Any) -> Any:
+    """`checkpoint.canon_ts`: microseconds since the epoch (PG ≥ 14's
+    `extract` is exact numeric)."""
+    micros = sa.cast(sa.extract("epoch", column) * 1_000_000, sa.BigInteger)
+    return func.coalesce(sa.cast(micros, sa.Text), sa.literal(""))
+
+
+def _wm_num(column: Any) -> Any:
+    """`checkpoint.canon_num`: `trim_scale` drops trailing fractional zeros."""
+    return func.coalesce(sa.cast(func.trim_scale(column), sa.Text), sa.literal(""))
+
+
+def _wm_text(column: Any) -> Any:
+    return func.coalesce(sa.cast(column, sa.Text), sa.literal(""))
+
+
+def _wm_key(*parts: Any) -> Any:
+    # concat_ws skips NULLs; every part above is already coalesced to ''.
+    return func.concat_ws(sa.literal("|"), *parts)

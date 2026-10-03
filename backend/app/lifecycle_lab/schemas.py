@@ -13,9 +13,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from app.lifecycle_lab.domain import AliasKind
 from app.schemas.common import BaseSchema
@@ -23,6 +23,11 @@ from app.schemas.common import BaseSchema
 #: Solana mints are base58, 32 to 44 characters.
 MINT_PATTERN = r"^[1-9A-HJ-NP-Za-km-z]{32,44}$"
 SLUG_PATTERN = r"^[a-z0-9][a-z0-9-]{0,63}$"
+#: First path segments of the Lab's own routes (API and the frontend's static
+#: pages). A meme slug equal to one would be shadowed by the static route.
+RESERVED_SLUGS = frozenset(
+    {"quality", "research-status", "health", "overview", "experiments", "runs", "memes"}
+)
 
 
 class Measured(BaseSchema):
@@ -68,6 +73,28 @@ class ExperimentSummary(BaseSchema):
     test: list[datetime | None]
 
 
+class ResearchRequirement(BaseSchema):
+    key: str
+    label: str
+    threshold: str
+    #: null = could not be measured; then ``met`` is false and ``reason`` says why.
+    observed: str | None
+    met: bool
+    reason: str | None
+
+
+class ResearchStatusOut(BaseSchema):
+    state: str
+    #: "UNCERTAIN" in every state this phase can reach (no verdict engine).
+    verdict: str
+    verdict_engine_available: bool
+    forward_start: datetime | None
+    forward_days: float | None
+    experiment_key: str | None
+    requirements: list[ResearchRequirement]
+    explanation: str
+
+
 class Overview(BaseSchema):
     lab_enabled: bool
     real_trading: bool
@@ -80,6 +107,7 @@ class Overview(BaseSchema):
     tracked_memes: int
     linked_tokens: int
     notes: list[str]
+    research_status: ResearchStatusOut
 
 
 class HealthOut(BaseSchema):
@@ -294,6 +322,121 @@ class RunDetail(BaseSchema):
 
 
 # --------------------------------------------------------------------------
+# Validation phase: data quality and the per-meme audit trail
+# --------------------------------------------------------------------------
+
+
+class ObservationSplit(BaseSchema):
+    forward: int
+    backfill: int
+
+
+class SourceCollectionStats(BaseSchema):
+    source: str
+    label: str
+    runs_24h: int
+    available: int
+    unavailable: int
+    disabled: int
+    error: int
+    stale: int
+    partial: int
+    #: AVAILABLE / (runs - DISABLED); null when that denominator is zero.
+    success_rate_24h: str | None
+    last_success_at: datetime | None
+    last_status: str | None
+    last_reason: str | None
+
+
+class CollectionStats(BaseSchema):
+    runs_24h: int
+    failures_24h: int
+    success_rate_24h: str | None
+    by_source: list[SourceCollectionStats]
+
+
+class QualityMemeRef(BaseSchema):
+    slug: str
+    display_name: str
+
+
+class QualityTokenRef(BaseSchema):
+    mint: str
+    meme_slug: str
+
+
+class QualityIncompleteToken(QualityTokenRef):
+    missing: list[str]
+
+
+class QualityReport(BaseSchema):
+    generated_at: datetime
+    tracked_memes: int
+    tracked_tokens: int
+    observations_today: ObservationSplit
+    observations_week: ObservationSplit
+    collection: CollectionStats
+    unavailable_sources: list[str]
+    stale_sources: list[str]
+    oldest_forward_observation_at: datetime | None
+    newest_forward_observation_at: datetime | None
+    memes_without_observations: list[QualityMemeRef]
+    tokens_without_market_history: list[QualityTokenRef]
+    tokens_with_incomplete_market_data: list[QualityIncompleteToken]
+
+
+class AuditLink(LinkOut):
+    linked_by: str | None
+    evidence: Any
+
+
+class AuditSource(BaseSchema):
+    source: str
+    label: str
+    status: str
+    reason: str | None
+    first_observation_at: datetime | None
+    latest_observation_at: datetime | None
+    observation_count: int
+    forward_count: int
+    backfill_count: int
+
+
+class AuditMarket(BaseSchema):
+    mint: str
+    first_observation_at: datetime | None
+    latest_observation_at: datetime | None
+    observation_count: int
+    missing_fields: list[str]
+
+
+class AuditAttention(BaseSchema):
+    mentions_1h: Measured
+    velocity: Measured
+    acceleration: Measured
+    baseline_multiple: Measured
+
+
+class CollectionPriorityOut(BaseSchema):
+    level: str
+    #: The GDELT collection interval at this level.
+    interval_seconds: int
+    reason: str
+
+
+class MemeQuality(BaseSchema):
+    meme: MemeIdentity
+    aliases: list[AliasOut]
+    links: list[AuditLink]
+    sources: list[AuditSource]
+    market: list[AuditMarket]
+    lifecycle_state: str
+    attention: AuditAttention
+    divergence_case: str
+    collection_priority: CollectionPriorityOut
+
+
+# --------------------------------------------------------------------------
 # Requests (admin curation)
 # --------------------------------------------------------------------------
 
@@ -315,6 +458,13 @@ class MemeCreate(_Request):
     gdelt_query: str | None = Field(default=None, max_length=500)
     aliases: list[AliasIn] = Field(default_factory=list, max_length=50)
 
+    @field_validator("slug")
+    @classmethod
+    def _slug_not_reserved(cls, value: str) -> str:
+        if value in RESERVED_SLUGS:
+            raise ValueError(f"{value!r} is reserved for a Lab page; choose another slug.")
+        return value
+
 
 class MemeCreated(BaseSchema):
     slug: str
@@ -335,6 +485,21 @@ class ManualLinkIn(_Request):
 
     mint: str = Field(pattern=MINT_PATTERN)
     confidence: Decimal = Field(gt=0, le=1, max_digits=5, decimal_places=4)
+    #: Only methods that can rest on evidence. A ticker, symbol or alias match
+    #: (exact_name / exact_symbol / alias_match) is never sufficient for a
+    #: curated link, so those values fail validation (422).
+    method: Literal["manual", "website_match", "social_link_match"] = "manual"
+    #: Where the match can be checked. Required: a link without a source cannot
+    #: be audited.
+    evidence_url: str = Field(pattern=r"^https?://\S+$", max_length=2048)
+    #: How identity was verified. Required for ``manual``.
+    evidence_note: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def _manual_needs_a_note(self) -> ManualLinkIn:
+        if self.method == "manual" and not (self.evidence_note or "").strip():
+            raise ValueError("evidence_note is required when method is 'manual'.")
+        return self
 
 
 class LinkCreated(LinkOut):

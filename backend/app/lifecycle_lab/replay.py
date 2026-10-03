@@ -35,6 +35,15 @@ pre-partitioned per meme and per mint once; each instant takes a bisect slice
 latest-price lookup is O(log n) via a prefix index. What remains is the
 engines' own per-state cost; ``history_lookback`` bounds it when needed.
 
+**Resumable.** The replay is a fold over decision ticks with an explicit
+``ReplayState`` (portfolio ledger, open positions and their exit memory,
+per-meme prior events, decision-log compaction, counters). ``run_replay`` folds
+from ``ReplayState.initial``; ``resume_replay`` continues from any state it, or
+an earlier ``resume_replay``, returned — and the result is identical to the
+uninterrupted replay (``tests/unit/test_mll_incremental.py``). The state at
+tick ``T`` depends only on what was visible at or before ``T``; whether the
+inputs still say the same about ``<= T`` is ``checkpoint.py``'s question.
+
 Pure: no I/O, no clock, no randomness. Inputs are canonically sorted, so the
 input order does not matter, and ``input_fingerprint`` identifies them.
 """
@@ -44,7 +53,7 @@ from __future__ import annotations
 import hashlib
 import json
 from bisect import bisect_left, bisect_right
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, fields
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -66,6 +75,8 @@ from app.lifecycle_lab.domain import (
     CollectionRun,
     DataClass,
     DivergenceCase,
+    EventType,
+    ExitReason,
     InformationState,
     LifecycleState,
     MarketFeatures,
@@ -96,6 +107,14 @@ from app.lifecycle_lab.portfolio import (
 )
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+_ZERO = Decimal(0)
+#: Bump on ANY change to what the fold computes or carries — engines, state
+#: layout, tick order. A checkpoint from another version is never resumed
+#: (``checkpoint.is_valid``); the engine-source hash backs this up for edits
+#: that forget to bump it.
+REPLAY_VERSION = "mll-replay-v2"
+#: Layout of ``ReplayState.to_json``.
+STATE_FORMAT = 1
 #: Most-recent events copied onto a trade's evidence timeline.
 MAX_TIMELINE_EVENTS = 20
 _MIN_TIME = datetime.min.replace(tzinfo=UTC)
@@ -275,7 +294,7 @@ def _market_dict(m: MarketFeatures) -> dict[str, Any]:
     }
 
 
-def _obs_visibility_floor(o: Observation, mode: ResearchMode) -> datetime:
+def obs_visibility_floor(o: Observation, mode: ResearchMode) -> datetime:
     """A lower bound on when the PIT gate could admit ``o``. Used only to avoid
     handing the gate rows it would certainly reject; the gate decides."""
     if o.data_class is DataClass.FORWARD or mode is ResearchMode.AUTHORITATIVE:
@@ -364,6 +383,8 @@ class _OpenRuntime:
     meme_id: str
     exit_state: PositionExitState
     cursor: int
+    #: The tick at which ``cursor`` was last set (see ``OpenPosition``).
+    cursor_at: datetime
     notes_seen: set[str]
 
 
@@ -406,6 +427,377 @@ def input_fingerprint(
 
 
 # --------------------------------------------------------------------------
+# Resumable state
+# --------------------------------------------------------------------------
+
+
+def config_hash(cfg: LabConfig, arm: Arm) -> str:
+    """Everything in the configuration a replay's state depends on: the lab
+    config and the arm's strategy spec. A state built under one hash cannot
+    be continued under another."""
+    return spec_hash(
+        {"config": cfg.as_spec(), "strategy": strategy.strategy_spec(arm, cfg.baseline)}
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class OpenPosition:
+    """An open paper position and everything its exit rules carry between
+    ticks."""
+
+    #: The ledger's copy, evidence timeline so far included.
+    trade: PaperTrade
+    meme_id: str
+    exit_state: PositionExitState
+    #: Market readings available at or before this tick have been evaluated.
+    #: A time, not a list index: the index of "the first unevaluated reading"
+    #: is recomputed from the inputs on resume (``_MintIndex.visible_end``),
+    #: so it cannot go stale if rows *after* this instant arrive.
+    cursor_at: datetime
+    #: Exit rules already reported as uncheckable (once per distinct note).
+    notes_seen: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ReplayState:
+    """Everything the fold carries from one decision tick to the next — and
+    everything a result is assembled from.
+
+    ``run_replay`` is ``resume_replay`` from ``ReplayState.initial``. The state
+    after tick ``T`` is a function of the inputs visible at or before ``T``
+    only (the PIT gate sees nothing later, and nothing here is computed from a
+    later row), which is what makes continuing from it equivalent to never
+    having stopped. ``to_json``/``from_json`` round-trip it exactly, Decimals
+    as strings, so it can be stored as a checkpoint.
+
+    Immutable by convention as well as by type: the fold copies whatever it
+    will mutate (the open decision runs) when it restores and when it exports.
+    """
+
+    # -- identity: a state only continues the replay it came from ----------
+    mode: ResearchMode
+    arm: Arm
+    start: datetime
+    hindsight_links: bool
+    history_lookback: timedelta | None
+    config_hash: str
+    #: Meme ids in the replay's canonical order.
+    meme_ids: tuple[str, ...]
+    # -- progress -------------------------------------------------------------
+    ticks: int
+    #: The last decision tick folded in; ``None`` before the first.
+    processed_until: datetime | None
+    # -- portfolio ledger -----------------------------------------------------
+    cash: Decimal
+    realized_pnl: Decimal
+    peak_equity: Decimal
+    #: In ledger insertion order: valuation sums over it, and Decimal sums are
+    #: only reproducible in the same order.
+    open_positions: tuple[OpenPosition, ...]
+    #: Closed trades in the order they closed.
+    closed: tuple[PaperTrade, ...]
+    #: The equity curve as appended (a point only when something changed).
+    snapshots: tuple[PortfolioSnapshot, ...]
+    #: The most recent valuation, appended or not — the curve's closing point.
+    last_snapshot: PortfolioSnapshot | None
+    # -- per meme: prior events (the event engine's episode / re-arm memory) -
+    #: Per meme index, in canonical meme order, events in accumulation order.
+    events: tuple[tuple[str, tuple[MemeEvent, ...]], ...]
+    # -- decision log ---------------------------------------------------------
+    #: The run-length decision log so far.
+    decisions: tuple[dict[str, Any], ...]
+    #: Compaction state: per (meme, mint), the index of its open run in
+    #: ``decisions`` and that run's outcome (canonical JSON).
+    open_runs: tuple[tuple[str, str, int, str], ...]
+    rejection_counts: tuple[tuple[str, int], ...]
+    any_backfill: bool
+
+    @classmethod
+    def initial(
+        cls,
+        *,
+        inputs: ReplayInputs,
+        cfg: LabConfig,
+        mode: ResearchMode,
+        arm: Arm,
+        start: datetime,
+        hindsight_links: bool = False,
+        history_lookback: timedelta | None = None,
+    ) -> ReplayState:
+        """The state before the first tick of a replay starting at ``start``."""
+        if start.tzinfo is None:
+            raise ValueError("start must be timezone-aware")
+        ids = _canonical_meme_ids(inputs)
+        cap = cfg.portfolio.starting_capital
+        return cls(
+            mode=mode,
+            arm=arm,
+            start=start,
+            hindsight_links=hindsight_links,
+            history_lookback=history_lookback,
+            config_hash=config_hash(cfg, arm),
+            meme_ids=ids,
+            ticks=0,
+            processed_until=None,
+            cash=cap,
+            realized_pnl=_ZERO,
+            peak_equity=cap,
+            open_positions=(),
+            closed=(),
+            snapshots=(),
+            last_snapshot=None,
+            events=tuple((m, ()) for m in ids),
+            decisions=(),
+            open_runs=(),
+            rejection_counts=(),
+            any_backfill=False,
+        )
+
+    # -- JSON ------------------------------------------------------------------
+
+    def to_json(self) -> dict[str, Any]:
+        """A JSON-safe document (``json.dumps`` accepts it as-is)."""
+        return {
+            "format": STATE_FORMAT,
+            "replay_version": REPLAY_VERSION,
+            "mode": self.mode.value,
+            "arm": self.arm.value,
+            "start": self.start.isoformat(),
+            "hindsight_links": self.hindsight_links,
+            "history_lookback_us": (
+                None if self.history_lookback is None else _td_to_us(self.history_lookback)
+            ),
+            "config_hash": self.config_hash,
+            "meme_ids": list(self.meme_ids),
+            "ticks": self.ticks,
+            "processed_until": _iso(self.processed_until),
+            "cash": str(self.cash),
+            "realized_pnl": str(self.realized_pnl),
+            "peak_equity": str(self.peak_equity),
+            "open_positions": [_position_to_json(p) for p in self.open_positions],
+            "closed": [t.to_dict() for t in self.closed],
+            "snapshots": [_snapshot_to_json(s) for s in self.snapshots],
+            "last_snapshot": (
+                None if self.last_snapshot is None else _snapshot_to_json(self.last_snapshot)
+            ),
+            "events": [[m, [_event_to_json(e) for e in evs]] for m, evs in self.events],
+            "decisions": [dict(d) for d in self.decisions],
+            "open_runs": [list(r) for r in self.open_runs],
+            "rejection_counts": [[k, v] for k, v in self.rejection_counts],
+            "any_backfill": self.any_backfill,
+        }
+
+    @classmethod
+    def from_json(cls, doc: Mapping[str, Any] | str) -> ReplayState:
+        """Inverse of ``to_json``. Refuses a document written by another state
+        format or replay version — such a state describes a different engine."""
+        d: Mapping[str, Any] = json.loads(doc) if isinstance(doc, str) else doc
+        if d.get("format") != STATE_FORMAT:
+            raise ValueError(f"unsupported replay state format: {d.get('format')!r}")
+        if d.get("replay_version") != REPLAY_VERSION:
+            raise ValueError(f"replay state from another engine: {d.get('replay_version')!r}")
+        lookback = d["history_lookback_us"]
+        last = d["last_snapshot"]
+        return cls(
+            mode=ResearchMode(d["mode"]),
+            arm=Arm(d["arm"]),
+            start=datetime.fromisoformat(d["start"]),
+            hindsight_links=bool(d["hindsight_links"]),
+            history_lookback=None if lookback is None else timedelta(microseconds=lookback),
+            config_hash=str(d["config_hash"]),
+            meme_ids=tuple(str(m) for m in d["meme_ids"]),
+            ticks=int(d["ticks"]),
+            processed_until=_from_iso(d["processed_until"]),
+            cash=Decimal(d["cash"]),
+            realized_pnl=Decimal(d["realized_pnl"]),
+            peak_equity=Decimal(d["peak_equity"]),
+            open_positions=tuple(_position_from_json(p) for p in d["open_positions"]),
+            closed=tuple(_trade_from_json(t) for t in d["closed"]),
+            snapshots=tuple(_snapshot_from_json(s) for s in d["snapshots"]),
+            last_snapshot=None if last is None else _snapshot_from_json(last),
+            events=tuple(
+                (str(m), tuple(_event_from_json(e) for e in evs)) for m, evs in d["events"]
+            ),
+            decisions=tuple(dict(x) for x in d["decisions"]),
+            open_runs=tuple(
+                (str(m), str(mint), int(i), str(o)) for m, mint, i, o in d["open_runs"]
+            ),
+            rejection_counts=tuple((str(k), int(v)) for k, v in d["rejection_counts"]),
+            any_backfill=bool(d["any_backfill"]),
+        )
+
+
+def _td_to_us(value: timedelta) -> int:
+    return value // timedelta(microseconds=1)
+
+
+def _iso(value: datetime | None) -> str | None:
+    return None if value is None else value.isoformat()
+
+
+def _from_iso(value: str | None) -> datetime | None:
+    return None if value is None else datetime.fromisoformat(value)
+
+
+def _dec(value: str | None) -> Decimal | None:
+    return None if value is None else Decimal(value)
+
+
+def _measured_to_json(value: Measured) -> dict[str, str]:
+    if isinstance(value, Unavailable):
+        return {"u": value.reason}
+    return {"d": str(value)}
+
+
+def _measured_from_json(doc: Mapping[str, str]) -> Measured:
+    if "u" in doc:
+        return Unavailable(doc["u"])
+    return Decimal(doc["d"])
+
+
+def _snapshot_to_json(s: PortfolioSnapshot) -> list[Any]:
+    # Positional, not keyed: the equity curve is the bulk of a long state.
+    return [
+        s.at.isoformat(),
+        _s(s.equity),
+        str(s.cash),
+        str(s.deployed),
+        str(s.realized_pnl),
+        _s(s.unrealized_pnl),
+        s.open_positions,
+        str(s.peak_equity),
+        _s(s.drawdown),
+    ]
+
+
+def _snapshot_from_json(row: Sequence[Any]) -> PortfolioSnapshot:
+    at, equity, cash, deployed, realized, unrealized, n_open, peak, drawdown = row
+    return PortfolioSnapshot(
+        at=datetime.fromisoformat(at),
+        equity=_dec(equity),
+        cash=Decimal(cash),
+        deployed=Decimal(deployed),
+        realized_pnl=Decimal(realized),
+        unrealized_pnl=_dec(unrealized),
+        open_positions=int(n_open),
+        peak_equity=Decimal(peak),
+        drawdown=_dec(drawdown),
+    )
+
+
+def _s(value: Decimal | None) -> str | None:
+    return None if value is None else str(value)
+
+
+def _trade_from_json(d: Mapping[str, Any]) -> PaperTrade:
+    exit_reason = d["exit_reason"]
+    return PaperTrade(
+        trade_key=d["trade_key"],
+        arm=Arm(d["arm"]),
+        meme_id=d["meme_id"],
+        mint_address=d["mint_address"],
+        entry_at=datetime.fromisoformat(d["entry_at"]),
+        entry_price=Decimal(d["entry_price"]),
+        size_usd=Decimal(d["size_usd"]),
+        quantity=Decimal(d["quantity"]),
+        entry_fees_usd=Decimal(d["entry_fees_usd"]),
+        entry_market_cap=_dec(d["entry_market_cap"]),
+        entry_liquidity_usd=_dec(d["entry_liquidity_usd"]),
+        token_age_seconds=d["token_age_seconds"],
+        age_bucket=AgeBucket(d["age_bucket"]),
+        lifecycle_state=LifecycleState(d["lifecycle_state"]),
+        divergence_case=DivergenceCase(d["divergence_case"]),
+        entry_reason=d["entry_reason"],
+        entry_features=dict(d["entry_features"]),
+        evidence_timeline=tuple(dict(e) for e in d["evidence_timeline"]),
+        cost_model=d["cost_model"],
+        exit_at=_from_iso(d["exit_at"]),
+        exit_price=_dec(d["exit_price"]),
+        exit_reason=None if exit_reason is None else ExitReason(exit_reason),
+        exit_fees_usd=_dec(d["exit_fees_usd"]),
+        pnl_usd=_dec(d["pnl_usd"]),
+        return_pct=_dec(d["return_pct"]),
+        status=d["status"],
+        contains_backfill=bool(d["contains_backfill"]),
+        hindsight=bool(d["hindsight"]),
+    )
+
+
+def _event_to_json(e: MemeEvent) -> dict[str, Any]:
+    # ``features`` is built JSON-safe by the event engine (``events.json_safe``)
+    # and is stored as-is: re-normalising it here could change what a resumed
+    # detector reads back as its prior.
+    return {**_event_dict(e), "features": e.features}
+
+
+def _event_from_json(d: Mapping[str, Any]) -> MemeEvent:
+    case = d["divergence_case"]
+    lstate = d["lifecycle_state"]
+    return MemeEvent(
+        meme_id=d["meme_id"],
+        event_type=EventType(d["event_type"]),
+        detected_at=datetime.fromisoformat(d["detected_at"]),
+        mode=ResearchMode(d["mode"]),
+        detector_version=d["detector_version"],
+        mint_address=d["mint_address"],
+        divergence_case=None if case is None else DivergenceCase(case),
+        lifecycle_state=None if lstate is None else LifecycleState(lstate),
+        features=dict(d["features"]),
+        contains_backfill=bool(d["contains_backfill"]),
+    )
+
+
+def _position_to_json(p: OpenPosition) -> dict[str, Any]:
+    x = p.exit_state
+    return {
+        "trade": p.trade.to_dict(),
+        "meme_id": p.meme_id,
+        "exit_state": {
+            "entry_at": x.entry_at.isoformat(),
+            "entry_price": str(x.entry_price),
+            "peak_price": str(x.peak_price),
+            "entry_volume_1h": _measured_to_json(x.entry_volume_1h),
+            "entry_attention_1h": _measured_to_json(x.entry_attention_1h),
+        },
+        "cursor_at": p.cursor_at.isoformat(),
+        "notes_seen": list(p.notes_seen),
+    }
+
+
+def _position_from_json(d: Mapping[str, Any]) -> OpenPosition:
+    x = d["exit_state"]
+    return OpenPosition(
+        trade=_trade_from_json(d["trade"]),
+        meme_id=d["meme_id"],
+        exit_state=PositionExitState(
+            entry_at=datetime.fromisoformat(x["entry_at"]),
+            entry_price=Decimal(x["entry_price"]),
+            peak_price=Decimal(x["peak_price"]),
+            entry_volume_1h=_measured_from_json(x["entry_volume_1h"]),
+            entry_attention_1h=_measured_from_json(x["entry_attention_1h"]),
+        ),
+        cursor_at=datetime.fromisoformat(d["cursor_at"]),
+        notes_seen=tuple(str(n) for n in d["notes_seen"]),
+    )
+
+
+class _Ledger(Portfolio):
+    """The portfolio ledger, restorable from and exportable to a state."""
+
+    def load(self, state: ReplayState) -> None:
+        self.cash = state.cash
+        self.realized_pnl = state.realized_pnl
+        self.peak_equity = state.peak_equity
+        for pos in state.open_positions:
+            self._open[pos.trade.trade_key] = pos.trade
+            self._open_by_mint[pos.trade.mint_address] = pos.trade.trade_key
+        self.closed = list(state.closed)
+
+    def in_ledger_order(self) -> tuple[PaperTrade, ...]:
+        return tuple(self._open.values())
+
+
+# --------------------------------------------------------------------------
 # The replay
 # --------------------------------------------------------------------------
 
@@ -429,15 +821,138 @@ def run_replay(
     a bound can change what they detect. It is an opt-in for long replays
     where that trade is acceptable, and it is part of the fingerprint because
     it is part of what the engines saw.
+
+    Exactly ``resume_replay`` from ``ReplayState.initial``.
     """
     if mode is ResearchMode.AUTHORITATIVE and hindsight_links:
         raise ValueError("AUTHORITATIVE mode refuses hindsight_links")
     if end <= start:
         raise ValueError("end must be after start")
-    lookback = history_lookback
-    authoritative = mode is ResearchMode.AUTHORITATIVE
+    state = ReplayState.initial(
+        inputs=inputs,
+        cfg=cfg,
+        mode=mode,
+        arm=arm,
+        start=start,
+        hindsight_links=hindsight_links,
+        history_lookback=history_lookback,
+    )
+    result, _ = resume_replay(
+        state=state,
+        inputs=inputs,
+        cfg=cfg,
+        mode=mode,
+        arm=arm,
+        end=end,
+        hindsight_links=hindsight_links,
+    )
+    return result
 
-    # ---- canonicalise inputs ------------------------------------------------
+
+def resume_replay(
+    *,
+    state: ReplayState,
+    inputs: ReplayInputs,
+    cfg: LabConfig,
+    mode: ResearchMode,
+    arm: Arm,
+    end: datetime,
+    hindsight_links: bool = False,
+    checkpoint_at: datetime | None = None,
+) -> tuple[ReplayResult, ReplayState]:
+    """Continue a replay from ``state`` to ``end``.
+
+    Returns the result over ``[state.start, end)`` — identical to
+    ``run_replay`` over that window on the same inputs — and the state after
+    the last tick before ``end``; or, with ``checkpoint_at``, the state after
+    the last tick before ``checkpoint_at`` (which must not be after ``end``),
+    so one pass can both report to ``end`` and leave a checkpoint behind it.
+
+    ``inputs`` is the full input set, not just the new rows: the detectors
+    read every visible row through the ``InformationState`` at each tick. What
+    is saved is the ticks already folded into ``state``.
+
+    The caller is responsible for the inputs visible at or before
+    ``state.processed_until`` being the ones the state was built from —
+    ``checkpoint.is_valid`` is that check. This function verifies only what
+    it can see: the state's mode, arm, links mode, configuration and meme set.
+    """
+    if mode is ResearchMode.AUTHORITATIVE and hindsight_links:
+        raise ValueError("AUTHORITATIVE mode refuses hindsight_links")
+    if end <= state.start:
+        raise ValueError("end must be after start")
+    mismatch = _state_mismatch(
+        state, inputs=inputs, cfg=cfg, mode=mode, arm=arm, hl=hindsight_links
+    )
+    if mismatch is not None:
+        raise ValueError(f"replay state does not continue this replay: {mismatch}")
+    if state.processed_until is not None and end <= state.processed_until:
+        raise ValueError("the state is already at or past end")
+    if checkpoint_at is not None and checkpoint_at > end:
+        raise ValueError("checkpoint_at must not be after end")
+
+    prepared = _prepare(inputs, mode)
+    fingerprint = input_fingerprint(
+        reprs=prepared.reprs,
+        cfg=cfg,
+        mode=mode,
+        arm=arm,
+        start=state.start,
+        end=end,
+        hindsight_links=hindsight_links,
+        history_lookback=state.history_lookback,
+    )
+    fold = _Fold(state=state, prepared=prepared, cfg=cfg)
+
+    interval = cfg.decision_interval
+    first = state.start if state.processed_until is None else state.processed_until + interval
+    exported: ReplayState | None = None
+    for t in decision_times(first, end, interval) if first < end else []:
+        if checkpoint_at is not None and exported is None and t >= checkpoint_at:
+            exported = fold.export()
+        fold.step(t)
+    if exported is None:
+        exported = fold.export()
+    return fold.result(end=end, fingerprint=fingerprint), exported
+
+
+def _canonical_meme_ids(inputs: ReplayInputs) -> tuple[str, ...]:
+    return tuple(m.id for m in sorted(inputs.memes, key=lambda m: (m.id, _row_repr(m))))
+
+
+def _state_mismatch(
+    state: ReplayState,
+    *,
+    inputs: ReplayInputs,
+    cfg: LabConfig,
+    mode: ResearchMode,
+    arm: Arm,
+    hl: bool,
+) -> str | None:
+    if state.mode is not mode:
+        return "mode"
+    if state.arm is not arm:
+        return "arm"
+    if state.hindsight_links != hl:
+        return "hindsight_links"
+    if state.config_hash != config_hash(cfg, arm):
+        return "config"
+    if state.meme_ids != _canonical_meme_ids(inputs):
+        return "meme_set"
+    if tuple(m for m, _ in state.events) != state.meme_ids:
+        return "events"
+    return None
+
+
+@dataclass(slots=True)
+class _Prepared:
+    reprs: dict[str, list[str]]
+    mint_index: dict[str, _MintIndex]
+    indexes: list[_MemeIndex]
+
+
+def _prepare(inputs: ReplayInputs, mode: ResearchMode) -> _Prepared:
+    """Canonicalise, then partition per meme and per mint, once per call."""
     reprs: dict[str, list[str]] = {}
 
     def keyed(name: str, rows: Sequence[Any]) -> list[tuple[str, Any]]:
@@ -453,18 +968,7 @@ def run_replay(
     market_rows = keyed("market", inputs.market)
     runs = keyed("runs", inputs.runs)
 
-    fingerprint = input_fingerprint(
-        reprs=reprs,
-        cfg=cfg,
-        mode=mode,
-        arm=arm,
-        start=start,
-        end=end,
-        hindsight_links=hindsight_links,
-        history_lookback=lookback,
-    )
-
-    if authoritative:
+    if mode is ResearchMode.AUTHORITATIVE:
         observations = [r for r in observations if r[1].data_class is DataClass.FORWARD]
         market_rows = [r for r in market_rows if r[1].data_class is DataClass.FORWARD]
         runs = [r for r in runs if r[1].data_class is DataClass.FORWARD]
@@ -485,7 +989,7 @@ def run_replay(
                 links=meme_links,
                 tokens=tuple(t for _, t in tokens if t.mint_address in mints),
                 observations=_Sliced(
-                    (_obs_visibility_floor(o, mode), k, o)
+                    (obs_visibility_floor(o, mode), k, o)
                     for k, o in observations
                     if o.meme_id == meme.id
                     or (o.mint_address is not None and o.mint_address in mints)
@@ -502,39 +1006,183 @@ def run_replay(
                 ),
             )
         )
+    return _Prepared(reprs=reprs, mint_index=mint_index, indexes=indexes)
 
-    # ---- state ---------------------------------------------------------------
-    portfolio = Portfolio(cfg.portfolio)
-    runtime: dict[str, _OpenRuntime] = {}
-    decision_log: list[dict[str, Any]] = []
-    last_outcome: dict[tuple[str, str], tuple[Any, ...]] = {}
-    open_runs: dict[tuple[str, str], dict[str, Any]] = {}
-    rejection_counts: dict[str, int] = {}
-    snapshots: list[PortfolioSnapshot] = []
-    any_backfill = False
-    wired = strategy.is_wired(arm)
+
+class _Fold:
+    """One replay's working state: restored from a ``ReplayState``, advanced a
+    tick at a time, exported back to one. The per-tick body is the replay."""
+
+    def __init__(self, *, state: ReplayState, prepared: _Prepared, cfg: LabConfig) -> None:
+        self.state0 = state
+        self.cfg = cfg
+        self.mode = state.mode
+        self.arm = state.arm
+        self.hindsight_links = state.hindsight_links
+        self.lookback = state.history_lookback
+        self.wired = strategy.is_wired(state.arm)
+        self.mint_index = prepared.mint_index
+        self.indexes = prepared.indexes
+        for idx, (meme_id, events) in zip(self.indexes, state.events, strict=True):
+            assert idx.meme.id == meme_id
+            idx.events = list(events)
+
+        self.portfolio = _Ledger(cfg.portfolio)
+        self.portfolio.load(state)
+        self.runtime: dict[str, _OpenRuntime] = {}
+        for pos in state.open_positions:
+            mi = self.mint_index.get(pos.trade.mint_address)
+            self.runtime[pos.trade.trade_key] = _OpenRuntime(
+                meme_id=pos.meme_id,
+                exit_state=pos.exit_state,
+                cursor=0 if mi is None else mi.visible_end(pos.cursor_at),
+                cursor_at=pos.cursor_at,
+                notes_seen=set(pos.notes_seen),
+            )
+
+        # The open runs are the only decision rows a later tick mutates
+        # (``until``/``ticks``), so they are copied in: the state handed to
+        # this fold is never written through.
+        self.decision_log: list[dict[str, Any]] = list(state.decisions)
+        self.open_index: dict[tuple[str, str], int] = {}
+        self.last_outcome: dict[tuple[str, str], str] = {}
+        for meme_id, mint, i, outcome in state.open_runs:
+            self.decision_log[i] = dict(self.decision_log[i])
+            self.open_index[(meme_id, mint)] = i
+            self.last_outcome[(meme_id, mint)] = outcome
+        self.rejection_counts: dict[str, int] = dict(state.rejection_counts)
+        self.snapshots: list[PortfolioSnapshot] = list(state.snapshots)
+        self.last_snapshot: PortfolioSnapshot | None = state.last_snapshot
+        self.any_backfill = state.any_backfill
+        self.ticks = state.ticks
+        self.processed_until = state.processed_until
+
+    # -- export / result -------------------------------------------------------
+
+    def export(self) -> ReplayState:
+        decisions = list(self.decision_log)
+        open_runs: list[tuple[str, str, int, str]] = []
+        for key in sorted(self.open_index):
+            i = self.open_index[key]
+            # A copy: this fold may keep extending the live row.
+            decisions[i] = dict(decisions[i])
+            open_runs.append((key[0], key[1], i, self.last_outcome[key]))
+        positions: list[OpenPosition] = []
+        for trade in self.portfolio.in_ledger_order():
+            rt = self.runtime[trade.trade_key]
+            positions.append(
+                OpenPosition(
+                    trade=trade,
+                    meme_id=rt.meme_id,
+                    exit_state=rt.exit_state,
+                    cursor_at=rt.cursor_at,
+                    notes_seen=tuple(sorted(rt.notes_seen)),
+                )
+            )
+        s0 = self.state0
+        return ReplayState(
+            mode=s0.mode,
+            arm=s0.arm,
+            start=s0.start,
+            hindsight_links=s0.hindsight_links,
+            history_lookback=s0.history_lookback,
+            config_hash=s0.config_hash,
+            meme_ids=s0.meme_ids,
+            ticks=self.ticks,
+            processed_until=self.processed_until,
+            cash=self.portfolio.cash,
+            realized_pnl=self.portfolio.realized_pnl,
+            peak_equity=self.portfolio.peak_equity,
+            open_positions=tuple(positions),
+            closed=tuple(self.portfolio.closed),
+            snapshots=tuple(self.snapshots),
+            last_snapshot=self.last_snapshot,
+            events=tuple((idx.meme.id, tuple(idx.events)) for idx in self.indexes),
+            decisions=tuple(decisions),
+            open_runs=tuple(open_runs),
+            rejection_counts=tuple(self.rejection_counts.items()),
+            any_backfill=self.any_backfill,
+        )
+
+    def result(self, *, end: datetime, fingerprint: str) -> ReplayResult:
+        """Assemble the result without disturbing the fold."""
+        snapshots = list(self.snapshots)
+        if self.ticks:
+            # The closing point of the curve. The last tick's valuation is it:
+            # nothing has changed since, so re-valuing (as an earlier version
+            # did after the loop) gives the same numbers — and would move the
+            # running peak, which a fold that continues must not do.
+            last = self.last_snapshot
+            assert last is not None and snapshots
+            if snapshots[-1].at != last.at:
+                snapshots.append(last)
+        else:
+            empty = _Ledger(self.cfg.portfolio)
+            empty.load(self.state0)
+            snapshots.append(empty.snapshot(self.state0.start, {}))
+
+        open_at_end = self.portfolio.mark_end_of_data()
+        trades = tuple(
+            sorted(
+                (*self.portfolio.closed, *open_at_end),
+                key=lambda tr: (tr.entry_at, tr.trade_key),
+            )
+        )
+        all_events = tuple(
+            sorted((e for idx in self.indexes for e in idx.events), key=_event_sort_key)
+        )
+        metrics = compute_metrics(
+            trades, snapshots, starting_capital=self.cfg.portfolio.starting_capital
+        )
+        return ReplayResult(
+            mode=self.mode,
+            arm=self.arm,
+            start=self.state0.start,
+            end=end,
+            hindsight_links=self.hindsight_links,
+            contains_backfill=self.any_backfill,
+            input_fingerprint=fingerprint,
+            ticks=self.ticks,
+            trades=trades,
+            snapshots=tuple(snapshots),
+            events=all_events,
+            decisions=tuple(dict(d) for d in self.decision_log),
+            rejection_counts=dict(sorted(self.rejection_counts.items())),
+            metrics=metrics,
+            open_at_end=open_at_end,
+        )
+
+    # -- one tick --------------------------------------------------------------
 
     def log(
-        t: datetime, meme_id: str, mint: str, outcome: tuple[Any, ...], row: dict[str, Any]
+        self,
+        t: datetime,
+        meme_id: str,
+        mint: str,
+        outcome: tuple[Any, ...],
+        row: dict[str, Any],
     ) -> None:
         key = (meme_id, mint)
-        if last_outcome.get(key) == outcome and key in open_runs:
-            run = open_runs[key]
+        encoded = json.dumps(outcome, separators=(",", ":"))
+        if self.last_outcome.get(key) == encoded and key in self.open_index:
+            run = self.decision_log[self.open_index[key]]
             run["until"] = t.isoformat()
             run["ticks"] += 1
             return
-        last_outcome[key] = outcome
+        self.last_outcome[key] = encoded
         entry = {"at": t.isoformat(), "until": t.isoformat(), "ticks": 1, **row}
-        open_runs[key] = entry
-        decision_log.append(entry)
+        self.open_index[key] = len(self.decision_log)
+        self.decision_log.append(entry)
 
-    ticks = decision_times(start, end, cfg.decision_interval)
-
-    for t in ticks:
-        lo = _MIN_TIME if lookback is None else t - lookback
+    def step(self, t: datetime) -> None:
+        cfg = self.cfg
+        mode = self.mode
+        portfolio = self.portfolio
+        runtime = self.runtime
+        lo = _MIN_TIME if self.lookback is None else t - self.lookback
         # ---- phase 1: what was known about each meme ---------------------
         known: dict[str, _MemeTick] = {}
-        for idx in indexes:
+        for idx in self.indexes:
             state = pit.information_available_at(
                 as_of=t,
                 mode=mode,
@@ -545,10 +1193,10 @@ def run_replay(
                 observations=idx.observations.window(lo, t),
                 market=idx.market.window(lo, t),
                 runs=idx.runs.window(lo, t),
-                hindsight_links=hindsight_links,
+                hindsight_links=self.hindsight_links,
                 max_observation_age=cfg.attention.max_observation_age,
             )
-            any_backfill = any_backfill or state.contains_backfill
+            self.any_backfill = self.any_backfill or state.contains_backfill
             attn = attention_engine.attention_features(state, cfg.attention)
             visible_mints = sorted({link.mint_address for link in state.links})
             mkt = {m: market_engine.market_features(state, m) for m in visible_mints}
@@ -580,7 +1228,7 @@ def run_replay(
         # ---- phase 2: exits ----------------------------------------------
         for trade in portfolio.open_trades:
             rt = runtime[trade.trade_key]
-            mi = mint_index.get(trade.mint_address)
+            mi = self.mint_index.get(trade.mint_address)
             if mi is None:
                 continue
             end_i = mi.visible_end(t)
@@ -622,13 +1270,16 @@ def run_replay(
                         ev.signal,
                         contains_backfill=point.data_class is DataClass.BACKFILL,
                     )
-                    any_backfill = any_backfill or point.data_class is DataClass.BACKFILL
+                    self.any_backfill = (
+                        self.any_backfill or point.data_class is DataClass.BACKFILL
+                    )
                     del runtime[trade.trade_key]
                     closed = True
                     break
             if closed:
                 continue
             rt.cursor = end_i
+            rt.cursor_at = t
             if last_priced < 0 and attn_now is not None:
                 latest = mi.latest(t)
                 if latest is not None:
@@ -647,16 +1298,18 @@ def run_replay(
                             ev.signal,
                             contains_backfill=latest.data_class is DataClass.BACKFILL,
                         )
-                        any_backfill = any_backfill or latest.data_class is DataClass.BACKFILL
+                        self.any_backfill = (
+                            self.any_backfill or latest.data_class is DataClass.BACKFILL
+                        )
                         del runtime[trade.trade_key]
                         continue
             _annotate(portfolio, rt, trade.trade_key, notes, t)
 
         # ---- phase 3: entries --------------------------------------------
-        for idx in indexes:
+        for idx in self.indexes:
             mt = known[idx.meme.id]
             if not mt.market:
-                log(
+                self.log(
                     t,
                     idx.meme.id,
                     "",
@@ -676,24 +1329,24 @@ def run_replay(
             for mint, mf in mt.market.items():
                 row = _decide_and_enter(
                     t=t,
-                    arm=arm,
-                    wired=wired,
+                    arm=self.arm,
+                    wired=self.wired,
                     cfg=cfg,
                     meme_index=idx,
                     meme_tick=mt,
                     mint=mint,
                     mf=mf,
-                    mint_index=mint_index.get(mint),
+                    mint_index=self.mint_index.get(mint),
                     portfolio=portfolio,
                     runtime=runtime,
-                    hindsight_links=hindsight_links,
+                    hindsight_links=self.hindsight_links,
                 )
                 if row.get("rejection"):
-                    rejection_counts[row["rejection"]] = (
-                        rejection_counts.get(row["rejection"], 0) + 1
+                    self.rejection_counts[row["rejection"]] = (
+                        self.rejection_counts.get(row["rejection"], 0) + 1
                     )
                 if row.get("entry_backfill"):
-                    any_backfill = True
+                    self.any_backfill = True
                 row.pop("entry_backfill", None)
                 outcome = (
                     row["status"],
@@ -702,44 +1355,15 @@ def run_replay(
                     row["rejection"],
                     row["trade_key"],
                 )
-                log(t, idx.meme.id, mint, outcome, row)
+                self.log(t, idx.meme.id, mint, outcome, row)
 
         # ---- snapshot ----------------------------------------------------
-        snap = portfolio.snapshot(t, _marks(portfolio, mint_index, t))
-        if not snapshots or _snap_changed(snapshots[-1], snap):
-            snapshots.append(snap)
-
-    final_at = ticks[-1] if ticks else start
-    if ticks and snapshots[-1].at != final_at:
-        snapshots.append(portfolio.snapshot(final_at, _marks(portfolio, mint_index, final_at)))
-    if not ticks:
-        snapshots.append(portfolio.snapshot(start, {}))
-
-    open_at_end = portfolio.mark_end_of_data()
-    trades = tuple(
-        sorted((*portfolio.closed, *open_at_end), key=lambda tr: (tr.entry_at, tr.trade_key))
-    )
-    all_events = tuple(sorted((e for idx in indexes for e in idx.events), key=_event_sort_key))
-    metrics = compute_metrics(
-        trades, snapshots, starting_capital=cfg.portfolio.starting_capital
-    )
-    return ReplayResult(
-        mode=mode,
-        arm=arm,
-        start=start,
-        end=end,
-        hindsight_links=hindsight_links,
-        contains_backfill=any_backfill,
-        input_fingerprint=fingerprint,
-        ticks=len(ticks),
-        trades=trades,
-        snapshots=tuple(snapshots),
-        events=all_events,
-        decisions=tuple(decision_log),
-        rejection_counts=dict(sorted(rejection_counts.items())),
-        metrics=metrics,
-        open_at_end=open_at_end,
-    )
+        snap = portfolio.snapshot(t, _marks(portfolio, self.mint_index, t))
+        if not self.snapshots or _snap_changed(self.snapshots[-1], snap):
+            self.snapshots.append(snap)
+        self.last_snapshot = snap
+        self.ticks += 1
+        self.processed_until = t
 
 
 def _annotate(
@@ -902,6 +1526,7 @@ def _decide_and_enter(
             entry_attention_1h=meme_tick.attention.mentions_1h,
         ),
         cursor=mint_index.visible_end(t) if mint_index is not None else 0,
+        cursor_at=t,
         notes_seen=set(),
     )
     return row

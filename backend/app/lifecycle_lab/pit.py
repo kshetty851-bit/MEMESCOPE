@@ -22,7 +22,10 @@ The rules, in the order they are applied:
   yet contributes nothing, however loud it was.
 * **Sources.** Every member of ``Source`` gets a ``SourceAvailability``, so a
   source that never ran shows up as UNAVAILABLE("never_collected") instead of
-  silently contributing zero.
+  silently contributing zero. The meme's own latest run decides; a global run
+  speaks for it only while it has none of its own for that source. A
+  successful run older than the source's freshness budget (``SOURCE_MAX_AGE``,
+  sized to its collection cadence) is STALE.
 
 Pure: no I/O, no clock, no randomness. Output tuples are sorted on explicit
 keys so shuffled inputs yield an identical state.
@@ -30,13 +33,14 @@ keys so shuffled inputs yield an identical state.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta
 from typing import Any
 
 from app.lifecycle_lab.domain import (
     ACCUMULATING_METRICS,
     PUBLICATION_LAG,
+    SOURCE_MAX_AGE,
     CollectionRun,
     DataClass,
     InformationState,
@@ -96,13 +100,14 @@ def _subject_visible(obs: Observation, meme_id: str, mints: frozenset[str]) -> b
     return obs.mint_address is not None and obs.mint_address in mints
 
 
-def _run_relevant(run: CollectionRun, meme_id: str, mints: frozenset[str]) -> bool:
+def _run_scope(run: CollectionRun, meme_id: str, mints: frozenset[str]) -> int | None:
+    """1 for a run about this meme (or one of its visible mints), 0 for a
+    global run, None for a run about something else."""
     if run.meme_id is not None:
-        return run.meme_id == meme_id
+        return 1 if run.meme_id == meme_id else None
     if run.mint_address is not None:
-        return run.mint_address in mints
-    # A global run (one sweep over every subject) speaks for this meme too.
-    return True
+        return 1 if run.mint_address in mints else None
+    return 0
 
 
 def observation_key(obs: Observation) -> tuple[Any, ...]:
@@ -157,6 +162,14 @@ def latest_known(points: Iterable[MarketPoint], as_of: datetime) -> MarketPoint 
         ):
             best = point
     return best
+
+
+def freshness_budgets(
+    source_max_age: Mapping[Source, timedelta] | None, fallback: timedelta
+) -> dict[Source, timedelta]:
+    """Effective budget per source (see ``information_available_at``)."""
+    mapping = SOURCE_MAX_AGE if source_max_age is None else source_max_age
+    return {s: mapping.get(s, fallback) for s in Source}
 
 
 def _run_availability(
@@ -222,8 +235,15 @@ def information_available_at(
     runs: Iterable[CollectionRun],
     hindsight_links: bool = False,
     max_observation_age: timedelta = timedelta(hours=2),
+    source_max_age: Mapping[Source, timedelta] | None = None,
 ) -> InformationState:
-    """Everything known at ``as_of`` in ``mode``. See the module docstring."""
+    """Everything known at ``as_of`` in ``mode``. See the module docstring.
+
+    Freshness precedence, per source: ``source_max_age`` (``None`` means
+    ``SOURCE_MAX_AGE``) wins; ``max_observation_age`` covers only sources the
+    mapping omits. The mapping replaces the default whole, so passing ``{}``
+    restores the single global budget.
+    """
     if hindsight_links and mode is ResearchMode.AUTHORITATIVE:
         raise ValueError(
             "hindsight_links is EXPLORATORY-only: an authoritative result may not "
@@ -270,35 +290,42 @@ def information_available_at(
         key=market_key,
     )
 
-    # One pass: only the latest visible run per source matters.
-    latest_runs: dict[Source, CollectionRun] = {}
+    # One pass: the latest visible run per source, where the meme's own
+    # (per-subject) runs outrank global ones. A global run speaks for this
+    # meme only until it has a run of its own for that source: one erroring
+    # due meme in a sweep must not turn a meme that was not due PARTIAL.
+    latest_runs: dict[Source, tuple[int, CollectionRun]] = {}
     for r in runs:
-        if r.finished_at > as_of or not _run_relevant(r, meme.id, mints):
+        if r.finished_at > as_of:
+            continue
+        scope = _run_scope(r, meme.id, mints)
+        if scope is None:
             continue
         if mode is ResearchMode.AUTHORITATIVE and r.data_class is DataClass.BACKFILL:
             continue
         held = latest_runs.get(r.source)
-        if held is None or (r.finished_at, r.started_at, r.id) > (
-            held.finished_at,
-            held.started_at,
-            held.id,
+        if held is None or (scope, r.finished_at, r.started_at, r.id) > (
+            held[0],
+            held[1].finished_at,
+            held[1].started_at,
+            held[1].id,
         ):
-            latest_runs[r.source] = r
+            latest_runs[r.source] = (scope, r)
+    budgets = freshness_budgets(source_max_age, max_observation_age)
     sources: list[SourceAvailability] = []
     for source in sorted(Source, key=lambda s: s.value):
+        held = latest_runs.get(source)
         availability = _run_availability(
             source,
-            latest_runs.get(source),
+            held[1] if held else None,
             as_of,
-            max_observation_age,
+            budgets[source],
         )
         if (
             mode is ResearchMode.EXPLORATORY
             and availability.status is not SourceStatus.AVAILABLE
         ):
-            backfilled = _backfill_availability(
-                source, visible_obs, as_of, max_observation_age
-            )
+            backfilled = _backfill_availability(source, visible_obs, as_of, budgets[source])
             if backfilled is not None:
                 availability = backfilled
         sources.append(availability)
@@ -319,4 +346,5 @@ def information_available_at(
         sources=tuple(sources),
         contains_backfill=contains_backfill,
         hindsight_links=hindsight_links,
+        source_max_age=tuple((s, budgets[s]) for s in sorted(Source, key=lambda s: s.value)),
     )

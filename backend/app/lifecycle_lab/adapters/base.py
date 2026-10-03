@@ -17,7 +17,8 @@ Reason vocabulary (stable codes; prose is rendered elsewhere):
   poller_stale                           -> STALE
   partial_subjects, truncated_page       -> PARTIAL
   rate_limited, timeout, network_error, unparseable, irregular_buckets,
-  unauthorized, http_<code>              -> ERROR
+  unauthorized, gdelt_query_error, unexpected_bucket_size,
+  http_<code>                            -> ERROR
 
 Rate limits are respected, not worked around: a 429 ends the run for that
 source (remaining subjects are ``ERROR rate_limited``) and the next scheduled
@@ -72,6 +73,13 @@ class AdapterResult:
     market_points: tuple[MarketPoint, ...] = ()
     #: mint -> profile facts (DexScreener).
     profiles: dict[str, dict[str, Any]] = field(default_factory=dict)
+    #: Facts about the attempt itself (request counts, shared queries), stored
+    #: on the global run's ``detail``. Never observations.
+    detail: dict[str, Any] | None = None
+    #: Subject key -> facts about that subject's failure (e.g. the first 200
+    #: characters of a plain-text error body), stored on its run's ``detail``
+    #: so an operator can read what the source actually said.
+    per_subject_detail: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 @runtime_checkable
@@ -90,9 +98,11 @@ class SourceAdapter(Protocol):
 class AdapterError(Exception):
     """A failed attempt, carrying the reason code recorded on the run."""
 
-    def __init__(self, reason: str) -> None:
+    def __init__(self, reason: str, detail: dict[str, Any] | None = None) -> None:
         super().__init__(reason)
         self.reason = reason
+        #: Recorded on the subject's run when present (see ``per_subject_detail``).
+        self.detail = detail
 
 
 class MinIntervalLimiter:

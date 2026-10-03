@@ -1391,6 +1391,11 @@ class Settings(BaseSettings):
     )
     #: GDELT asks for at most one request per ~5s; 6s leaves headroom.
     MLL_GDELT_MIN_INTERVAL_SECONDS: int = 6
+    #: The forward replay never checkpoints closer to now than this. Collectors
+    #: stamp retrieved_at at fetch time and insert a little later; a row that
+    #: lands behind a checkpoint invalidates it (full replay), so the lag only
+    #: keeps that rare — the watermark, not the lag, is the guarantee.
+    MLL_CHECKPOINT_SAFETY_LAG_SECONDS: int = 1800
 
     @computed_field  # type: ignore[prop-decorator]
     @property

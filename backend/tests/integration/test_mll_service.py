@@ -224,8 +224,11 @@ async def test_health_reports_reddit_and_x_disabled_not_zero(
     by = {s["source"]: s for s in (await svc.health(NOW))["sources"]}
     assert by["gdelt"]["status"] == "available"
     assert by["gdelt"]["observations_24h"] == 6
-    # Three hours later the last run is outside the freshness budget.
+    # GDELT's freshness budget is 7h (the LOW-priority interval plus margin):
+    # three hours on it is still current, eight hours on it is stale.
     by = {s["source"]: s for s in (await svc.health(NOW + timedelta(hours=3)))["sources"]}
+    assert by["gdelt"]["status"] == "available"
+    by = {s["source"]: s for s in (await svc.health(NOW + timedelta(hours=8)))["sources"]}
     assert by["gdelt"]["status"] == "stale"
 
 

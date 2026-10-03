@@ -10,6 +10,7 @@ and counts every request.
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -329,7 +330,10 @@ def gdelt_body(points: list[tuple[str, int]]) -> dict[str, Any]:
     }
 
 
-async def test_gdelt_parses_15_minute_buckets_with_provenance() -> None:
+async def test_gdelt_synthetic_shape_from_documentation_parses_15_minute_buckets() -> None:
+    """SYNTHETIC body built from documentation/memory, not captured live (the
+    live-shape test in test_mll_gdelt.py loads the captured fixture). This
+    pins the provenance mapping, not GDELT's real shape."""
     body = gdelt_body(
         [
             ("20261003T110000Z", 4),
@@ -365,17 +369,25 @@ async def test_gdelt_parses_15_minute_buckets_with_provenance() -> None:
 
 
 async def test_gdelt_detects_bucket_size_instead_of_assuming() -> None:
+    """Width comes from the timestamps. A backfill accepts whatever GDELT
+    chose; a FORWARD run refuses anything but 15 minutes, because hourly and
+    15-minute windows in one series would be double counted downstream."""
     body = gdelt_body(
         [("20261003T080000Z", 5), ("20261003T090000Z", 6), ("20261003T100000Z", 7)]
     )
     async with Recorder(json_response(body)).client() as client:
-        result = await GdeltAdapter(make_settings(), client, sleep=no_sleep).collect(
-            [make_subject()], now=NOW
+        adapter = GdeltAdapter(make_settings(), client, sleep=no_sleep)
+        result = await adapter.backfill(
+            make_subject(), NOW - timedelta(hours=5), NOW - timedelta(hours=1), NOW
         )
+        forward = await adapter.collect([make_subject()], now=NOW)
     assert {o.raw_payload["bucket_seconds"] for o in result.observations if o.raw_payload} == {
         3600
     }
     assert result.observations[0].window_end == datetime(2026, 10, 3, 9, tzinfo=UTC)
+    assert (forward.status, forward.reason) == (SourceStatus.ERROR, "unexpected_bucket_size")
+    assert forward.observations == ()
+    assert forward.per_subject_detail["m1"] == {"bucket_seconds": 3600}
 
 
 async def test_gdelt_uses_explicit_query_and_backfill_window() -> None:
@@ -413,7 +425,7 @@ async def test_gdelt_uses_explicit_query_and_backfill_window() -> None:
         (
             httpx.Response(200, text="Timespan is too short."),
             SourceStatus.ERROR,
-            "unparseable",
+            "gdelt_query_error",
         ),
         (httpx.Response(200, json=[1, 2]), SourceStatus.ERROR, "unparseable"),
         (
@@ -465,7 +477,10 @@ async def test_gdelt_spaces_requests_by_the_configured_interval() -> None:
     s = make_settings(MLL_GDELT_MIN_INTERVAL_SECONDS=6)
     async with Recorder(json_response(body)).client() as client:
         adapter = GdeltAdapter(s, client, sleep=fake_sleep, clock=lambda: clock["t"])
-        await adapter.collect([make_subject(meme_id="a"), make_subject(meme_id="b")], now=NOW)
+        other = make_subject(meme_id="b")
+        # Distinct queries: identical ones would share a single request.
+        other = Subject(meme=replace(other.meme, gdelt_query='"other"'))
+        await adapter.collect([make_subject(meme_id="a"), other], now=NOW)
     assert sleeps == [pytest.approx(6.0)]  # none before the first, 6s before the second
 
 

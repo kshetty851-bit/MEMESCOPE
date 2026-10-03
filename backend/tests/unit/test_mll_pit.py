@@ -279,10 +279,113 @@ def test_every_source_reported_and_missing_ones_say_never_collected() -> None:
         assert by_source[source].reason == "never_collected"
 
 
+def _status(state, source: Source):
+    return next(s for s in state.sources if s.source is source)
+
+
 def test_old_available_run_is_stale() -> None:
-    state = gate(runs=[run(T - timedelta(hours=3))])
-    gdelt = next(s for s in state.sources if s.source is Source.GDELT)
-    assert gdelt.status is SourceStatus.STALE
+    """GDELT's budget is 7h (LOW priority collects every 6h)."""
+    assert _status(gate(runs=[run(T - timedelta(hours=6))]), Source.GDELT).status is (
+        SourceStatus.AVAILABLE
+    )
+    stale = _status(gate(runs=[run(T - timedelta(hours=8))]), Source.GDELT)
+    assert stale.status is SourceStatus.STALE
+    assert stale.reason == "no_available_run_within_max_age"
+
+
+def test_daily_wikipedia_stays_available_between_daily_collections() -> None:
+    """Wikipedia is collected once per UTC day. Calling it STALE two hours
+    later would make platform_count follow the scheduler, not attention: it
+    stays AVAILABLE at +20h and goes STALE only past its 30h budget."""
+    runs = [run(T, source=Source.WIKIPEDIA)]
+    at_20h = gate(as_of=T + timedelta(hours=20), runs=runs)
+    assert _status(at_20h, Source.WIKIPEDIA).status is SourceStatus.AVAILABLE
+    at_31h = gate(as_of=T + timedelta(hours=31), runs=runs)
+    assert _status(at_31h, Source.WIKIPEDIA).status is SourceStatus.STALE
+
+
+def test_pumpfun_replies_budget_is_tighter_than_the_global_default() -> None:
+    runs = [run(T - timedelta(minutes=45), source=Source.PUMPFUN_REPLIES)]
+    assert _status(gate(runs=runs), Source.PUMPFUN_REPLIES).status is SourceStatus.STALE
+
+
+def test_explicit_budgets_replace_the_default_and_fall_back_to_max_age() -> None:
+    """``source_max_age`` wins per source; ``max_observation_age`` covers the
+    sources it omits, so ``{}`` restores the single global budget."""
+    runs = [run(T - timedelta(hours=3), source=Source.WIKIPEDIA)]
+
+    def wiki(**kw: object) -> SourceStatus:
+        state = information_available_at(
+            as_of=T,
+            mode=ResearchMode.AUTHORITATIVE,
+            meme=MEME,
+            aliases=[],
+            links=[],
+            tokens=[],
+            observations=[],
+            market=[],
+            runs=runs,
+            **kw,  # type: ignore[arg-type]
+        )
+        return _status(state, Source.WIKIPEDIA).status
+
+    assert wiki() is SourceStatus.AVAILABLE
+    assert wiki(source_max_age={}) is SourceStatus.STALE
+    assert wiki(source_max_age={}, max_observation_age=timedelta(hours=4)) is (
+        SourceStatus.AVAILABLE
+    )
+    assert wiki(source_max_age={Source.WIKIPEDIA: timedelta(hours=1)}) is SourceStatus.STALE
+
+
+def test_gate_records_the_budgets_it_applied() -> None:
+    budgets = dict(gate().source_max_age)
+    assert set(budgets) == set(Source)
+    assert budgets[Source.WIKIPEDIA] == timedelta(hours=30)
+
+
+def test_a_memes_own_run_outranks_a_later_global_run() -> None:
+    """A meme that was not due keeps its own last result. A later global
+    sweep that went PARTIAL because some *other* due meme errored says
+    nothing about this one."""
+    own = run(T - timedelta(hours=1))
+    sweep = run(
+        T - timedelta(minutes=5),
+        status=SourceStatus.PARTIAL,
+        reason="some_failed",
+        meme_id=None,
+    )
+    gdelt = _status(gate(runs=[own, sweep]), Source.GDELT)
+    assert gdelt.status is SourceStatus.AVAILABLE
+    assert gdelt.last_run_at == own.finished_at
+
+
+def test_a_global_run_speaks_for_a_meme_without_its_own() -> None:
+    sweep = run(
+        T - timedelta(minutes=5),
+        status=SourceStatus.PARTIAL,
+        reason="some_failed",
+        meme_id=None,
+    )
+    other = run(T - timedelta(minutes=1), status=SourceStatus.ERROR, meme_id="m2")
+    gdelt = _status(gate(runs=[sweep, other]), Source.GDELT)
+    assert (gdelt.status, gdelt.reason) == (SourceStatus.PARTIAL, "some_failed")
+
+
+def test_a_linked_mints_run_counts_as_the_memes_own() -> None:
+    mint_run = replace(
+        run(T - timedelta(hours=1), source=Source.PUMPFUN_REPLIES, meme_id=None),
+        mint_address=MINT,
+        finished_at=T - timedelta(minutes=10),
+    )
+    sweep = run(
+        T - timedelta(minutes=2),
+        source=Source.PUMPFUN_REPLIES,
+        status=SourceStatus.ERROR,
+        reason="http_500",
+        meme_id=None,
+    )
+    state = gate(runs=[mint_run, sweep], links=[link(T - timedelta(days=1))])
+    assert _status(state, Source.PUMPFUN_REPLIES).status is SourceStatus.AVAILABLE
 
 
 def test_latest_run_wins_and_carries_its_reason() -> None:

@@ -11,10 +11,12 @@ the service only flushes.
 
 | task                            | cadence      | what                                   |
 |---------------------------------|--------------|----------------------------------------|
-| ``lifecycle_collect_tick``      | every 15 min | FORWARD collection, one commit/source  |
+| ``lifecycle_collect_tick``      | every 15 min | FORWARD collection, one commit/source; |
+|                                 |              | who is asked: ``priority.py`` plan     |
 | ``lifecycle_detect_events_tick``| every 5 min  | forward event detection at the grid    |
 | ``lifecycle_timeliness_tick``   | every 15 min | settle event outcomes after 26h        |
-| ``lifecycle_forward_replay_tick``| every 30 min| AUTHORITATIVE replay, re-saved per arm |
+| ``lifecycle_forward_replay_tick``| every 30 min| AUTHORITATIVE replay per arm, resumed |
+|                                 |              | from its checkpoint when still valid   |
 | ``lifecycle_autolink_tick``     | hourly       | DexScreener search → ≥0.8 links only   |
 | ``lifecycle_experiment_tick``   | hourly       | register / refresh the experiment set  |
 | ``lifecycle_backfill``          | on demand    | EXPLORATORY backfill (admin POST)      |
@@ -22,6 +24,7 @@ the service only flushes.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -34,7 +37,10 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
 from app.lab.scheduler import DRY_RUN_LOCK_NAMESPACE
+from app.lifecycle_lab import priority
 from app.lifecycle_lab.adapters import DexScreenerAdapter
+from app.lifecycle_lab.collector import SourceSchedule
+from app.lifecycle_lab.domain import Source
 from app.lifecycle_lab.service import LifecycleLabService
 from app.workers.celery_app import celery_app
 from app.workers.runtime import run_async
@@ -53,6 +59,15 @@ LOCK_BACKFILL = 0x4D4C4C07
 #: Outbound client for the third-party sources. Adapters set per-request
 #: timeouts; this is only a ceiling.
 HTTP_TIMEOUT_SECONDS = 30.0
+
+#: Seconds of the collect task's hard limit NOT spent on spaced GDELT requests:
+#: planning, Wikipedia, DexScreener, DB writes and a slow GDELT answer or two.
+#: The GDELT adapter also refuses to start a request that could run past
+#: (limit - margin), so a run of slow answers defers memes instead of the task
+#: being killed mid-write.
+COLLECT_MARGIN_SECONDS = 180.0
+#: Fallback if the Celery config carries no hard limit.
+DEFAULT_TASK_TIME_LIMIT_SECONDS = 600.0
 
 
 def _now() -> datetime:
@@ -105,9 +120,23 @@ async def _collect_tick() -> dict[str, Any]:
     if not settings.FEATURE_LIFECYCLE_LAB_ENABLED:
         return {"skipped": "lab_disabled"}
     now = _now()
+    deadline = time.monotonic() + max(0.0, _task_time_limit() - COLLECT_MARGIN_SECONDS)
     statuses: dict[str, str] = {}
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SECONDS) as client:
         adapters = LifecycleLabService.build_adapters(client)
+        schedule: dict[Source, SourceSchedule] | None
+        try:
+            async with SessionFactory() as session:
+                schedule = await LifecycleLabService(session).plan_collection(
+                    now, adapters, gdelt_budget=gdelt_budget(), gdelt_deadline=deadline
+                )
+                await session.rollback()
+        except Exception:
+            # Unscheduled is the pre-scheduler behaviour (every subject, fixed
+            # span): bounded for the 10-20 memes this targets, and better than
+            # collecting nothing. Logged loudly, never silent.
+            logger.exception("lifecycle_collect_plan_failed")
+            schedule = None
         for adapter in sorted(adapters, key=lambda a: a.source.value):
             try:
                 async with SessionFactory() as session:
@@ -115,18 +144,39 @@ async def _collect_tick() -> dict[str, Any]:
                         await session.rollback()
                         return {"skipped": "collect_already_running", "sources": statuses}
                     runs = await LifecycleLabService(session).collect(
-                        now, [adapter], clock=_now
+                        now, [adapter], clock=_now, schedule=schedule
                     )
                     await session.commit()
             except Exception:
                 logger.exception("lifecycle_collect_failed", source=adapter.source.value)
                 statuses[adapter.source.value] = "failed"
                 continue
+            if not runs and schedule is not None and adapter.source in schedule:
+                statuses[adapter.source.value] = "not_due"
             for run in runs:
                 if run.meme_id is None and run.mint_address is None:
                     statuses[run.source.value] = run.status.value
     logger.info("lifecycle_collect", **statuses)
-    return {"sources": statuses}
+    out: dict[str, Any] = {"sources": statuses}
+    if schedule is not None:
+        out["schedule"] = {s.value: p.summary for s, p in sorted(schedule.items())}
+    else:
+        out["schedule"] = "unscheduled"
+    return out
+
+
+def _task_time_limit() -> float:
+    return float(celery_app.conf.task_time_limit or DEFAULT_TASK_TIME_LIMIT_SECONDS)
+
+
+def gdelt_budget() -> int:
+    """GDELT requests one collect pass may make:
+    floor((task_time_limit - COLLECT_MARGIN_SECONDS) / MLL_GDELT_MIN_INTERVAL_SECONDS).
+    With the defaults (600 s, 180 s, 6 s) that is 70 - far above the 10-20
+    memes the Lab targets, so the budget only bites if tracking grows."""
+    return priority.gdelt_request_budget(
+        _task_time_limit(), COLLECT_MARGIN_SECONDS, settings.MLL_GDELT_MIN_INTERVAL_SECONDS
+    )
 
 
 # --------------------------------------------------------------------------
@@ -165,9 +215,24 @@ def lifecycle_timeliness_tick() -> dict[str, Any]:
 
 @celery_app.task(name="app.lifecycle_lab.scheduler.lifecycle_forward_replay_tick")
 def lifecycle_forward_replay_tick() -> dict[str, Any]:
-    return run_async(
-        _run_locked("forward_replay", LOCK_REPLAY, lambda s: s.run_forward_replay(_now()))
-    )
+    return run_async(_run_locked("forward_replay", LOCK_REPLAY, _forward_replay))
+
+
+async def _forward_replay(service: LifecycleLabService) -> dict[str, Any]:
+    """Each arm resumes from its checkpoint when it may (see
+    ``LifecycleLabService.run_forward_replay``). Whether it did, and why not,
+    is logged per arm — a checkpoint invalidated every run is a cost leak
+    worth seeing (late-arriving rows behind the safety lag, usually)."""
+    out = await service.run_forward_replay(_now())
+    for arm, run in (out.get("runs") or {}).items():
+        logger.info(
+            "lifecycle_forward_replay_arm",
+            arm=arm,
+            replay=run.get("replay"),
+            invalidation_reason=run.get("invalidation_reason"),
+            ticks_processed=run.get("ticks_processed"),
+        )
+    return out
 
 
 @celery_app.task(name="app.lifecycle_lab.scheduler.lifecycle_experiment_tick")

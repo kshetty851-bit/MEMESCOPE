@@ -1,0 +1,748 @@
+{
+  "_comment": [
+    "EXAMPLE seed for scripts/mll_seed.py - nothing here is a verified token link.",
+    "Wikipedia titles are from memory: open each article (or call the Wikipedia API) and fix the title before seeding; a wrong title is reported honestly as UNAVAILABLE no_article, never as zero.",
+    "Every TO_VERIFY value is a placeholder. A TO_VERIFY alias is skipped; a link whose mint is TO_VERIFY is reported as pending.",
+    "Never type a mint from memory. Find candidates on DexScreener, verify against the meme's own website/social accounts, then replace the slot with a real mint + confidence + evidence_url (+ evidence_note for manual, or matched for website_match/social_link_match).",
+    "A ticker or name match is never evidence. linked_at is never accepted: the server stamps it.",
+    "A 'domain' alias is the meme's canonical site (e.g. example.org); a 'social_handle' alias is its canonical account handle."
+  ],
+  "memes": [
+    {
+      "slug": "pepe-the-frog",
+      "display_name": "Pepe the Frog",
+      "description": "Internet meme: an anthropomorphic frog character originating in the comic Boy's Club.",
+      "wikipedia_title": "Pepe the Frog",
+      "gdelt_query": "\"pepe the frog\"",
+      "aliases": [
+        {
+          "alias": "Pepe the Frog",
+          "kind": "name"
+        },
+        {
+          "alias": "feels good man",
+          "kind": "phrase"
+        },
+        {
+          "alias": "sad frog",
+          "kind": "phrase"
+        },
+        {
+          "alias": "#pepe",
+          "kind": "hashtag"
+        },
+        {
+          "alias": "#pepethefrog",
+          "kind": "hashtag"
+        },
+        {
+          "alias": "Pepe the Frog",
+          "kind": "wiki_title"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "domain"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "social_handle"
+        }
+      ],
+      "identity": {
+        "website": "TO_VERIFY",
+        "x_handle": "TO_VERIFY",
+        "reddit": "TO_VERIFY",
+        "notes": "Fill from the meme's own canonical pages, never from a token's claims."
+      },
+      "links": [
+        {
+          "mint": "TO_VERIFY",
+          "method": "manual",
+          "confidence": "TO_VERIFY",
+          "evidence_url": "TO_VERIFY",
+          "evidence_note": "TO_VERIFY"
+        }
+      ]
+    },
+    {
+      "slug": "doge",
+      "display_name": "Doge",
+      "description": "Internet meme: a Shiba Inu photograph captioned in broken English; Cheems is a later variant.",
+      "wikipedia_title": "Doge (meme)",
+      "gdelt_query": "\"doge meme\" OR \"shiba inu meme\"",
+      "aliases": [
+        {
+          "alias": "Doge",
+          "kind": "name"
+        },
+        {
+          "alias": "Cheems",
+          "kind": "name"
+        },
+        {
+          "alias": "much wow",
+          "kind": "phrase"
+        },
+        {
+          "alias": "such meme",
+          "kind": "phrase"
+        },
+        {
+          "alias": "#doge",
+          "kind": "hashtag"
+        },
+        {
+          "alias": "Doge (meme)",
+          "kind": "wiki_title"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "domain"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "social_handle"
+        }
+      ],
+      "identity": {
+        "website": "TO_VERIFY",
+        "x_handle": "TO_VERIFY",
+        "reddit": "TO_VERIFY",
+        "notes": "Fill from the meme's own canonical pages, never from a token's claims."
+      },
+      "links": [
+        {
+          "mint": "TO_VERIFY",
+          "method": "manual",
+          "confidence": "TO_VERIFY",
+          "evidence_url": "TO_VERIFY",
+          "evidence_note": "TO_VERIFY"
+        }
+      ]
+    },
+    {
+      "slug": "moo-deng",
+      "display_name": "Moo Deng",
+      "description": "Pygmy hippopotamus at Khao Kheow Open Zoo, Thailand, that became a viral meme in 2024.",
+      "wikipedia_title": "Moo Deng",
+      "gdelt_query": "\"moo deng\"",
+      "aliases": [
+        {
+          "alias": "Moo Deng",
+          "kind": "name"
+        },
+        {
+          "alias": "bouncy pig",
+          "kind": "phrase"
+        },
+        {
+          "alias": "#moodeng",
+          "kind": "hashtag"
+        },
+        {
+          "alias": "Moo Deng",
+          "kind": "wiki_title"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "domain"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "social_handle"
+        }
+      ],
+      "identity": {
+        "website": "TO_VERIFY",
+        "x_handle": "TO_VERIFY",
+        "reddit": "TO_VERIFY",
+        "notes": "Fill from the meme's own canonical pages, never from a token's claims."
+      },
+      "links": [
+        {
+          "mint": "TO_VERIFY",
+          "method": "manual",
+          "confidence": "TO_VERIFY",
+          "evidence_url": "TO_VERIFY",
+          "evidence_note": "TO_VERIFY"
+        }
+      ]
+    },
+    {
+      "slug": "grumpy-cat",
+      "display_name": "Grumpy Cat",
+      "description": "Internet meme: a cat with a permanently downturned expression.",
+      "wikipedia_title": "Grumpy Cat",
+      "gdelt_query": "\"grumpy cat\"",
+      "aliases": [
+        {
+          "alias": "Grumpy Cat",
+          "kind": "name"
+        },
+        {
+          "alias": "Tardar Sauce",
+          "kind": "name"
+        },
+        {
+          "alias": "#grumpycat",
+          "kind": "hashtag"
+        },
+        {
+          "alias": "Grumpy Cat",
+          "kind": "wiki_title"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "domain"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "social_handle"
+        }
+      ],
+      "identity": {
+        "website": "TO_VERIFY",
+        "x_handle": "TO_VERIFY",
+        "reddit": "TO_VERIFY",
+        "notes": "Fill from the meme's own canonical pages, never from a token's claims."
+      },
+      "links": [
+        {
+          "mint": "TO_VERIFY",
+          "method": "manual",
+          "confidence": "TO_VERIFY",
+          "evidence_url": "TO_VERIFY",
+          "evidence_note": "TO_VERIFY"
+        }
+      ]
+    },
+    {
+      "slug": "nyan-cat",
+      "display_name": "Nyan Cat",
+      "description": "Internet meme: a pixel-art cat with a pop-tart body flying through space leaving a rainbow trail.",
+      "wikipedia_title": "Nyan Cat",
+      "gdelt_query": "\"nyan cat\"",
+      "aliases": [
+        {
+          "alias": "Nyan Cat",
+          "kind": "name"
+        },
+        {
+          "alias": "nyan nyan",
+          "kind": "phrase"
+        },
+        {
+          "alias": "#nyancat",
+          "kind": "hashtag"
+        },
+        {
+          "alias": "Nyan Cat",
+          "kind": "wiki_title"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "domain"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "social_handle"
+        }
+      ],
+      "identity": {
+        "website": "TO_VERIFY",
+        "x_handle": "TO_VERIFY",
+        "reddit": "TO_VERIFY",
+        "notes": "Fill from the meme's own canonical pages, never from a token's claims."
+      },
+      "links": [
+        {
+          "mint": "TO_VERIFY",
+          "method": "manual",
+          "confidence": "TO_VERIFY",
+          "evidence_url": "TO_VERIFY",
+          "evidence_note": "TO_VERIFY"
+        }
+      ]
+    },
+    {
+      "slug": "keyboard-cat",
+      "display_name": "Keyboard Cat",
+      "description": "Internet meme: a video of a cat appearing to play the keyboard, used to play people off.",
+      "wikipedia_title": "Keyboard Cat",
+      "gdelt_query": "\"keyboard cat\"",
+      "aliases": [
+        {
+          "alias": "Keyboard Cat",
+          "kind": "name"
+        },
+        {
+          "alias": "Fatso",
+          "kind": "name"
+        },
+        {
+          "alias": "play him off",
+          "kind": "phrase"
+        },
+        {
+          "alias": "#keyboardcat",
+          "kind": "hashtag"
+        },
+        {
+          "alias": "Keyboard Cat",
+          "kind": "wiki_title"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "domain"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "social_handle"
+        }
+      ],
+      "identity": {
+        "website": "TO_VERIFY",
+        "x_handle": "TO_VERIFY",
+        "reddit": "TO_VERIFY",
+        "notes": "Fill from the meme's own canonical pages, never from a token's claims."
+      },
+      "links": [
+        {
+          "mint": "TO_VERIFY",
+          "method": "manual",
+          "confidence": "TO_VERIFY",
+          "evidence_url": "TO_VERIFY",
+          "evidence_note": "TO_VERIFY"
+        }
+      ]
+    },
+    {
+      "slug": "success-kid",
+      "display_name": "Success Kid",
+      "description": "Internet meme: a photograph of a toddler clenching sand in a fist, used for small victories.",
+      "wikipedia_title": "Success Kid",
+      "gdelt_query": "\"success kid\"",
+      "aliases": [
+        {
+          "alias": "Success Kid",
+          "kind": "name"
+        },
+        {
+          "alias": "i hate sandcastles",
+          "kind": "phrase"
+        },
+        {
+          "alias": "#successkid",
+          "kind": "hashtag"
+        },
+        {
+          "alias": "Success Kid",
+          "kind": "wiki_title"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "domain"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "social_handle"
+        }
+      ],
+      "identity": {
+        "website": "TO_VERIFY",
+        "x_handle": "TO_VERIFY",
+        "reddit": "TO_VERIFY",
+        "notes": "Fill from the meme's own canonical pages, never from a token's claims."
+      },
+      "links": [
+        {
+          "mint": "TO_VERIFY",
+          "method": "manual",
+          "confidence": "TO_VERIFY",
+          "evidence_url": "TO_VERIFY",
+          "evidence_note": "TO_VERIFY"
+        }
+      ]
+    },
+    {
+      "slug": "trollface",
+      "display_name": "Trollface",
+      "description": "Internet meme: a rage-comic drawing of a grinning face used to signify trolling.",
+      "wikipedia_title": "Trollface",
+      "gdelt_query": "\"trollface\" OR \"troll face\"",
+      "aliases": [
+        {
+          "alias": "Trollface",
+          "kind": "name"
+        },
+        {
+          "alias": "Troll face",
+          "kind": "name"
+        },
+        {
+          "alias": "#trollface",
+          "kind": "hashtag"
+        },
+        {
+          "alias": "Trollface",
+          "kind": "wiki_title"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "domain"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "social_handle"
+        }
+      ],
+      "identity": {
+        "website": "TO_VERIFY",
+        "x_handle": "TO_VERIFY",
+        "reddit": "TO_VERIFY",
+        "notes": "Fill from the meme's own canonical pages, never from a token's claims."
+      },
+      "links": [
+        {
+          "mint": "TO_VERIFY",
+          "method": "manual",
+          "confidence": "TO_VERIFY",
+          "evidence_url": "TO_VERIFY",
+          "evidence_note": "TO_VERIFY"
+        }
+      ]
+    },
+    {
+      "slug": "rickrolling",
+      "display_name": "Rickrolling",
+      "description": "Internet meme: a bait-and-switch linking to Rick Astley's Never Gonna Give You Up.",
+      "wikipedia_title": "Rickrolling",
+      "gdelt_query": "\"rickroll\" OR \"rickrolling\" OR \"rickrolled\"",
+      "aliases": [
+        {
+          "alias": "Rickrolling",
+          "kind": "name"
+        },
+        {
+          "alias": "Rickroll",
+          "kind": "name"
+        },
+        {
+          "alias": "never gonna give you up",
+          "kind": "phrase"
+        },
+        {
+          "alias": "#rickroll",
+          "kind": "hashtag"
+        },
+        {
+          "alias": "Rickrolling",
+          "kind": "wiki_title"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "domain"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "social_handle"
+        }
+      ],
+      "identity": {
+        "website": "TO_VERIFY",
+        "x_handle": "TO_VERIFY",
+        "reddit": "TO_VERIFY",
+        "notes": "Fill from the meme's own canonical pages, never from a token's claims."
+      },
+      "links": [
+        {
+          "mint": "TO_VERIFY",
+          "method": "manual",
+          "confidence": "TO_VERIFY",
+          "evidence_url": "TO_VERIFY",
+          "evidence_note": "TO_VERIFY"
+        }
+      ]
+    },
+    {
+      "slug": "wojak",
+      "display_name": "Wojak",
+      "description": "Internet meme: a simple line drawing of a bald man expressing emotion; many derivative characters.",
+      "wikipedia_title": "Wojak",
+      "gdelt_query": "\"wojak\" OR \"feels guy\"",
+      "aliases": [
+        {
+          "alias": "Wojak",
+          "kind": "name"
+        },
+        {
+          "alias": "Feels Guy",
+          "kind": "name"
+        },
+        {
+          "alias": "i know that feel bro",
+          "kind": "phrase"
+        },
+        {
+          "alias": "#wojak",
+          "kind": "hashtag"
+        },
+        {
+          "alias": "Wojak",
+          "kind": "wiki_title"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "domain"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "social_handle"
+        }
+      ],
+      "identity": {
+        "website": "TO_VERIFY",
+        "x_handle": "TO_VERIFY",
+        "reddit": "TO_VERIFY",
+        "notes": "Fill from the meme's own canonical pages, never from a token's claims."
+      },
+      "links": [
+        {
+          "mint": "TO_VERIFY",
+          "method": "manual",
+          "confidence": "TO_VERIFY",
+          "evidence_url": "TO_VERIFY",
+          "evidence_note": "TO_VERIFY"
+        }
+      ]
+    },
+    {
+      "slug": "distracted-boyfriend",
+      "display_name": "Distracted Boyfriend",
+      "description": "Internet meme: a stock photograph of a man looking at another woman while his partner looks on.",
+      "wikipedia_title": "Distracted boyfriend",
+      "gdelt_query": "\"distracted boyfriend\"",
+      "aliases": [
+        {
+          "alias": "Distracted Boyfriend",
+          "kind": "name"
+        },
+        {
+          "alias": "#distractedboyfriend",
+          "kind": "hashtag"
+        },
+        {
+          "alias": "Distracted boyfriend",
+          "kind": "wiki_title"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "domain"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "social_handle"
+        }
+      ],
+      "identity": {
+        "website": "TO_VERIFY",
+        "x_handle": "TO_VERIFY",
+        "reddit": "TO_VERIFY",
+        "notes": "Fill from the meme's own canonical pages, never from a token's claims."
+      },
+      "links": [
+        {
+          "mint": "TO_VERIFY",
+          "method": "manual",
+          "confidence": "TO_VERIFY",
+          "evidence_url": "TO_VERIFY",
+          "evidence_note": "TO_VERIFY"
+        }
+      ]
+    },
+    {
+      "slug": "bad-luck-brian",
+      "display_name": "Bad Luck Brian",
+      "description": "Internet meme: a yearbook photograph captioned with misfortunes.",
+      "wikipedia_title": "Bad Luck Brian",
+      "gdelt_query": "\"bad luck brian\"",
+      "aliases": [
+        {
+          "alias": "Bad Luck Brian",
+          "kind": "name"
+        },
+        {
+          "alias": "#badluckbrian",
+          "kind": "hashtag"
+        },
+        {
+          "alias": "Bad Luck Brian",
+          "kind": "wiki_title"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "domain"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "social_handle"
+        }
+      ],
+      "identity": {
+        "website": "TO_VERIFY",
+        "x_handle": "TO_VERIFY",
+        "reddit": "TO_VERIFY",
+        "notes": "Fill from the meme's own canonical pages, never from a token's claims."
+      },
+      "links": [
+        {
+          "mint": "TO_VERIFY",
+          "method": "manual",
+          "confidence": "TO_VERIFY",
+          "evidence_url": "TO_VERIFY",
+          "evidence_note": "TO_VERIFY"
+        }
+      ]
+    },
+    {
+      "slug": "hide-the-pain-harold",
+      "display_name": "Hide the Pain Harold",
+      "description": "Internet meme: stock photographs of a man with a strained smile.",
+      "wikipedia_title": "Hide the Pain Harold",
+      "gdelt_query": "\"hide the pain harold\"",
+      "aliases": [
+        {
+          "alias": "Hide the Pain Harold",
+          "kind": "name"
+        },
+        {
+          "alias": "#hidethepainharold",
+          "kind": "hashtag"
+        },
+        {
+          "alias": "Hide the Pain Harold",
+          "kind": "wiki_title"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "domain"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "social_handle"
+        }
+      ],
+      "identity": {
+        "website": "TO_VERIFY",
+        "x_handle": "TO_VERIFY",
+        "reddit": "TO_VERIFY",
+        "notes": "Fill from the meme's own canonical pages, never from a token's claims."
+      },
+      "links": [
+        {
+          "mint": "TO_VERIFY",
+          "method": "manual",
+          "confidence": "TO_VERIFY",
+          "evidence_url": "TO_VERIFY",
+          "evidence_note": "TO_VERIFY"
+        }
+      ]
+    },
+    {
+      "slug": "salt-bae",
+      "display_name": "Salt Bae",
+      "description": "Internet meme: a chef's stylised salt-sprinkling gesture, viral in January 2017.",
+      "wikipedia_title": "Salt Bae",
+      "gdelt_query": "\"salt bae\"",
+      "aliases": [
+        {
+          "alias": "Salt Bae",
+          "kind": "name"
+        },
+        {
+          "alias": "#saltbae",
+          "kind": "hashtag"
+        },
+        {
+          "alias": "Salt Bae",
+          "kind": "wiki_title"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "domain"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "social_handle"
+        }
+      ],
+      "identity": {
+        "website": "TO_VERIFY",
+        "x_handle": "TO_VERIFY",
+        "reddit": "TO_VERIFY",
+        "notes": "Fill from the meme's own canonical pages, never from a token's claims."
+      },
+      "links": [
+        {
+          "mint": "TO_VERIFY",
+          "method": "manual",
+          "confidence": "TO_VERIFY",
+          "evidence_url": "TO_VERIFY",
+          "evidence_note": "TO_VERIFY"
+        }
+      ]
+    },
+    {
+      "slug": "stonks",
+      "display_name": "Stonks",
+      "description": "Internet meme: a deliberately misspelled stock-market joke featuring a 3D-rendered suited figure.",
+      "wikipedia_title": "Stonks",
+      "gdelt_query": "\"stonks\"",
+      "aliases": [
+        {
+          "alias": "Stonks",
+          "kind": "name"
+        },
+        {
+          "alias": "Meme Man",
+          "kind": "name"
+        },
+        {
+          "alias": "stonks only go up",
+          "kind": "phrase"
+        },
+        {
+          "alias": "#stonks",
+          "kind": "hashtag"
+        },
+        {
+          "alias": "Stonks",
+          "kind": "wiki_title"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "domain"
+        },
+        {
+          "alias": "TO_VERIFY",
+          "kind": "social_handle"
+        }
+      ],
+      "identity": {
+        "website": "TO_VERIFY",
+        "x_handle": "TO_VERIFY",
+        "reddit": "TO_VERIFY",
+        "notes": "Fill from the meme's own canonical pages, never from a token's claims."
+      },
+      "links": [
+        {
+          "mint": "TO_VERIFY",
+          "method": "manual",
+          "confidence": "TO_VERIFY",
+          "evidence_url": "TO_VERIFY",
+          "evidence_note": "TO_VERIFY"
+        }
+      ]
+    }
+  ]
+}

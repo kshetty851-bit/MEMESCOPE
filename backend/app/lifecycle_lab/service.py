@@ -23,12 +23,16 @@ Conventions that are easy to break here:
 
 from __future__ import annotations
 
+import functools
+import importlib
+import json
 import time
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from typing import Any, cast
 
 import httpx
@@ -37,10 +41,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.lifecycle_lab import attention as attention_engine
+from app.lifecycle_lab import checkpoint as checkpoint_engine
 from app.lifecycle_lab import events as events_engine
 from app.lifecycle_lab import experiments as experiments_engine
 from app.lifecycle_lab import linking, pit, replay, strategy
 from app.lifecycle_lab import market as market_engine
+from app.lifecycle_lab import priority as priority_engine
 from app.lifecycle_lab import states as states_engine
 from app.lifecycle_lab import timeliness as timeliness_engine
 from app.lifecycle_lab.adapters import (
@@ -54,11 +60,13 @@ from app.lifecycle_lab.adapters import (
     WikipediaAdapter,
     build_adapters,
 )
-from app.lifecycle_lab.collector import collect_once
+from app.lifecycle_lab.adapters.gdelt import query_for as gdelt_query_for
+from app.lifecycle_lab.collector import SourceSchedule, collect_once
 from app.lifecycle_lab.config import DEFAULT_CONFIG, LabConfig
 from app.lifecycle_lab.domain import (
     ATTENTION_SOURCES,
     REAL_TRADING,
+    SOURCE_MAX_AGE,
     TIMELINESS_HORIZONS,
     AliasKind,
     Arm,
@@ -223,6 +231,28 @@ _RETURN_COLUMNS: dict[str, str] = {
 
 #: `enabled()` and `data_class` read settings only; the client is never touched.
 _NO_CLIENT = cast("httpx.AsyncClient", None)
+
+_MICROSECOND = timedelta(microseconds=1)
+
+
+@functools.cache
+def _engine_sources() -> dict[str, bytes]:
+    """Source bytes of the pure engine modules, for ``checkpoint.engine_hash``.
+
+    Read once per process, close to import: a checkpoint is tagged with the
+    code that is *running*, so an edit on disk invalidates checkpoints only
+    once a restarted worker actually runs it. Never mutated by callers.
+    """
+    out: dict[str, bytes] = {}
+    for name in checkpoint_engine.ENGINE_MODULES:
+        path = importlib.import_module(name).__file__
+        assert path is not None
+        out[name] = Path(path).read_bytes()
+    return out
+
+
+def _iso(value: datetime | None) -> str | None:
+    return None if value is None else value.isoformat()
 
 
 class LabNotFoundError(LookupError):
@@ -665,7 +695,11 @@ class LifecycleLabService:
         for seen in await self.repo.latest_runs_by_source():
             latest.setdefault(seen.source, seen)
         counts = await self.repo.observation_counts(since=now - DAY)
-        stale_after = self.cfg.attention.max_observation_age
+        # The same per-source budgets the PIT gate applies: a daily Wikipedia
+        # reading is current for a day, and judging it by a 2h clock would
+        # report a healthy collector as stale every afternoon.
+        stale_budget = SOURCE_MAX_AGE
+        fallback_age = self.cfg.attention.max_observation_age
         out: list[dict[str, Any]] = []
         for source in sorted(Source, key=lambda s: s.value):
             adapter = adapters[source]
@@ -680,7 +714,7 @@ class LifecycleLabService:
             elif (
                 run.status is SourceStatus.AVAILABLE
                 and adapter.data_class is DataClass.FORWARD
-                and now - run.finished_at > stale_after
+                and now - run.finished_at > stale_budget.get(source, fallback_age)
             ):
                 status, reason = SourceStatus.STALE.value, pit.STALE_REASON
             else:
@@ -895,6 +929,10 @@ class LifecycleLabService:
                 f"Only forward data collected since {fs.isoformat()} counts toward "
                 "the verdict.",
             )
+        # Imported here: quality_service imports this module's helpers.
+        from app.lifecycle_lab.quality_service import QualityService
+
+        research = QualityService(self.session, cfg=self.cfg)
         return {
             "lab_enabled": bool(settings.FEATURE_LIFECYCLE_LAB_ENABLED),
             "real_trading": REAL_TRADING,
@@ -925,6 +963,7 @@ class LifecycleLabService:
             "tracked_memes": len(memes),
             "linked_tokens": len(linked),
             "notes": notes,
+            "research_status": await research.research_status(now),
         }
 
     # ------------------------------------------------------------------
@@ -1353,17 +1392,32 @@ class LifecycleLabService:
     # Forward replay
     # ------------------------------------------------------------------
 
-    async def run_forward_replay(self, now: datetime) -> dict[str, Any]:
+    async def run_forward_replay(
+        self, now: datetime, *, force_full: bool = False
+    ) -> dict[str, Any]:
         """AUTHORITATIVE replay over ``[forward_start, now)`` per wired arm,
-        persisted into ONE forward run row per arm.
+        persisted into ONE forward run row per arm — incrementally.
 
-        Recomputes from scratch every time: the replay is deterministic, and
-        point-in-time gating means a later run cannot change what an earlier
-        tick saw, so re-saving is idempotent — trades upsert their exit side
-        only, snapshots and events are first-write-wins. Cost grows with the
-        forward period (ticks x memes x arms); ``FORWARD_HISTORY_LOOKBACK``
-        bounds each tick's history and ``MLL_MAX_TRACKED_TOKENS`` caps the
-        memes. Incremental replay is a later optimisation.
+        Each arm resumes from its checkpoint (``mll_replay_checkpoints``) when
+        ``checkpoint.is_valid`` says nothing visible at or before the
+        checkpoint's last tick has changed, and replays from scratch
+        otherwise; the reason is recorded in the run summary. Either way the
+        result is identical — ``resume_replay`` is the replay
+        (``tests/unit/test_mll_incremental.py``) — and so is what is stored:
+        trades upsert their exit side only, snapshots and events are
+        first-write-wins, and an incremental run writes only what the
+        checkpoint's state had not yet produced, all of which an earlier run
+        stored in the same transaction as the checkpoint.
+
+        A new checkpoint is taken at the last tick before
+        ``now - MLL_CHECKPOINT_SAFETY_LAG_SECONDS``; the ticks after it are
+        recomputed by every run, as late-arriving rows may still change them.
+        Its watermark is computed in SQL *before* the inputs are loaded, and a
+        checkpoint is validated *after* they are: a row committed in between
+        then shows up as a watermark mismatch on the next run (a full replay),
+        never as a resume that silently missed it.
+
+        ``force_full`` ignores any checkpoint (and replaces it).
         """
         fs = parse_forward_start()
         if fs is None:
@@ -1372,24 +1426,97 @@ class LifecycleLabService:
             return {"skipped": "forward_not_started"}
         ids = await self.ensure_baseline_experiment(now)
         memes, capped = await self._capped_memes()
-        inputs = await self._load(
-            memes,
-            until=now,
-            since=fs - FORWARD_HISTORY_LOOKBACK,
-            include_backfill=False,
-        )
+        meme_ids = [m.id for m in memes]
+        since = fs - FORWARD_HISTORY_LOOKBACK
+        lag = timedelta(seconds=max(0, settings.MLL_CHECKPOINT_SAFETY_LAG_SECONDS))
+        checkpoint_at = now - lag
+        # The tick a new checkpoint would hold: the last grid tick before
+        # checkpoint_at (the replay exports its state just before that tick).
+        cp_tick = _floor(checkpoint_at - _MICROSECOND, self.cfg.decision_interval)
+        new_marks: checkpoint_engine.Watermarks | None = None
+        if cp_tick >= fs:
+            new_marks = await self.repo.input_watermarks(
+                meme_ids=meme_ids, at=cp_tick, mode=ResearchMode.AUTHORITATIVE, since=since
+            )
+        inputs = await self._load(memes, until=now, since=since, include_backfill=False)
+        engine = _engine_sources()
+        marks_at: dict[datetime, checkpoint_engine.Watermarks] = {}
         out: dict[str, Any] = {"memes": len(memes), "capped": capped, "runs": {}}
         for arm in REPLAY_ARMS:
             began = time.monotonic()
-            result = replay.run_replay(
+            scope = checkpoint_engine.CheckpointScope(
+                mode=ResearchMode.AUTHORITATIVE, arm=arm, experiment_id=ids[arm]
+            )
+            versions = checkpoint_engine.current_versions(
+                engine_sources=engine,
+                cfg=self.cfg,
+                arm=arm,
+                spec_hash=await self._experiment_spec_hash(fs, arm),
+            )
+            prior, reason = (
+                (None, "forced")
+                if force_full
+                else await self._resumable_state(
+                    scope=scope,
+                    versions=versions,
+                    fs=fs,
+                    now=now,
+                    meme_ids=meme_ids,
+                    since=since,
+                    marks_at=marks_at,
+                )
+            )
+            fresh = replay.ReplayState.initial(
                 inputs=inputs,
                 cfg=self.cfg,
                 mode=ResearchMode.AUTHORITATIVE,
                 arm=arm,
                 start=fs,
-                end=now,
                 history_lookback=FORWARD_HISTORY_LOOKBACK,
             )
+            try:
+                result, cp_state = replay.resume_replay(
+                    state=prior or fresh,
+                    inputs=inputs,
+                    cfg=self.cfg,
+                    mode=ResearchMode.AUTHORITATIVE,
+                    arm=arm,
+                    end=now,
+                    checkpoint_at=checkpoint_at if new_marks is not None else None,
+                )
+            except ValueError as exc:
+                if prior is None:
+                    raise
+                # The state disagrees with this replay in a way the watermark
+                # cannot see (meme order, configuration): never guess.
+                prior, reason = None, f"state_mismatch:{exc}"
+                result, cp_state = replay.resume_replay(
+                    state=fresh,
+                    inputs=inputs,
+                    cfg=self.cfg,
+                    mode=ResearchMode.AUTHORITATIVE,
+                    arm=arm,
+                    end=now,
+                    checkpoint_at=checkpoint_at if new_marks is not None else None,
+                )
+            checkpoint: checkpoint_engine.Checkpoint | None = None
+            if new_marks is not None and cp_state.processed_until == cp_tick:
+                checkpoint = checkpoint_engine.make_checkpoint(
+                    scope=scope, versions=versions, state=cp_state, watermarks=new_marks
+                )
+            state_json = None if checkpoint is None else json.dumps(checkpoint.state)
+            cp_until = None if checkpoint is None else checkpoint.processed_until
+            info: dict[str, Any] = {
+                "mode": "full" if prior is None else "incremental",
+                "invalidation_reason": None if prior is not None else reason,
+                "resumed_from": None if prior is None else _iso(prior.processed_until),
+                "ticks_processed": result.ticks - (0 if prior is None else prior.ticks),
+                "ticks_total": result.ticks,
+                "duration_ms": round((time.monotonic() - began) * 1000),
+                "checkpoint_at": _iso(cp_until),
+                "checkpoint_bytes": None if state_json is None else len(state_json),
+                "replay_version": versions.replay_version,
+            }
             run_id = await self._persist_forward(
                 experiment_id=ids[arm],
                 result=result,
@@ -1397,13 +1524,109 @@ class LifecycleLabService:
                 memes=len(memes),
                 capped=capped,
                 duration=time.monotonic() - began,
+                prior=prior,
+                replay_info=info,
             )
+            if checkpoint is not None and state_json is not None:
+                await self.repo.save_checkpoint(
+                    {
+                        "scope_key": scope.key(),
+                        "mode": scope.mode.value,
+                        "arm": arm.value,
+                        "experiment_id": ids[arm],
+                        "backtest_run_id": run_id,
+                        "replay_version": versions.replay_version,
+                        "engine_hash": versions.engine_hash,
+                        "config_hash": versions.config_hash,
+                        "spec_hash": versions.spec_hash,
+                        "window_start": checkpoint.window_start,
+                        "processed_until": checkpoint.processed_until,
+                        "input_watermark": checkpoint.input_watermark,
+                        "state": checkpoint.state,
+                        "state_bytes": len(state_json),
+                    }
+                )
+            elif prior is None:
+                # Forced, or found stale, and too early to replace: never leave
+                # it behind to be validated (and refused) again.
+                await self.repo.delete_checkpoint(scope.key())
             out["runs"][arm.value] = {
                 "run_id": run_id,
                 "trades": result.metrics.trades,
                 "ticks": result.ticks,
+                "replay": info["mode"],
+                "invalidation_reason": info["invalidation_reason"],
+                "ticks_processed": info["ticks_processed"],
             }
         return out
+
+    async def _experiment_spec_hash(self, fs: datetime, arm: Arm) -> str:
+        row = await self.repo.get_experiment_by_key(experiment_key(fs, arm))
+        return "" if row is None else str(row["spec_hash"])
+
+    async def _resumable_state(
+        self,
+        *,
+        scope: checkpoint_engine.CheckpointScope,
+        versions: checkpoint_engine.CheckpointVersions,
+        fs: datetime,
+        now: datetime,
+        meme_ids: Sequence[str],
+        since: datetime,
+        marks_at: dict[datetime, checkpoint_engine.Watermarks],
+    ) -> tuple[replay.ReplayState | None, str]:
+        """The checkpointed state if it may be resumed, else ``(None, reason)``."""
+        row = await self.repo.get_checkpoint(scope.key())
+        if row is None:
+            return None, "no_checkpoint"
+        run = await self.repo.find_run(
+            experiment_id=scope.experiment_id, mode=AUTHORITATIVE, segment=FORWARD_SEGMENT
+        )
+        if run is None or str(run["id"]) != str(row["backtest_run_id"]):
+            # The rows an incremental run builds on are not where it would write.
+            return None, "run_changed"
+        processed_until: datetime = row["processed_until"]
+        if processed_until >= now:
+            return None, "checkpoint_ahead_of_now"
+        stored = checkpoint_engine.Checkpoint(
+            scope=scope,
+            versions=checkpoint_engine.CheckpointVersions(
+                replay_version=row["replay_version"],
+                engine_hash=row["engine_hash"],
+                config_hash=row["config_hash"],
+                spec_hash=row["spec_hash"],
+            ),
+            window_start=row["window_start"],
+            processed_until=processed_until,
+            input_watermark=row["input_watermark"],
+            state=row["state"],
+        )
+        if processed_until not in marks_at:
+            marks_at[processed_until] = await self.repo.input_watermarks(
+                meme_ids=meme_ids,
+                at=processed_until,
+                mode=ResearchMode.AUTHORITATIVE,
+                since=since,
+            )
+        ok, reason = checkpoint_engine.is_valid(
+            stored,
+            current_versions=versions,
+            current_watermarks=marks_at[processed_until],
+            window_start=fs,
+        )
+        if not ok:
+            return None, reason
+        try:
+            state = replay.ReplayState.from_json(row["state"])
+        except (ValueError, KeyError, TypeError) as exc:
+            return None, f"state_unreadable:{type(exc).__name__}"
+        if (
+            state.processed_until != processed_until
+            or state.start != fs
+            or state.history_lookback != FORWARD_HISTORY_LOOKBACK
+        ):
+            return None, "state_inconsistent"
+        return state, checkpoint_engine.VALID
 
     async def _persist_forward(
         self,
@@ -1414,7 +1637,13 @@ class LifecycleLabService:
         memes: int,
         capped: bool,
         duration: float,
+        prior: replay.ReplayState | None = None,
+        replay_info: Mapping[str, Any] | None = None,
     ) -> str:
+        """Save a forward result. After a resume from ``prior``, only what
+        ``prior`` had not produced is written: trades it had not closed,
+        snapshots after its curve, events after its last tick. Everything
+        else was written, identically, by the run that produced ``prior``."""
         existing = await self.repo.find_run(
             experiment_id=experiment_id, mode=AUTHORITATIVE, segment=FORWARD_SEGMENT
         )
@@ -1433,12 +1662,22 @@ class LifecycleLabService:
             )
         else:
             run_id = str(existing["id"])
-        await self.repo.save_trades(run_id, [_trade_row(t) for t in result.trades])
-        await self.repo.save_snapshots(run_id, [_snapshot_row(s) for s in result.snapshots])
+        trades: Sequence[PaperTrade] = result.trades
+        snapshots: Sequence[PortfolioSnapshot] = result.snapshots
+        events: Sequence[MemeEvent] = result.events
+        if prior is not None and prior.processed_until is not None:
+            done = {t.trade_key for t in prior.closed}
+            last = prior.processed_until
+            trades = [t for t in result.trades if t.trade_key not in done]
+            snapshots = result.snapshots[len(prior.snapshots) :]
+            events = [e for e in result.events if e.detected_at > last]
+        await self.repo.save_trades(run_id, [_trade_row(t) for t in trades])
+        await self.repo.save_snapshots(run_id, [_snapshot_row(s) for s in snapshots])
         if result.arm is Arm.BASELINE:
             # Events do not depend on the arm; one copy is enough.
-            await self.repo.save_events(result.events, source_run_id=run_id)
+            await self.repo.save_events(events, source_run_id=run_id)
         final = result.snapshots[-1]
+        info = dict(replay_info or {"mode": "full"})
         await self.repo.update_run(
             run_id,
             {
@@ -1462,7 +1701,8 @@ class LifecycleLabService:
                     "memes": memes,
                     "memes_capped": capped,
                     "history_lookback_seconds": FORWARD_HISTORY_LOOKBACK.total_seconds(),
-                    "recompute": "full",
+                    "recompute": info["mode"],
+                    "replay": info,
                     "duration_seconds": round(duration, 3),
                 },
             },
@@ -1705,16 +1945,180 @@ class LifecycleLabService:
         adapters: Sequence[SourceAdapter],
         *,
         clock: Callable[[], datetime] | None = None,
+        schedule: Mapping[Source, SourceSchedule] | None = None,
     ) -> list[CollectionRun]:
         """One FORWARD pass. BACKFILL-class adapters (GeckoTerminal OHLCV) are
-        not part of the schedule: they are one-off and run from ``backfill``."""
+        not part of the schedule: they are one-off and run from ``backfill``.
+        With ``schedule`` (from ``plan_collection``), scheduled sources are
+        asked only about what is due; see ``collector``."""
         forward = [a for a in adapters if a.data_class is DataClass.FORWARD]
         if not forward:
             return []
         subjects = await self.subjects(now)
         return await collect_once(
-            repo=self.repo, adapters=forward, subjects=subjects, now=now, clock=clock
+            repo=self.repo,
+            adapters=forward,
+            subjects=subjects,
+            now=now,
+            clock=clock,
+            schedule=schedule,
         )
+
+    def _lifecycle_at(
+        self, mi: _MemeInputs, as_of: datetime, prior: Sequence[MemeEvent]
+    ) -> LifecycleState:
+        state = mi.state(as_of, ResearchMode.AUTHORITATIVE, self.cfg)
+        attn = attention_engine.attention_features(state, self.cfg.attention)
+        primary = primary_link(state.links)
+        mf = (
+            None
+            if primary is None
+            else market_engine.market_features(state, primary.mint_address)
+        )
+        return states_engine.classify_state(
+            state=state, attention=attn, market=mf, prior_events=prior, cfg=self.cfg.events
+        )
+
+    async def collection_priorities(
+        self, now: datetime, *, meme_ids: Sequence[str] | None = None
+    ) -> dict[str, priority_engine.CollectionPriority]:
+        """Collection priority per tracked meme at ``now`` (``priority.py``).
+
+        Frequency only: nothing here reaches a replay or a strategy. The state
+        is classified point-in-time from AUTHORITATIVE (forward) data; when it
+        is UNKNOWN only because the newest reading aged out, the state at that
+        reading's ``retrieved_at`` stands in.
+        """
+        inputs = await self.load_inputs(
+            meme_ids=meme_ids,
+            until=now,
+            since=now - FORWARD_HISTORY_LOOKBACK,
+            market_since=now - RADAR_MARKET_LOOKBACK,
+            include_backfill=False,
+        )
+        prior = await self._prior_events(
+            [m.id for m in inputs.memes], since=now - FORWARD_HISTORY_LOOKBACK - DAY
+        )
+        out: dict[str, priority_engine.CollectionPriority] = {}
+        for mi in partition(inputs):
+            events = prior.get(mi.meme.id, ())
+            state_now = self._lifecycle_at(mi, now, events)
+            last = max(
+                (
+                    o.retrieved_at
+                    for o in mi.observations
+                    if o.source in ATTENTION_SOURCES
+                    and o.data_class is DataClass.FORWARD
+                    and o.retrieved_at <= now
+                ),
+                default=None,
+            )
+            then: LifecycleState | None = None
+            if (
+                state_now is LifecycleState.UNKNOWN
+                and last is not None
+                and now - last <= priority_engine.RECENT_DATA
+            ):
+                then = self._lifecycle_at(mi, last, events)
+            out[mi.meme.id] = priority_engine.priority_for(
+                state_now=state_now, now=now, last_data_at=last, state_at_last_data=then
+            )
+        return out
+
+    async def plan_collection(
+        self,
+        now: datetime,
+        adapters: Sequence[SourceAdapter],
+        *,
+        gdelt_budget: int | None = None,
+        gdelt_deadline: float | None = None,
+    ) -> dict[Source, SourceSchedule]:
+        """Who each scheduled source should be asked about in this pass.
+
+        Read-only. Sources without a due-time policy (or every-pass ones, or
+        disabled ones) are absent from the result and are asked about every
+        subject, as before. The GDELT adapter in ``adapters`` is switched to
+        scheduled mode: each meme's span covers the gap since its last success,
+        and no request starts past ``gdelt_deadline``.
+        """
+        policies = priority_engine.POLICIES
+        scheduled = [
+            a
+            for a in adapters
+            if a.data_class is DataClass.FORWARD
+            and a.source in policies
+            and policies[a.source].cadence is not priority_engine.Cadence.EVERY_PASS
+            and a.enabled()[0]
+        ]
+        if not scheduled:
+            return {}
+        subjects = await self.subjects(now)
+        runs = await self.repo.runs(
+            meme_ids=None, since=now - priority_engine.HISTORY_LOOKBACK, until=now
+        )
+        needs_level = any(
+            policies[a.source].cadence is priority_engine.Cadence.INTERVAL for a in scheduled
+        )
+        priorities = await self.collection_priorities(now) if needs_level else {}
+
+        def level(meme_id: str) -> priority_engine.PriorityLevel:
+            p = priorities.get(meme_id)
+            return priority_engine.PriorityLevel.NORMAL if p is None else p.level
+
+        plan: dict[Source, SourceSchedule] = {}
+        for adapter in scheduled:
+            source = adapter.source
+            history = priority_engine.fold_history(runs, source)
+            if policies[source].keyed_by is priority_engine.KeyedBy.MEME:
+                candidates = [
+                    priority_engine.Candidate(
+                        key=s.meme.id,
+                        slug=s.meme.slug,
+                        level=level(s.meme.id),
+                        history=history.get(s.meme.id, priority_engine.EMPTY_HISTORY),
+                        group=gdelt_query_for(s) if source is Source.GDELT else None,
+                    )
+                    for s in subjects
+                ]
+                sp = priority_engine.plan_source(
+                    source,
+                    candidates,
+                    now=now,
+                    budget=gdelt_budget if source is Source.GDELT else None,
+                )
+                by_id = {s.meme.id: s for s in subjects}
+                chosen = tuple(by_id[k] for k in sp.due)
+            else:
+                mint_level: dict[str, priority_engine.PriorityLevel] = {}
+                for s in subjects:
+                    for mint in s.mints:
+                        held = mint_level.get(mint, priority_engine.PriorityLevel.LOW)
+                        mine = level(s.meme.id)
+                        rank = priority_engine.RANK
+                        mint_level[mint] = mine if rank[mine] > rank[held] else held
+                candidates = [
+                    priority_engine.Candidate(
+                        key=mint,
+                        slug=mint,
+                        level=mint_level[mint],
+                        history=history.get(mint, priority_engine.EMPTY_HISTORY),
+                    )
+                    for mint in sorted(mint_level)
+                ]
+                sp = priority_engine.plan_source(source, candidates, now=now)
+                due = set(sp.due)
+                chosen = tuple(
+                    replace(s, mints=tuple(m for m in s.mints if m in due))
+                    for s in subjects
+                    if any(m in due for m in s.mints)
+                )
+            plan[source] = SourceSchedule(chosen, sp.deferred, sp.summary())
+            if isinstance(adapter, GdeltAdapter):
+                adapter.set_schedule(
+                    last_success={k: h.last_success_at for k, h in history.items()},
+                    deadline=gdelt_deadline,
+                )
+        return plan
 
     @staticmethod
     def build_adapters(client: httpx.AsyncClient) -> list[SourceAdapter]:
@@ -1835,23 +2239,35 @@ class LifecycleLabService:
         raise LabConflictError("alias normalises to nothing")
 
     async def add_manual_link(
-        self, slug: str, mint: str, confidence: Decimal, actor: str, now: datetime
+        self,
+        slug: str,
+        mint: str,
+        confidence: Decimal,
+        actor: str,
+        now: datetime,
+        *,
+        method: LinkMethod = LinkMethod.MANUAL,
+        evidence_url: str | None = None,
+        evidence_note: str | None = None,
     ) -> dict[str, Any]:
         """A curated link. ``linked_at`` is the server's ``now`` — a client can
         never date a link, because a link dated before a pump is exactly the
-        look-ahead the Lab exists to exclude."""
+        look-ahead the Lab exists to exclude. The evidence (where, how, who) is
+        kept with the link as its audit trail."""
         meme = await self.repo.get_meme_by_slug(slug)
         if meme is None:
             raise LabNotFoundError(slug)
         link = MemeTokenLink(
             meme_id=meme.id,
             mint_address=mint,
-            method=LinkMethod.MANUAL,
+            method=method,
             confidence=confidence,
             linked_at=now,
         )
         created = await self.repo.add_link(
-            link, evidence={"actor": actor}, linked_by=f"manual:{actor}"
+            link,
+            evidence={"url": evidence_url, "note": evidence_note, "submitted_by": actor},
+            linked_by=f"manual:{actor}",
         )
         stored = next(
             k for k in await self.repo.links_for([meme.id]) if k.mint_address == mint

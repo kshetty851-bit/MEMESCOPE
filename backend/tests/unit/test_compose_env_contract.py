@@ -205,6 +205,7 @@ REQUIRED_IN_ANCHOR = {
     "MLL_AUTOLINK_MIN_CONFIDENCE": "the autolinker and the API must agree on what links",
     "MLL_WIKIPEDIA_USER_AGENT": "Wikimedia throttles generic agents; one identity",
     "MLL_GDELT_MIN_INTERVAL_SECONDS": "politeness bound must not differ per process",
+    "MLL_CHECKPOINT_SAFETY_LAG_SECONDS": "every replay runner checkpoints behind one horizon",
 }
 
 #: Real-wallet execution settings, kept as their own set because the failure

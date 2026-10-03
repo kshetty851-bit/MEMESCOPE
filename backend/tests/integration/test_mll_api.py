@@ -69,6 +69,17 @@ def _meme_body(**over: Any) -> dict[str, Any]:
     return body
 
 
+def _link_body(mint_address: str, **over: Any) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "mint": mint_address,
+        "confidence": "0.9",
+        "evidence_url": "https://example.com/proof",
+        "evidence_note": "Official account pinned this contract address.",
+    }
+    body.update(over)
+    return body
+
+
 # --------------------------------------------------------------------------
 # Reads
 # --------------------------------------------------------------------------
@@ -139,7 +150,7 @@ async def test_unknown_meme_and_run_are_404(client: AsyncClient) -> None:
     [
         ("/memes", _meme_body()),
         ("/memes/some-meme/aliases", {"alias": "pepe", "kind": "name"}),
-        ("/memes/some-meme/links", {"mint": "1" * 44, "confidence": "0.9"}),
+        ("/memes/some-meme/links", _link_body("1" * 44)),
         (
             "/memes/some-meme/backfill",
             {"start": "2026-09-01T00:00:00Z", "end": "2026-09-02T00:00:00Z"},
@@ -157,7 +168,7 @@ async def test_curation_without_a_token_is_401(
     [
         ("/memes", _meme_body()),
         ("/memes/some-meme/aliases", {"alias": "pepe", "kind": "name"}),
-        ("/memes/some-meme/links", {"mint": "1" * 44, "confidence": "0.9"}),
+        ("/memes/some-meme/links", _link_body("1" * 44)),
         (
             "/memes/some-meme/backfill",
             {"start": "2026-09-01T00:00:00Z", "end": "2026-09-02T00:00:00Z"},
@@ -193,7 +204,7 @@ async def test_admin_curation_and_server_dated_links(
     before = datetime.now(UTC)
     link = await client.post(
         f"{API}/memes/{slug}/links",
-        json={"mint": m, "confidence": "0.9"},
+        json=_link_body(m),
         headers=admin_headers,
     )
     after = datetime.now(UTC)
@@ -228,7 +239,7 @@ async def test_admin_curation_and_server_dated_links(
     # Last, because a refused request rolls the test transaction back.
     forged = await client.post(
         f"{API}/memes/{slug}/links",
-        json={"mint": mint(), "confidence": "0.9", "linked_at": "2020-01-01T00:00:00Z"},
+        json={**_link_body(mint()), "linked_at": "2020-01-01T00:00:00Z"},
         headers=admin_headers,
     )
     assert forged.status_code == 422
@@ -371,3 +382,87 @@ async def test_ratios_are_fractions_not_percents(
         "0.000001"
     )
     assert Decimal(run["metrics"]["roi"]) == roi
+
+
+# --------------------------------------------------------------------------
+# Link evidence
+# --------------------------------------------------------------------------
+
+
+async def _new_slug(client: AsyncClient, headers: dict[str, str]) -> str:
+    created = await client.post(f"{API}/memes", json=_meme_body(), headers=headers)
+    return str(created.json()["slug"])
+
+
+async def test_a_link_stores_its_evidence_as_an_audit_trail(
+    client: AsyncClient, admin_headers: dict[str, str], user: User
+) -> None:
+    slug = await _new_slug(client, admin_headers)
+    m = mint()
+    response = await client.post(
+        f"{API}/memes/{slug}/links",
+        json=_link_body(m, method="website_match", evidence_note=None),
+        headers=admin_headers,
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["method"] == "website_match"
+    audit = (await client.get(f"{API}/memes/{slug}/quality")).json()
+    (link,) = audit["links"]
+    assert link["method"] == "website_match"
+    assert link["evidence"] == {
+        "url": "https://example.com/proof",
+        "note": None,
+        "submitted_by": str(user.id),
+    }
+    assert link["linked_by"] == f"manual:{user.id}"
+
+
+async def test_method_defaults_to_manual_and_keeps_the_note(
+    client: AsyncClient, admin_headers: dict[str, str]
+) -> None:
+    slug = await _new_slug(client, admin_headers)
+    response = await client.post(
+        f"{API}/memes/{slug}/links", json=_link_body(mint()), headers=admin_headers
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["method"] == "manual"
+    audit = (await client.get(f"{API}/memes/{slug}/quality")).json()
+    assert (
+        audit["links"][0]["evidence"]["note"]
+        == "Official account pinned this contract address."
+    )
+
+
+@pytest.mark.parametrize("method", ["exact_name", "exact_symbol", "alias_match", "telepathy"])
+async def test_a_text_match_is_never_sufficient_evidence_for_a_curated_link(
+    client: AsyncClient, admin_headers: dict[str, str], method: str
+) -> None:
+    slug = await _new_slug(client, admin_headers)
+    response = await client.post(
+        f"{API}/memes/{slug}/links",
+        json=_link_body(mint(), method=method),
+        headers=admin_headers,
+    )
+    assert response.status_code == 422, response.text
+
+
+@pytest.mark.parametrize(
+    "over",
+    [
+        {"evidence_url": None},
+        {"evidence_url": "not a url"},
+        {"evidence_url": "ftp://example.com/x"},
+        {"evidence_note": None},
+        {"evidence_note": "   "},
+    ],
+)
+async def test_a_link_without_evidence_is_refused(
+    client: AsyncClient, admin_headers: dict[str, str], over: dict[str, Any]
+) -> None:
+    """The URL is always required; a manual link also needs the note."""
+    slug = await _new_slug(client, admin_headers)
+    body = _link_body(mint(), **over)
+    if over.get("evidence_url", "x") is None:
+        del body["evidence_url"]
+    response = await client.post(f"{API}/memes/{slug}/links", json=body, headers=admin_headers)
+    assert response.status_code == 422, response.text

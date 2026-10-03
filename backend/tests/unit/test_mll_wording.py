@@ -25,7 +25,7 @@ from app.lifecycle_lab.domain import EventType, ExitReason
 pytestmark = pytest.mark.unit
 
 PACKAGE = Path(service.__file__).parent
-SCANNED = ("schemas.py", "service.py", "api.py", "scheduler.py")
+SCANNED = ("schemas.py", "service.py", "api.py", "scheduler.py", "quality_service.py")
 ADVICE = re.compile(r"\b(buy|sell|hold|consider|recommend)", re.IGNORECASE)
 
 

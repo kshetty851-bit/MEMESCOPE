@@ -18,6 +18,8 @@ from fastapi import APIRouter, Query, status
 from app.api.deps import AdminUser, DbSession
 from app.core.config import settings
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
+from app.lifecycle_lab.domain import LinkMethod
+from app.lifecycle_lab.quality_service import QualityService
 from app.lifecycle_lab.schemas import (
     AliasCreated,
     AliasIn,
@@ -30,8 +32,11 @@ from app.lifecycle_lab.schemas import (
     MemeCreate,
     MemeCreated,
     MemeDetail,
+    MemeQuality,
     MemesOut,
     Overview,
+    QualityReport,
+    ResearchStatusOut,
     RunDetail,
 )
 from app.lifecycle_lab.service import LabConflictError, LabNotFoundError, LifecycleLabService
@@ -88,6 +93,31 @@ async def meme_detail(
     if detail is None:
         raise NotFoundError(f"No tracked meme {slug!r}.")
     return MemeDetail.model_validate(detail)
+
+
+@router.get("/quality", response_model=QualityReport, summary="Forward data-quality report")
+async def quality(session: DbSession) -> QualityReport:
+    return QualityReport.model_validate(await QualityService(session).report(_now()))
+
+
+@router.get(
+    "/memes/{slug}/quality", response_model=MemeQuality, summary="One meme's audit trail"
+)
+async def meme_quality(slug: str, session: DbSession) -> MemeQuality:
+    audit = await QualityService(session).meme_quality(slug, _now())
+    if audit is None:
+        raise NotFoundError(f"No tracked meme {slug!r}.")
+    return MemeQuality.model_validate(audit)
+
+
+@router.get(
+    "/research-status",
+    response_model=ResearchStatusOut,
+    summary="Research state and minimum-evidence gate",
+)
+async def research_status(session: DbSession) -> ResearchStatusOut:
+    status_ = await QualityService(session).research_status(_now())
+    return ResearchStatusOut.model_validate(status_)
 
 
 @router.get("/experiments", response_model=ExperimentsOut, summary="Experiment registry")
@@ -159,7 +189,14 @@ async def add_link(
 ) -> LinkCreated:
     try:
         row = await LifecycleLabService(session).add_manual_link(
-            slug, body.mint, body.confidence, str(admin.id), _now()
+            slug,
+            body.mint,
+            body.confidence,
+            str(admin.id),
+            _now(),
+            method=LinkMethod(body.method),
+            evidence_url=body.evidence_url,
+            evidence_note=body.evidence_note,
         )
     except LabNotFoundError as exc:
         raise NotFoundError(f"No tracked meme {slug!r}.") from exc

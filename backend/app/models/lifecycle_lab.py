@@ -459,3 +459,50 @@ class MllPortfolioSnapshot(Base, UUIDPrimaryKeyMixin):
     __table_args__ = (
         UniqueConstraint("backtest_run_id", "at", name="uq_mll_portfolio_snapshots_run_at"),
     )
+
+
+class MllReplayCheckpoint(Base, UUIDPrimaryKeyMixin, TimestampMixin):
+    """The current resumable state of one forward replay (one row per scope).
+
+    A cache with a proof attached, never a record: deleting a row costs one
+    full replay and changes no result. ``app/lifecycle_lab/checkpoint.py``
+    decides whether the row may be resumed — versions, config, spec hash and
+    the input watermark must all still match. Written in the same transaction
+    as the run's trades, snapshots and events, so a checkpoint never exists
+    without the rows it was computed alongside; it cascades with its run.
+    """
+
+    __tablename__ = "mll_replay_checkpoints"
+
+    #: ``CheckpointScope.key()``: mode | arm | experiment | hindsight.
+    scope_key: Mapped[str] = mapped_column(String(256), nullable=False)
+    mode: Mapped[str] = mapped_column(String(16), nullable=False)
+    arm: Mapped[str] = mapped_column(String(64), nullable=False)
+    experiment_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("mll_experiments.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    backtest_run_id: Mapped[uuid.UUID] = mapped_column(
+        PgUUID(as_uuid=True),
+        ForeignKey("mll_backtest_runs.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    replay_version: Mapped[str] = mapped_column(String(48), nullable=False)
+    #: SHA-256 of the pure engine modules' source (``checkpoint.ENGINE_MODULES``).
+    engine_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    config_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    spec_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    #: The last decision tick folded into ``state``.
+    processed_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    #: ``{meme_id | "*": {kind: "count:sum"}}`` at ``processed_until``.
+    input_watermark: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    #: ``ReplayState.to_json()``.
+    state: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    #: Size of the serialised state, for the cost model.
+    state_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("scope_key", name="uq_mll_replay_checkpoints_scope_key"),
+    )
