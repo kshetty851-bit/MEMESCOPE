@@ -4,9 +4,11 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
 import { api } from "@/lib/api-client";
+import { Character, RigDefs, portraitViewBox } from "@/components/hq/character-rig";
+import type { CharacterDefinition, Emotion, Pose } from "@/lib/hq/characters";
 import {
-  ROBOTS, STAGES, coinKey, liveIndex, stoppedBy,
-  type Checkpoint, type CheckpointEvent, type LiveBelt, type LiveCoin, type Robot,
+  ROBOTS, STAGES, WHALE, coinKey, idleOf, liveIndex, lookOf, stoppedBy,
+  type Checkpoint, type CheckpointEvent, type LiveBelt, type LiveCoin,
 } from "@/lib/hq/checkpoint";
 
 /**
@@ -71,8 +73,11 @@ function useMotion(): boolean {
 }
 
 function useClock(ms: number): number {
-  const [now, setNow] = useState(() => Date.now());
+  // 0 until mounted: the idle moods follow the clock, and the server's
+  // clock is never the browser's, so a real time here breaks hydration.
+  const [now, setNow] = useState(0);
   useEffect(() => {
+    setNow(Date.now());
     const id = window.setInterval(() => setNow(Date.now()), ms);
     return () => window.clearInterval(id);
   }, [ms]);
@@ -141,75 +146,45 @@ function who(coin: LiveCoin): string {
   const i = liveIndex(coin);
   if (coin.status === "bought") return "Bought";
   if (i < 0) return coin.status === "stopped" ? "Wallet gate" : "Checking";
-  return ROBOTS[i]!.name;
+  return `${ROBOTS[i]!.first} · ${ROBOTS[i]!.name}`;
 }
 
-/** One robot. `look` varies the antenna and head so no two neighbours match. */
-function RobotFigure({ robot, index }: { robot: Robot; index: number }) {
-  const look = index % 3;
-  const round = index % 2 === 0 ? 7 : 4;
-  const glyph = robot.name.slice(0, 2).toUpperCase();
+/** One person, drawn with HQ's own character rig, feeling what their check
+ *  is doing: curious while a coin is in front of them, cheering when it
+ *  passes, cross when they stop it, and their own moods in between. */
+function PersonFigure({ index, state, now }: { index: number; state: BotState; now: number }) {
+  const look = lookOf(index);
+  const mood: { emotion: Emotion; pose: Pose } =
+    state === "stop" ? { emotion: "angry", pose: "standing" }
+    : state === "pass" ? { emotion: "happy", pose: "cheering" }
+    : state === "scan" ? { emotion: "surprised", pose: "holding_tablet" }
+    : idleOf(index, now);
+  const box = portraitViewBox(look as CharacterDefinition, "bust");
+  const [x, y, w, h] = box.split(" ").map(Number) as [number, number, number, number];
   return (
-    <svg viewBox="0 0 56 68" width="64" height="78" aria-hidden="true" className="overflow-visible">
-      <polygon className="cp-beam" points="20,26 36,26 48,68 8,68" />
+    <svg viewBox={box} width={64} height={72} aria-hidden="true" className="cp-person overflow-visible">
       <g className="cp-body">
-        <circle className="cp-halo" cx="28" cy="32" r="27" />
-        {look === 0 ? (
-          <>
-            <line x1="28" y1="11" x2="28" y2="4" stroke="var(--cp-metal-hi)" strokeWidth="1.6" />
-            <circle className="cp-tip" cx="28" cy="3.5" r="2.6" />
-          </>
-        ) : look === 1 ? (
-          <>
-            <line x1="22" y1="11" x2="19" y2="4" stroke="var(--cp-metal-hi)" strokeWidth="1.4" />
-            <line x1="34" y1="11" x2="37" y2="4" stroke="var(--cp-metal-hi)" strokeWidth="1.4" />
-            <circle className="cp-tip" cx="19" cy="3.8" r="2" />
-            <circle className="cp-tip" cx="37" cy="3.8" r="2" />
-          </>
-        ) : (
-          <>
-            <line x1="28" y1="11" x2="28" y2="6" stroke="var(--cp-metal-hi)" strokeWidth="1.6" />
-            <path d="M21 6 Q28 -1 35 6 Z" className="cp-metal" />
-            <circle className="cp-tip" cx="28" cy="5" r="1.8" />
-          </>
-        )}
-        <rect className="cp-metal" x="8" y="16" width="5" height="9" rx="2" />
-        <rect className="cp-metal" x="43" y="16" width="5" height="9" rx="2" />
-        <rect className="cp-chassis" x="12" y="10" width="32" height="21" rx={round} />
-        <rect className="cp-visor" x="16" y="14" width="24" height="11" rx="5" />
-        <g className="cp-eyes">
-          <circle className="cp-eye" cx="23" cy="19.5" r="2.6" />
-          <circle className="cp-eye" cx="33" cy="19.5" r="2.6" />
-        </g>
-        <rect className="cp-chassis-dark" x="24" y="27" width="8" height="1.5" rx="0.75" />
-        <rect className="cp-metal" x="25" y="31" width="6" height="3" />
-        <rect className="cp-chassis-dark" x="8" y="36" width="5" height="14" rx="2.5" />
-        <rect className="cp-chassis-dark" x="43" y="36" width="5" height="14" rx="2.5" />
-        <rect className="cp-chassis" x="14" y="34" width="28" height="22" rx="6" />
-        <rect className="cp-screen" x="18" y="38" width="20" height="11" rx="2" strokeWidth="0.8" />
-        <text x="28" y="46" textAnchor="middle" fontSize="7" fontWeight="700"
-              fill="var(--cp-chassis)" fontFamily="ui-monospace, monospace">
-          {glyph}
-        </text>
-        <rect className="cp-metal" x="17" y="56" width="22" height="5" rx="2" />
-        <circle className="cp-metal" cx="21" cy="63" r="3" />
-        <circle className="cp-metal" cx="35" cy="63" r="3" />
+        <circle className="cp-halo" cx={x + w / 2} cy={y + h / 2} r={w * 0.55} />
+        <Character character={look} pose={mood.pose} stance="standing" emotion={mood.emotion} />
       </g>
     </svg>
   );
 }
 
-function SleepingRobot() {
+function SleepingWhale() {
+  const box = portraitViewBox(WHALE as CharacterDefinition, "bust");
   return (
-    <div className="flex w-[76px] flex-col items-center pt-1 opacity-70" data-testid="cp-asleep"
-         title="Whale — 'no single holder owns too much'. Switched off: it needs a paid data plan.">
-      <div className="cp-bot relative" data-state="asleep" style={{ "--cp-chassis": "var(--color-neutral)" } as React.CSSProperties}>
-        <RobotFigure robot={{ id: "whale", name: "Whale", stage: "safety", job: "", codes: [] }}
-                     index={1} />
-        <span className="cp-zz absolute -right-1 top-0 text-[10px] font-bold text-ink-3">z</span>
+    <div className="flex w-[76px] flex-col items-center pt-1 opacity-75" data-testid="cp-asleep"
+         title="Walt · Whale — 'no single holder owns too much'. Switched off: it needs a paid data plan.">
+      <div className="cp-bot relative" data-state="asleep">
+        <svg viewBox={box} width={64} height={72} aria-hidden="true" className="cp-person overflow-visible">
+          <g className="cp-body"><Character character={WHALE} emotion="tired" /></g>
+        </svg>
+        <span className="cp-zz absolute -right-1 top-0 text-[11px] font-bold text-ink-3">z</span>
+        <span className="cp-zz absolute right-2 -top-2 text-[9px] font-bold text-ink-3 [animation-delay:1s]">z</span>
       </div>
-      <div className="mt-0.5 text-[11px] font-medium text-ink-3">Whale</div>
-      <div className="text-[10px] text-ink-3">asleep · off</div>
+      <div className="mt-0.5 text-[11px] font-semibold text-ink-3">Walt</div>
+      <div className="text-[10px] text-ink-3">Whale · asleep</div>
     </div>
   );
 }
@@ -276,7 +251,7 @@ export function CheckpointOffice({ data, live, now: nowProp, motionOverride }: {
         <div>
           <h2 className="text-base font-semibold text-ink">The Checkpoint</h2>
           <p className="text-xs text-ink-3">
-            30 robots check every coin before the real wallet buys it — live, as each coin graduates.
+            30 people check every coin before the real wallet buys it — live, as each coin graduates.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-4 text-xs tabular-nums">
@@ -295,10 +270,12 @@ export function CheckpointOffice({ data, live, now: nowProp, motionOverride }: {
         </div>
       </header>
 
+      {/* The rig's shared gradients, once for all thirty-one figures. */}
+      <svg width="0" height="0" aria-hidden="true" className="absolute"><RigDefs /></svg>
       <div className="grid gap-3 p-4 xl:grid-cols-[minmax(0,4fr)_minmax(0,4fr)_minmax(0,8fr)]">
         {STAGES.map((stage) => (
           <Hall key={stage.id} stage={stage} stateOf={stateOf} data={data} onBelt={onBelt}
-                stamp={stamp} recentStops={recentStops} onPick={setPicked} picked={picked} />
+                stamp={stamp} recentStops={recentStops} onPick={setPicked} picked={picked} now={now} />
         ))}
       </div>
 
@@ -327,7 +304,7 @@ export function CheckpointOffice({ data, live, now: nowProp, motionOverride }: {
           {robot ? (
             <>
               <div className="text-sm font-semibold text-ink">
-                {robot.name} <span className="font-normal text-ink-3">· {STAGES.find((s) => s.id === robot.stage)!.title}</span>
+                {robot.first} · {robot.name} <span className="font-normal text-ink-3">· {STAGES.find((s) => s.id === robot.stage)!.title}</span>
               </div>
               <div className="text-ink-2">{robot.job}</div>
               <div className="mt-0.5 text-ink-3">
@@ -337,7 +314,7 @@ export function CheckpointOffice({ data, live, now: nowProp, motionOverride }: {
               </div>
             </>
           ) : (
-            <span className="text-ink-3">Tap a robot to see what it checks and how many coins it stopped.</span>
+            <span className="text-ink-3">Tap anyone to see what they check and how many coins they stopped.</span>
           )}
         </div>
         <div className="flex items-center gap-2 rounded-lg border border-up/40 bg-up/[0.06] px-3 py-2 text-xs">
@@ -353,7 +330,8 @@ export function CheckpointOffice({ data, live, now: nowProp, motionOverride }: {
   );
 }
 
-function Hall({ stage, stateOf, data, onBelt, stamp, recentStops, onPick, picked }: {
+function Hall({ stage, stateOf, data, onBelt, stamp, recentStops, onPick, picked, now }: {
+  now: number;
   stage: (typeof STAGES)[number];
   stateOf: (i: number) => BotState;
   data: Checkpoint | undefined;
@@ -382,7 +360,7 @@ function Hall({ stage, stateOf, data, onBelt, stamp, recentStops, onPick, picked
             <button key={r.id} type="button" onClick={() => onPick(i)}
                     className="cp-bot relative flex w-[76px] flex-col items-center rounded-lg pt-1"
                     data-state={stateOf(i)} data-testid={`cp-bot-${r.id}`}
-                    aria-pressed={picked === i} aria-label={`${r.name}: ${r.job}`}
+                    aria-pressed={picked === i} aria-label={`${r.first} (${r.name}): ${r.job}`}
                     style={{ "--cp-delay": `${(i * 0.37) % 3}s` } as React.CSSProperties}>
               {here.length ? (
                 <Coin label={here[0]!.coin.symbol} extra={here.length - 1}
@@ -394,11 +372,17 @@ function Hall({ stage, stateOf, data, onBelt, stamp, recentStops, onPick, picked
                   {stamped === "stopped" ? "STOP" : "BUY ✓"}
                 </span>
               ) : null}
-              <RobotFigure robot={r} index={i} />
+              {stamped === "stopped" ? (
+                <span className="cp-bubble" data-testid={`cp-bubble-${r.id}`}>{r.stopLine}</span>
+              ) : stamped === "bought" ? (
+                <span className="cp-bubble cp-bubble-yes">All 30 said yes!</span>
+              ) : null}
+              <PersonFigure index={i} state={stateOf(i)} now={now} />
               <span className="cp-desk" aria-hidden="true">
                 <span className="cp-led" /><span className="cp-led" /><span className="cp-led" />
               </span>
-              <span className={`mt-0.5 text-[11px] font-medium ${picked === i ? "text-ink" : "text-ink-2"}`}>{r.name}</span>
+              <span className={`mt-0.5 text-[11px] font-semibold ${picked === i ? "text-ink" : "text-ink-2"}`}>{r.first}</span>
+              <span className="text-[10px] text-ink-3">{r.name}</span>
               <span className="text-[10px] tabular-nums text-ink-3">
                 {count === null ? "guard" : `${count.toLocaleString("en-US")} stopped`}
               </span>
@@ -411,7 +395,7 @@ function Hall({ stage, stateOf, data, onBelt, stamp, recentStops, onPick, picked
             </button>
           );
         })}
-        {stage.id === "safety" ? <SleepingRobot /> : null}
+        {stage.id === "safety" ? <SleepingWhale /> : null}
       </div>
       <div className="cp-belt h-2.5 w-full" aria-hidden="true" />
     </div>

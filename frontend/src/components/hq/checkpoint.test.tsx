@@ -21,7 +21,7 @@ const data: Checkpoint = {
   ],
 };
 
-describe("the thirty robots", () => {
+describe("the thirty checkers", () => {
   it("are thirty, with their own names, none an HQ employee's", () => {
     expect(ROBOTS).toHaveLength(30);
     const names = ROBOTS.map((r) => r.name.toLowerCase());
@@ -32,6 +32,14 @@ describe("the thirty robots", () => {
     expect(ROBOTS.filter((r) => r.stage === "rule")).toHaveLength(7);
     expect(ROBOTS.filter((r) => r.stage === "gate")).toHaveLength(8);
     expect(ROBOTS.filter((r) => r.stage === "safety")).toHaveLength(15);
+  });
+
+  it("are thirty people with their own first names and a line for every stop", () => {
+    const firsts = ROBOTS.map((r) => r.first.toLowerCase());
+    expect(new Set(firsts).size).toBe(30);
+    const staff = new Set([...EMPLOYEES.map((e) => e.name.toLowerCase()), "karthik", "walt"]);
+    expect(firsts.filter((n) => staff.has(n))).toEqual([]);
+    expect(ROBOTS.every((r) => r.stopLine.length > 0 && r.stopLine.length <= 40)).toBe(true);
   });
 
   it("each refusal code belongs to exactly one robot", () => {
@@ -84,9 +92,9 @@ describe("the Checkpoint office, live", () => {
   it("lists the latest coins in plain words, naming no robot it cannot", () => {
     render(<CheckpointOffice data={data} live={live} motionOverride={false} now={now} />);
     const list = screen.getByTestId("cp-live-list");
-    expect(list).toHaveTextContent("NEWCDepthwaiting for the pool to show20s ago");
-    expect(list).toHaveTextContent("SMOLDepthpool $20,203, under $75,000");
-    expect(list).toHaveTextContent("RUGGOTracer");
+    expect(list).toHaveTextContent("NEWCDiego · Depthwaiting for the pool to show20s ago");
+    expect(list).toHaveTextContent("SMOLDiego · Depthpool $20,203, under $75,000");
+    expect(list).toHaveTextContent("RUGGOTariq · Tracer");
     expect(list).toHaveTextContent("HELDWallet gatepassed the rule; the wallet did not take it");
     expect(list).toHaveTextContent("WINNYBoughtpassed all 30 and was bought");
     expect(screen.getByTestId("cp-bot-scale")).toHaveTextContent("48 stopped");
@@ -107,6 +115,7 @@ describe("the Checkpoint office, live", () => {
       expect(screen.getByTestId("cp-bot-tracer")).toHaveTextContent("FRESH");
       expect(screen.getByTestId("cp-bot-tracer")).toHaveAttribute("data-state", "stop");
       expect(screen.getByTestId("cp-bot-tracer")).toHaveTextContent("STOP");
+      expect(screen.getByTestId("cp-bubble-tracer")).toHaveTextContent(ROBOTS[4]!.stopLine);
     } finally {
       vi.useRealTimers();
     }
