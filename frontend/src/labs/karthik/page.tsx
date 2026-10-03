@@ -294,7 +294,7 @@ export function SizeGrid({ data }: { data: KarthikBook }) {
   if (!w?.floors?.length || !w.sizes?.every((row) => Array.isArray(row.cells))) return null;
   return (
     <>
-      <GridPanel data={data} title="If each trade had been" rows={w.sizes} />
+      <GridPanel data={data} title="If each trade had been — on 10x the money, since the lab started" rows={w.sizes} />
       {/* Karthik, 2026-10-03: the same sizes on ten times the money, shown
           as the balance each would have now. */}
       {w.sizes_wide?.length ? (

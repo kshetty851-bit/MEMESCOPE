@@ -1425,10 +1425,12 @@ async def fresh_held(book: str = "", db: AsyncSession = Depends(get_db)) -> Fres
 #: The trade sizes Karthik's page compares, each on twice its size, as the
 #: book itself runs $50 on $100 (Karthik, 2026-09-30: "$10 on $20, $20 on
 #: $40, $25 on $50"; the small sizes sat on $100 before).
-KARTHIK_WHATIF_SIZES = ((10, 20), (20, 40), (25, 50), (50, 100), (100, 200), (200, 400))
-#: The same sizes on TEN times their size (Karthik, 2026-10-03: "$10 on 100,
-#: 20 on 200 ... 200 on 2000"), a second table under the first.
-KARTHIK_WHATIF_SIZES_WIDE = tuple((t, 10 * t) for t, _ in KARTHIK_WHATIF_SIZES)
+#: Karthik, 2026-10-03: "change size on all 1st table shud be 10x like below
+#: table" -- both tables now run each size on ten times its size.
+KARTHIK_WHATIF_SIZES = tuple((t, 10 * t) for t in (10, 20, 25, 50, 100, 200))
+#: The same sizes (Karthik, 2026-10-03: "$10 on 100, 20 on 200 ... 200 on
+#: 2000"), a second table under the first, counted from 1 Oct.
+KARTHIK_WHATIF_SIZES_WIDE = KARTHIK_WHATIF_SIZES
 #: ...and counted from 1 Oct, 00:00 Dubai (Karthik, 2026-10-03: "show from
 #: october 1 instead").
 KARTHIK_WHATIF_WIDE_FROM = datetime(2026, 9, 30, 20, 0, tzinfo=UTC)
