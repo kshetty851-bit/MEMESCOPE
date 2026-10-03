@@ -40,7 +40,10 @@ export interface KarthikBook {
   busy_skipped: number;
   /** When the book became one trade at a time. Replayed from day 1, so what
    *  came before is a look back chosen after seeing it. */
-  one_at_a_time_since: string;
+  one_at_a_time_since: string | null;
+  /** Since when it buys as many at once as the balance allows (2026-10-03),
+   *  replayed from day 1. */
+  many_at_once_since?: string | null;
   /** The pools the book counts, [low, high) USD, and when that was chosen.
    *  Replayed from day 1, so what came before is a look back. */
   pools_usd?: [number, number | null];

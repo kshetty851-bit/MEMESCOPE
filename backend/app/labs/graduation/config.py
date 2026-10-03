@@ -1076,6 +1076,11 @@ KARTHIK_PREVIOUS_SIZE = (Decimal(100), Decimal(50))
 #: Replayed from the book's first day, so everything before this is a look
 #: back chosen after seeing it; only what follows tests the rule.
 KARTHIK_ONE_AT_A_TIME_AT = datetime(2026, 9, 25, 15, 20, tzinfo=UTC)
+#: ...and when it stopped being one (Karthik, 2026-10-03: "make it multiple as
+#: per available balance"): every signal is bought while a ticket's worth of
+#: the balance is free, on the book and every cell of its grid. Replayed from
+#: day 1 like the rule it replaces.
+KARTHIK_MANY_AT_ONCE_AT = datetime(2026, 10, 3, 13, 15, tzinfo=UTC)
 
 #: The pools Karthik's book counts, [low, high) in USD (None = no top), and
 #: when that was chosen. His request, 2026-09-26: $150k and up, after the

@@ -1457,17 +1457,6 @@ def _opened_order(row: Any) -> tuple[datetime, str]:
     return (row.opened_at, row.mint)
 
 
-def _one_at_a_time(rows: Sequence[Any]) -> list[Any]:
-    """Karthik's rule since 25 Sep, applied from the book's first day: buy only
-    when nothing is held. A signal that arrives while a trade is open is let
-    go, whatever the cash. `rows` must be in the order they opened."""
-    out: list[Any] = []
-    busy_until = None
-    for row in rows:
-        if busy_until is None or row.opened_at >= busy_until:
-            out.append(row)
-            busy_until = row.closed_at
-    return out
 
 
 def _karthik_line(rows: Sequence[Any], sol: Decimal | None, *, size: float,
@@ -1516,9 +1505,10 @@ def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
     (Karthik, 2026-09-27; floors cut to $75k-$200k on 2026-09-30).
 
     Every cell is its own walk from the book's start, on the balance its size
-    is paired with, ONE TRADE AT A TIME on the pools at or above its floor: a
-    floor that never bought a shallow coin was free for the next deep one, so
-    a cell is never the book's trades filtered afterwards. `rows` are the
+    is paired with, buying every signal on the pools at or above its floor
+    while a ticket's worth of its balance is free (2026-10-03; one at a time
+    before): a floor that never spent on a shallow coin had the cash for the
+    next deep one, so a cell is never the book's trades filtered afterwards. `rows` are the
     $75k+ signals his arm took; `small` is the same rule on $25-75k pools
     (`KARTHIK_BAND_BOOKS`). Nothing here changes what the book trades.
     """
@@ -1530,7 +1520,7 @@ def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
         sub = [r for r in signals if float(r.liq_open_usd or 0) >= floor
                and (cap is None or float(r.liq_open_usd or 0) < cap)
                and (since is None or r.opened_at >= since)]
-        return _karthik_line(_one_at_a_time(sub), sol, size=size, capital=capital,
+        return _karthik_line(sub, sol, size=size, capital=capital,
                              cents=cents)
 
     lo, hi = config.KARTHIK_BOOK_POOLS
@@ -1831,7 +1821,8 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     every = [r for r in sorted([*small, *signals], key=_opened_order)
              if lo <= float(r.liq_open_usd or 0)
              and (hi is None or float(r.liq_open_usd or 0) < hi)]
-    rows = _one_at_a_time(every)
+    # As many at once as the balance allows (2026-10-03), not one at a time.
+    rows = every
     walk = _funded_walk(
         [(p.opened_at, p.closed_at, float(p.net_return),
           float(p.impact_open or 0), float(p.impact_close or 0)) for p in rows],
@@ -1883,9 +1874,11 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         "lowest_usd": Decimal(str(walk.low)).quantize(cents),
         "trades": walk.funded,
         "skipped": walk.skipped,
-        # Signals let go because a trade was already open -- the rule, not cash.
+        # Signals let go because a trade was already open: none since the book
+        # buys as many at once as the balance allows (2026-10-03).
         "busy_skipped": len(every) - len(rows),
-        "one_at_a_time_since": config.KARTHIK_ONE_AT_A_TIME_AT,
+        "one_at_a_time_since": None,
+        "many_at_once_since": config.KARTHIK_MANY_AT_ONCE_AT,
         "wins": sum(1 for money in pnl if money > 0),
         "rugs": sum(1 for row, _ in took
                     if float(row.net_return) <= float(config.OPERATOR_RUG_MOVE)),
