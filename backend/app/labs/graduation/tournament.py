@@ -775,6 +775,12 @@ ARMS: tuple[Arm, ...] = (
     Arm("KARTHIK_Q50_5M", "band50_75", 5, quiet=True,
         note="Karthik's rule on $50-75k pools — every graduation with a $50-75k "
              "pool that is still quiet (under 100 trades) when bought, out at 5m"),
+    # BACK 2026-10-03 (Karthik: "add 25k+ pool before 50k+ pool"), after going
+    # with the losing arms on 2026-10-01: the $25k+ column on his page needs
+    # it. Re-seeded from his book's first day by scripts/seed_karthik_bands.py.
+    Arm("KARTHIK_Q25_5M", "band25_50", 5, quiet=True,
+        note="Karthik's rule on $25-50k pools — every graduation with a $25-50k "
+             "pool that is still quiet (under 100 trades) when bought, out at 5m"),
     # Karthik, 2026-09-26: the quiet rule on $75k-$300k pools, for his book and
     # for the real wallet to follow (G-QMID). POST-HOC: the band is where
     # the pool-size splits of his book's first three days made money ($75-150k
@@ -803,12 +809,14 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: 2026-10-01, Karthik: "delete ... the loss arm" — every arm still losing
 #: went: F01_all_2m, F14_symnight_2m (the rug-signal A/B), KARTHIK_Q25_5M and
 #: BAND_55k_2m/_5m/_blk_5m/_quiet_5m. The history below is why there were 20.
-assert len(ARMS) == 13, (
+#: 2026-10-03: KARTHIK_Q25_5M back, for the $25k+ column on his page.
+assert len(ARMS) == 14, (
     "the BASELINE, B3 at four and five minutes, the $500k+flow candidate, the "
     "fast pair E75/E75T, the quiet arms (75k at four and five, 150k, 75-300k), "
-    "the band's pump-only arm and Karthik's two (KARTHIK_QUIET_5M, "
-    f"KARTHIK_Q50_5M) — not {len(ARMS)}. Retired and deleted arms' rules stay in "
-    "ENTRY_RULES, and `_manage` settles what they still held as `arm_retired`")
+    "the band's pump-only arm and Karthik's three (KARTHIK_QUIET_5M, "
+    f"KARTHIK_Q50_5M, KARTHIK_Q25_5M) — not {len(ARMS)}. Retired and deleted "
+    "arms' rules stay in ENTRY_RULES, and `_manage` settles what they still "
+    "held as `arm_retired`")
 assert {a.hold for a in ARMS} == {4, 5}, (
     "Four and five minutes. The two-minute arms (the A/B pair and BAND_55k_2m) "
     "went with every losing arm on 2026-10-01. Before that — from 2026-09-17 — "
@@ -830,9 +838,10 @@ assert all(a.tp is None and a.trail is None for a in ARMS), (
 assert all(a.stop is None or a.stop == Decimal("0.10") for a in ARMS), (
     "one stop level, so the twins differ in ONE thing. Sweeping levels here "
     "would be fitting a parameter on the same data that suggested it")
-assert len([a for a in ARMS if not a.is_control]) == 12, (
+#: Thirteen since KARTHIK_Q25_5M came back (2026-10-03); still under 42.
+assert len([a for a in ARMS if not a.is_control]) == 13, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Twelve arms are now judged against it, so the bar is if anything "
+    "draws. Thirteen arms are now judged against it, so the bar is if anything "
     "CONSERVATIVE — the luckiest of twelve reaches less than the luckiest "
     "of forty-two. Left as it is deliberately: a bar that is too hard costs a "
     "real finding some time, where one that is too easy costs a false one nothing")

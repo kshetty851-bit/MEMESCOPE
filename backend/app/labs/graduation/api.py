@@ -1439,11 +1439,13 @@ KARTHIK_WHATIF_WIDE_FROM = datetime(2026, 9, 30, 20, 0, tzinfo=UTC)
 #: Each column is (at least, under); None = no upper bound. Karthik,
 #: 2026-10-03: the $100k-$150k band beside $75k, the best pool size since
 #: 18 Sep by every graduation's 5-minute return.
-KARTHIK_GRID_COLUMNS = ((50_000, None), (75_000, None), (100_000, 150_000), (100_000, None),
-                        (150_000, None), (200_000, None))
-#: The $50k+ column (Karthik, 2026-10-03: "add 50k pool too") needs his rule on
-#: the $50-75k pools his book skips: this arm, seeded by replay before 26 Sep.
-KARTHIK_BAND_BOOK = "KARTHIK_Q50_5M"
+KARTHIK_GRID_COLUMNS = ((25_000, None), (50_000, None), (75_000, None),
+                        (100_000, 150_000), (100_000, None), (150_000, None),
+                        (200_000, None))
+#: The $25k+ and $50k+ columns (Karthik, 2026-10-03: "add 50k pool too",
+#: then "add 25k+ pool before 50k+ pool") need his rule on the $25-75k pools:
+#: these arms, seeded by replay (Q50 before 26 Sep, Q25 before 3 Oct).
+KARTHIK_BAND_BOOKS = ("KARTHIK_Q25_5M", "KARTHIK_Q50_5M")
 
 
 def _one_at_a_time(rows: Sequence[Any]) -> list[Any]:
@@ -1508,8 +1510,8 @@ def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
     is paired with, ONE TRADE AT A TIME on the pools at or above its floor: a
     floor that never bought a shallow coin was free for the next deep one, so
     a cell is never the book's trades filtered afterwards. `rows` are the
-    $75k+ signals his arm took; `small` is the same rule on $50-75k pools
-    (`KARTHIK_BAND_BOOK`). Nothing here changes what the book trades.
+    $75k+ signals his arm took; `small` is the same rule on $25-75k pools
+    (`KARTHIK_BAND_BOOKS`). Nothing here changes what the book trades.
     """
     signals = sorted([*small, *rows], key=lambda r: r.opened_at)
 
@@ -1802,10 +1804,11 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     # from day 1 on the book AND the grid: a coin bought more than two minutes
     # after it graduated, or of unknown age, never happened. EVO was 186s.
     rows = [r for r in rows if _fresh_entry(r)]
-    # His rule on the $50-75k pools, for the grid's $50k+ column only.
+    # His rule on the $25-75k pools: the book reaches down to $50k, the grid
+    # to $25k.
     small = [r for r in (await db.scalars(
         select(GradPaperPosition)
-        .where(GradPaperPosition.book == KARTHIK_BAND_BOOK,
+        .where(GradPaperPosition.book.in_(KARTHIK_BAND_BOOKS),
                GradPaperPosition.closed_at.is_not(None),
                GradPaperPosition.excluded.is_(None),
                GradPaperPosition.net_return.is_not(None),
