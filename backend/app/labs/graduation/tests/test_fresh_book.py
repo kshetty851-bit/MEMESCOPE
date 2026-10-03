@@ -363,8 +363,10 @@ async def test_the_grid_is_every_size_by_every_pool_floor() -> None:
     # The second table (2026-10-03): the same sizes on ten times their size.
     assert [(r["ticket_usd"], r["capital_usd"]) for r in w["sizes_wide"]] == [
         (10, 100), (20, 200), (25, 250), (50, 500), (100, 1000), (200, 2000)]
+    # Counted from 1 Oct (2026-10-03): a trade on the book's first day is not in it.
     wide = w["sizes_wide"][-1]["cells"][0]
-    assert (wide["pnl_usd"], wide["balance_usd"]) == (Decimal("20.00"), Decimal("2020.00"))
+    assert (wide["trades"], wide["balance_usd"]) == (0, Decimal("2000.00"))
+    assert w["wide_from"] == "2026-09-30T20:00:00+00:00"
 
 
 async def test_each_floor_takes_one_trade_at_a_time_on_its_own_pools() -> None:

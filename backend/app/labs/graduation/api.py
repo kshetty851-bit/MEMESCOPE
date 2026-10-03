@@ -1429,6 +1429,9 @@ KARTHIK_WHATIF_SIZES = ((10, 20), (20, 40), (25, 50), (50, 100), (100, 200), (20
 #: The same sizes on TEN times their size (Karthik, 2026-10-03: "$10 on 100,
 #: 20 on 200 ... 200 on 2000"), a second table under the first.
 KARTHIK_WHATIF_SIZES_WIDE = tuple((t, 10 * t) for t, _ in KARTHIK_WHATIF_SIZES)
+#: ...and counted from 1 Oct, 00:00 Dubai (Karthik, 2026-10-03: "show from
+#: october 1 instead").
+KARTHIK_WHATIF_WIDE_FROM = datetime(2026, 9, 30, 20, 0, tzinfo=UTC)
 #: The pool floors across the page's grid (Karthik, 2026-09-27).
 #: Karthik, 2026-09-30: "remove 25k 50k ... 300k 500k", keep 200k.
 KARTHIK_GRID_FLOORS = (75_000, 100_000, 150_000, 200_000)
@@ -1500,8 +1503,10 @@ def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
     """
     signals = sorted(rows, key=lambda r: r.opened_at)
 
-    def cell(floor: int, size: float, capital: float) -> dict[str, Any]:
-        sub = [r for r in signals if float(r.liq_open_usd or 0) >= floor]
+    def cell(floor: int, size: float, capital: float,
+             since: datetime | None = None) -> dict[str, Any]:
+        sub = [r for r in signals if float(r.liq_open_usd or 0) >= floor
+               and (since is None or r.opened_at >= since)]
         return _karthik_line(_one_at_a_time(sub), sol, size=size, capital=capital,
                              cents=cents)
 
@@ -1513,8 +1518,10 @@ def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
                    "current": (t, c) == (ticket, capital),
                    "cells": [cell(f, float(t), float(c)) for f in KARTHIK_GRID_FLOORS]}
                   for t, c in KARTHIK_WHATIF_SIZES],
+        "wide_from": KARTHIK_WHATIF_WIDE_FROM.isoformat(),
         "sizes_wide": [{"ticket_usd": t, "capital_usd": c, "current": False,
-                        "cells": [cell(f, float(t), float(c)) for f in KARTHIK_GRID_FLOORS]}
+                        "cells": [cell(f, float(t), float(c), KARTHIK_WHATIF_WIDE_FROM)
+                                  for f in KARTHIK_GRID_FLOORS]}
                        for t, c in KARTHIK_WHATIF_SIZES_WIDE],
     }
 
