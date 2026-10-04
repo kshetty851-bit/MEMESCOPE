@@ -591,7 +591,17 @@ async def checkpoint(session: DbSession) -> dict[str, object]:
         key=lambda e: e["at"], reverse=True)[:CHECKPOINT_STOPPED]
     feed = sorted([{"kind": "bought", "mint": m, "at": at} for m, at in bought] + stops,
                   key=lambda e: e["at"], reverse=True)
-    mints = [e["mint"] for e in feed]
+    # The main wallet's buys that rugged in the last day (2026-10-04): the only
+    # thing the office's manager may scold for. Names and times only.
+    rugged = (await session.execute(
+        select(RealWalletPosition.mint_address, RealWalletPosition.closed_at)
+        .where(RealWalletPosition.wallet_public_key == owner,
+               RealWalletPosition.status == "CLOSED",
+               RealWalletPosition.closed_at >= since,
+               RealWalletPosition.exit_actual_output_amount
+               < RealWalletPosition.entry_actual_input_amount / 2)
+        .order_by(RealWalletPosition.closed_at.desc()).limit(CHECKPOINT_STOPPED))).all()
+    mints = [e["mint"] for e in feed] + [m for m, _ in rugged]
     # The lab's record first; the wallet's own token list for what it missed.
     symbols = {m: s for m, s in (await session.execute(
         select(GradToken.mint, GradToken.symbol).where(GradToken.mint.in_(mints)))).all() if s}
@@ -606,6 +616,7 @@ async def checkpoint(session: DbSession) -> dict[str, object]:
         "feed": [{"kind": e["kind"], "symbol": symbols.get(e["mint"]),
                   "at": e["at"].isoformat(), "code": e.get("code"),
                   "rugged": e.get("rugged")} for e in feed],
+        "rugged_buys": [{"symbol": symbols.get(m), "at": at.isoformat()} for m, at in rugged],
     }
 
 

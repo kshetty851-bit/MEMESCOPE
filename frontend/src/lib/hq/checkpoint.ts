@@ -84,6 +84,9 @@ export interface Checkpoint {
   safety_checked: number;
   safety_allowed: number;
   feed: CheckpointEvent[];
+  /** The main wallet's buys that rugged in the last day (2026-10-04): the
+   *  only thing the office's manager scolds for. */
+  rugged_buys?: { symbol: string | null; at: string }[];
 }
 
 const BY_CODE = new Map(ROBOTS.flatMap((r, i) => r.codes.map((c) => [c, i] as const)));
