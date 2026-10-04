@@ -49,8 +49,9 @@ function useCheckpoint() {
   return useQuery({
     queryKey: ["hq", "checkpoint"],
     queryFn: () => api.get<Checkpoint>("/real-wallet/checkpoint"),
-    refetchInterval: 60_000,
-    staleTime: 30_000,
+    // Every 15s (2026-10-04): the homepage shows these counts "in real time".
+    refetchInterval: 15_000,
+    staleTime: 10_000,
   });
 }
 
@@ -406,4 +407,87 @@ export function CheckpointLive() {
   const q = useCheckpoint();
   const live = useLive();
   return <CheckpointOffice data={q.data} live={live.data} />;
+}
+
+/**
+ * THE ROSTER (Karthik, 2026-10-04: "below display their rules and achievements
+ * so far and change in real time"). Each person's check in plain words and how
+ * many coins it has stopped, from the same records as the office above. The
+ * wallet gate's people own no refusal codes (their refusals are not recorded),
+ * so they show what they do rather than a count nobody kept.
+ */
+export function CheckpointRoster() {
+  const { data } = useCheckpoint();
+  const stops = data ? Object.values(data.stopped_by).reduce((a, b) => a + b, 0) : null;
+  const rugBlocks = data
+    ? ROBOTS.filter((r) => r.stage === "rule")
+        .reduce((n, r) => n + (stoppedBy(r, data) ?? 0), 0)
+    : null;
+  const num = (v: number | null | undefined) => (v == null ? "—" : v.toLocaleString("en-US"));
+  return (
+    <section className="cp mt-4 overflow-hidden rounded-xl border border-line p-4" data-testid="cp-roster">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="text-base font-semibold text-ink">Their rules, and what they have stopped</h3>
+        <span className="flex items-center gap-1.5 text-[11px] text-ink-3">
+          <span className="cp-live-dot inline-block h-1.5 w-1.5 rounded-full bg-up" aria-hidden="true" />
+          updates every 15 seconds
+        </span>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {[
+          ["Coins stopped", num(stops), "text-down"],
+          ["Rug blocks", num(rugBlocks), "text-down"],
+          ["Safety-checked", num(data?.safety_checked), "text-ink"],
+          ["Passed all checks", num(data?.safety_allowed), "text-up"],
+        ].map(([label, value, tone]) => (
+          <div key={label} className="rounded-lg border border-line bg-ink/[0.02] p-3">
+            <div className="text-[10px] uppercase tracking-wider text-ink-3">{label}</div>
+            <div className={`mt-0.5 text-xl font-semibold tabular-nums ${tone}`}>{value}</div>
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 grid gap-4 lg:grid-cols-3">
+        {STAGES.map((stage) => (
+          <div key={stage.id} className="cp-hall rounded-lg border p-3" data-stage={stage.id}>
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-ink-2">{stage.title}</div>
+            <div className="text-[11px] text-ink-3">{stage.blurb}</div>
+            <ul className="mt-2 divide-y divide-line/60">
+              {ROBOTS.filter((r) => r.stage === stage.id).map((r) => {
+                const n = stoppedBy(r, data);
+                return (
+                  <li key={r.id} className="flex items-start justify-between gap-3 py-1.5" data-testid={`cp-roster-${r.id}`}>
+                    <div className="min-w-0">
+                      <div className="text-[12px] font-semibold text-ink">
+                        {r.first} <span className="font-normal text-ink-3">· {r.name}</span>
+                      </div>
+                      <div className="text-[11px] leading-snug text-ink-2">{r.job}</div>
+                    </div>
+                    <div className="shrink-0 text-right text-[11px] tabular-nums">
+                      {n == null ? (
+                        <span className="text-ink-3">on duty</span>
+                      ) : (
+                        <span className={n > 0 ? "font-semibold text-down" : "text-ink-3"}>
+                          {n.toLocaleString("en-US")} stopped
+                        </span>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** The homepage's view: the office at work, then the roster under it. */
+export function CheckpointPublic() {
+  return (
+    <>
+      <CheckpointLive />
+      <CheckpointRoster />
+    </>
+  );
 }

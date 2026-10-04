@@ -22,6 +22,11 @@ EXEMPT_EXACT_PATHS = frozenset(
         # The homepage's journey section (Karthik, 2026-09-27): lab headline
         # figures, project counts, and today's real-wallet trade/win COUNTS.
         "/api/v1/journey",
+        # The Checkpoint office on the homepage (Karthik, 2026-10-04: "show
+        # this 30 agents and their real time work"): coin names, times,
+        # refusal codes and counts only — no address, balance or amount.
+        "/api/v1/real-wallet/checkpoint",
+        "/api/v1/real-wallet/checkpoint/live",
     }
 )
 

@@ -67,3 +67,8 @@ def test_only_the_journey_path_opens_to_the_public():
     assert exempt("/api/v1/journey")
     assert not exempt("/api/v1/journey/x")
     assert not exempt("/api/v1/real-wallet/status")
+    # The homepage's Checkpoint office (2026-10-04): those two reads only.
+    assert exempt("/api/v1/real-wallet/checkpoint")
+    assert exempt("/api/v1/real-wallet/checkpoint/live")
+    assert not exempt("/api/v1/real-wallet/checkpoint/live/x")
+    assert not exempt("/api/v1/real-wallet/family")
