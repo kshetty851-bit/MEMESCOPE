@@ -7,6 +7,7 @@ import { RugsPreventedLive } from "@/components/rugs-prevented";
 import { Panel, PanelHeader, PanelTitle } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
+import { WorldClocks } from "./world-clocks";
 
 import { useKarthikBook, usePumpfunDays, useWalletsProfit } from "./hooks";
 import type {
@@ -801,6 +802,8 @@ export function KarthikLabPage() {
     <div className="min-w-0 space-y-4">
       {/* The thirty pre-buy checks, live, on top (Karthik, 2026-10-03). */}
       <CheckpointLive />
+      {/* UAE and USA clocks (Karthik, 2026-10-04). */}
+      <WorldClocks />
       {/* Two columns from 1150px: the counts and their boxes on the right, and
           the header grows to fit them rather than lying over the rule book. */}
       <div className="grid gap-x-8 gap-y-2 min-[1150px]:grid-cols-[minmax(0,1fr)_auto]">
