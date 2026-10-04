@@ -26,7 +26,10 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-POOL_FLOOR_USD = Decimal(75_000)
+#: $50k since 2026-10-04: the wallets trade G-Q50 (quiet $50k+), whose paper
+#: arm is BASE_50k_quiet_5m (Karthik: "showing pool check under 75k instead of
+#: 50k ... fix it").
+POOL_FLOOR_USD = Decimal(50_000)
 #: How long to wait for a pool reading before calling it missing.
 POOL_WAIT = timedelta(minutes=3)
 #: The rule decides within a few minutes of the pool showing.
@@ -34,7 +37,7 @@ RULE_WAIT = timedelta(minutes=4)
 #: The wallet acts within seconds of its rule's entry.
 GATE_WAIT = timedelta(seconds=90)
 BASELINE_BOOK = "BASE_75k_5m"
-QUIET_BOOK = "BASE_75k_quiet_5m"
+QUIET_BOOK = "BASE_50k_quiet_5m"
 
 
 @dataclass
@@ -73,7 +76,8 @@ def where(coin: Coin, now: datetime) -> dict[str, Any]:
             return out("stopped", "its pool never showed", robot="depth")
         return out("checking", "waiting for the pool to show", robot="depth")
     if coin.liquidity < POOL_FLOOR_USD:
-        return out("stopped", f"pool ${coin.liquidity:,.0f}, under $75,000", robot="depth")
+        return out("stopped", f"pool ${coin.liquidity:,.0f}, under ${POOL_FLOOR_USD:,.0f}",
+                   robot="depth")
     if coin.blocked:
         return out("stopped", "a rug block refused it", code=coin.blocked)
     if QUIET_BOOK in coin.books:

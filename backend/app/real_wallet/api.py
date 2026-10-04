@@ -533,7 +533,7 @@ async def _values(session: Any, addresses: list[str], now: datetime) -> list[Dec
 
 
 #: The rule's pool floor: a refused coin under it would never have been bought.
-CHECKPOINT_FLOOR_USD = 75_000
+CHECKPOINT_FLOOR_USD = 50_000   # G-Q50's floor since 2026-10-04
 #: The belt's mix: the latest buys AND the latest stops, so a day of buying
 #: still shows the rug bin working (2026-10-02).
 CHECKPOINT_BOUGHT = 8
@@ -544,7 +544,7 @@ CHECKPOINT_STOPPED = 6
 async def checkpoint(session: DbSession) -> dict[str, object]:
     """HQ's Checkpoint (Karthik, 2026-10-02: "show this 30 checks as 30
     agents"). Real records only: the rug blocks' refusals
-    (`GradOperator.blocked_reason`, $75k+ pools), the safety check's REJECT
+    (`GradOperator.blocked_reason`, $50k+ pools), the safety check's REJECT
     reasons, and the coins the main wallet bought. The wallet gate's own
     refusals are not recorded anywhere, so they are not counted here.
     Names and figures only, like `/status`."""
