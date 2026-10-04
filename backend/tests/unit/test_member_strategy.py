@@ -42,3 +42,17 @@ def test_a_wallet_limit_replaces_the_platforms_one(monkeypatch: pytest.MonkeyPat
 def test_the_owner_limit_is_off_unless_production_sets_it() -> None:
     # docker-compose.yml sets 25 in production; the user wallets keep theirs.
     assert settings.REAL_WALLET_OWNER_MAX_OPEN is None
+
+
+def test_one_limit_answer_for_the_driver_and_the_executor(
+        monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.real_wallet import family_wallets
+    monkeypatch.setattr(settings, "REAL_WALLET_PUBLIC_KEY", "OwnerKey")
+    monkeypatch.setattr(settings, "REAL_WALLET_OWNER_MAX_OPEN", 25)
+    monkeypatch.setattr(settings, "REAL_WALLET_MEMBER_MAX_OPEN", {"USER1": 25})
+    monkeypatch.setattr(family_wallets, "member_for",
+                        lambda key: {"User1Key": "USER1", "User2Key": "USER2"}.get(key))
+    assert family_wallets.max_open_for("OwnerKey") == 25
+    assert family_wallets.max_open_for("User1Key") == 25
+    assert family_wallets.max_open_for("User2Key") is None      # the platform's 1
+    assert family_wallets.max_open_for("Stranger") is None

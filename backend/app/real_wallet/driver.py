@@ -204,7 +204,7 @@ class RealWalletDriver:
                 equity_usd=equity_usd,
                 side="BUY",
                 spend_lamports=lamports,
-                max_open_positions=settings.REAL_WALLET_MEMBER_MAX_OPEN.get(account.member),
+                max_open_positions=family_wallets.max_open_for(wallet),
             ),
         )
         if not decision.allowed:
@@ -341,7 +341,7 @@ class RealWalletDriver:
                 equity_usd=equity_usd,
                 side="BUY",
                 spend_lamports=lamports,
-                max_open_positions=settings.REAL_WALLET_OWNER_MAX_OPEN,
+                max_open_positions=family_wallets.max_open_for(wallet),
             ),
         )
         if not decision.allowed:
