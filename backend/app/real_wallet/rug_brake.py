@@ -1,4 +1,4 @@
-"""The rug brake: one more rug while the main wallet is under $150 stops the
+"""The rug brake: one more rug while the main wallet is under $50 stops the
 trading, across every wallet (Karthik, 2026-10-03: "if we have 1 more rug
 before 150$ main balance, stop the trading accros all wallets").
 
@@ -32,11 +32,14 @@ logger = get_logger(__name__)
 #: When Karthik asked for it (11:46 Dubai): the morning's two rugs came before.
 ARMED_AT = datetime(2026, 10, 3, 7, 46, tzinfo=UTC)
 #: The main wallet's worth under which one more rug stops everything.
-BELOW_USD = Decimal(150)
+#: $150 until 2026-10-04, when Karthik lowered it ("change rug brake to only
+#: stop below $50") after it stopped every wallet at $129.31 on TVKjjv and he
+#: moved the wallets to $10 trades.
+BELOW_USD = Decimal(50)
 ACTOR = "rug_brake"
 
 #: Rugs already weighed in this process, so a rug that came while the wallet
-#: was worth $150+ is not weighed again on every pass.
+#: was worth `BELOW_USD`+ is not weighed again on every pass.
 _weighed: set[uuid.UUID] = set()
 
 

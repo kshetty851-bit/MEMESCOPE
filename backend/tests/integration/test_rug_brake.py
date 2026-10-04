@@ -1,5 +1,6 @@
 """The rug brake (Karthik, 2026-10-03): one more rug while the main wallet is
-under $150 stops the trading for every wallet; nothing else stops it."""
+under $150 stops the trading for every wallet; nothing else stops it.
+Lowered to $50 on 2026-10-04 at his request."""
 
 from __future__ import annotations
 
@@ -42,26 +43,26 @@ def _fresh():
     rug_brake._weighed.clear()
 
 
-async def test_a_rug_under_150_stops_everything(db_session):
+async def test_a_rug_under_50_stops_everything(db_session):
     await _on(db_session)
     db_session.add(closed("RUG", at=START + timedelta(minutes=30), got_back="0.01",
                           wallet="UserOne"))
     await db_session.flush()
     now = START + timedelta(minutes=31)
-    assert await rug_brake.pull_if_due(db_session, now, worth("125.23")) is True
+    assert await rug_brake.pull_if_due(db_session, now, worth("45.23")) is True
     state = await AutotradeSwitchService(db_session).state()
     assert (state.enabled, state.stopped_by) == (False, "rug_brake")
-    assert "$125.23" in state.stop_reason
+    assert "$45.23" in state.stop_reason
 
 
-async def test_a_rug_at_150_or_more_does_not_stop_it_and_is_not_weighed_again(db_session):
+async def test_a_rug_at_50_or_more_does_not_stop_it_and_is_not_weighed_again(db_session):
     await _on(db_session)
     db_session.add(closed("RUG", at=START + timedelta(minutes=30), got_back="0.01"))
     await db_session.flush()
     now = START + timedelta(minutes=31)
-    assert await rug_brake.pull_if_due(db_session, now, worth("150.00")) is False
+    assert await rug_brake.pull_if_due(db_session, now, worth("50.00")) is False
     # The same rug, the wallet since fallen: not this rug's to stop.
-    assert await rug_brake.pull_if_due(db_session, now, worth("90.00")) is False
+    assert await rug_brake.pull_if_due(db_session, now, worth("30.00")) is False
     assert (await AutotradeSwitchService(db_session).state()).enabled is True
 
 
@@ -76,7 +77,7 @@ async def test_winners_old_rugs_and_rugs_before_the_last_start_do_not_count(db_s
     await _on(db_session)
     await db_session.flush()
     later = START + timedelta(hours=1)
-    assert await rug_brake.pull_if_due(db_session, later, worth("80")) is False
+    assert await rug_brake.pull_if_due(db_session, later, worth("20")) is False
     assert (await AutotradeSwitchService(db_session).state()).enabled is True
 
 
@@ -86,7 +87,7 @@ async def test_an_unreadable_worth_waits_for_the_next_pass(db_session):
     await db_session.flush()
     now = START + timedelta(minutes=31)
     assert await rug_brake.pull_if_due(db_session, now, worth(None)) is False
-    assert await rug_brake.pull_if_due(db_session, now, worth("120")) is True
+    assert await rug_brake.pull_if_due(db_session, now, worth("40")) is True
 
 
 async def test_nothing_happens_while_already_stopped(db_session):
