@@ -37,3 +37,8 @@ def test_a_wallet_limit_replaces_the_platforms_one(monkeypatch: pytest.MonkeyPat
     assert PolicyReason.MAX_OPEN_POSITIONS in _reasons(1, None)
     assert PolicyReason.MAX_OPEN_POSITIONS not in _reasons(1, 25)
     assert PolicyReason.MAX_OPEN_POSITIONS in _reasons(25, 25)
+
+
+def test_the_owner_limit_is_off_unless_production_sets_it() -> None:
+    # docker-compose.yml sets 25 in production; the user wallets keep theirs.
+    assert settings.REAL_WALLET_OWNER_MAX_OPEN is None

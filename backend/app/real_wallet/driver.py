@@ -341,6 +341,7 @@ class RealWalletDriver:
                 equity_usd=equity_usd,
                 side="BUY",
                 spend_lamports=lamports,
+                max_open_positions=settings.REAL_WALLET_OWNER_MAX_OPEN,
             ),
         )
         if not decision.allowed:

@@ -86,8 +86,8 @@ def test_each_live_arm_copies_its_own_paper_book() -> None:
                                           "G-Q50"}
     assert live_spec.pool_floor("G-Q50") == 50_000
     assert live_spec.PAPER_BOOKS["G-Q50"] == "BASE_50k_quiet_5m"
-    # USER 1's arm only: never offered at the owner's Start.
-    assert "G-Q50" not in live_spec.OFFERED
+    # USER 1's since 2026-10-03, offered at the owner's Start since 2026-10-04.
+    assert "G-Q50" in live_spec.OFFERED
     # The $75k-$300k band (2026-09-26): reported by its lower edge, the arm's
     # own rule refuses $300k and up; same five-minute clock as G-QUIET.
     assert live_spec.pool_floor("G-QMID") == 75_000
