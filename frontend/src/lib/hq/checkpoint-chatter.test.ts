@@ -4,7 +4,8 @@ import { ROBOTS, type Checkpoint } from "@/lib/hq/checkpoint";
 import { EMPLOYEES } from "@/lib/hq/employees";
 
 import {
-  MANAGER, award, banter, praiseBuy, praiseStop, scoldRug, topStopper, voiceOf,
+  LINE_TEMPLATES, MANAGER, award, banter, praiseBuy, praiseStop, scoldRug, solo, topStopper,
+  voiceOf,
 } from "./checkpoint-chatter";
 
 const data: Checkpoint = {
@@ -15,7 +16,7 @@ const data: Checkpoint = {
 describe("the office's talk", () => {
   it("praises the person who really stopped the coin, by name and coin", () => {
     const i = ROBOTS.findIndex((r) => r.id === "recall");
-    for (let seed = 0; seed < 4; seed++) {
+    for (let seed = 0; seed < 40; seed++) {
       const line = praiseStop(i, "TVKJ", seed);
       expect(line.who).toBe("manager");
       expect(line.text).toContain("Rosa");
@@ -46,6 +47,24 @@ describe("the office's talk", () => {
       const v = voiceOf(who);
       expect(v.pitch).toBeGreaterThan(0.5);
       expect(v.pitch).toBeLessThan(1.5);
+    }
+  });
+});
+
+
+describe("plenty to say", () => {
+  it("has well over a hundred line templates, every one filled in", () => {
+    expect(LINE_TEMPLATES).toBeGreaterThan(150);
+    for (let seed = 0; seed < 300; seed++) {
+      const [ask, answer] = banter(seed);
+      for (const line of [ask, answer, solo(seed)]) {
+        expect(line.text).not.toMatch(/[{}]/);
+        expect(ROBOTS[line.who as number]).toBeDefined();
+      }
+    }
+    for (let seed = 0; seed < 40; seed++) {
+      expect(scoldRug("ADTF", seed).text).toContain("ADTF");
+      expect(praiseBuy("WINNY", seed).text).toContain("WINNY");
     }
   });
 });
