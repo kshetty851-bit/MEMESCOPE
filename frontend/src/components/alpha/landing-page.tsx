@@ -6,7 +6,6 @@ import { useCallback, useEffect, useState } from "react";
 
 import { LogoMark } from "@/components/brand/logo";
 import { Wordmark, WordmarkSubtitle } from "@/components/brand/wordmark";
-import { Crew, EnterHq } from "@/components/alpha/crew";
 import { AlphaAccess } from "@/components/alpha/alpha-access";
 import { HeroMascot, type MascotState } from "@/components/alpha/hero-mascot";
 import { Journey } from "@/components/alpha/journey";
@@ -21,6 +20,12 @@ import { cn } from "@/lib/utils";
 
 /** The moon landing, as a lazy chunk: not in the page's first load. */
 const loadMoonIntro = () => import("@/components/moon-intro/moon-intro");
+/** The Checkpoint office, loaded after the page so HQ's drawings stay out of
+ *  the homepage's first download. */
+const CheckpointPublic = dynamic(
+  () => import("@/components/hq/checkpoint").then((m) => m.CheckpointPublic),
+  { ssr: false },
+);
 const MoonIntro = dynamic(loadMoonIntro, { ssr: false });
 
 /**
@@ -179,20 +184,23 @@ export function LandingPage() {
       {approved && <MoonIntro onComplete={enter} />}
 
       {/*
-        THE CREW COMES FIRST, AND THAT ORDERING IS THE FIX.
-
-        This sat *after* `HomepageIntelligence`, which is 4,753px tall on a
-        1440x900 desktop — so the team section began at y=5,653 on a 6,600px
-        page. It was rendered, it was correct, and no one was ever going to
-        scroll to it. "Deployed" and "visible" turned out to be different
-        claims, and only the first one had been checked.
-
-        The order now tells the product's story in the order it happens: this
-        is who we are, this is the door they work behind, and *then* the live
-        intelligence for anyone who wants the detail.
+        THE CHECKPOINT, WHERE THE CREW WAS (Karthik, 2026-10-04: "remove the
+        memescope team on homepage before login, and show this 30 agents and
+        their real time work"). First after the hero, for the reason the crew
+        was: what sits below the intelligence is never scrolled to.
       */}
-      <Crew />
-      <EnterHq />
+      <section className="relative mx-auto w-full max-w-[80rem] px-4 py-10 lg:px-10" aria-labelledby="checkpoint-heading">
+        <h2 id="checkpoint-heading" className="text-2xl font-semibold text-ink">
+          30 checks, live
+        </h2>
+        <p className="mt-1 max-w-[70ch] text-sm text-ink-2">
+          Every new pump.fun coin walks past these thirty before the real wallet may buy it.
+          This is them at work right now.
+        </p>
+        <div className="mt-4">
+          <CheckpointPublic />
+        </div>
+      </section>
       <WhatRunsHere />
       <Journey />
       <SiteFooter />
