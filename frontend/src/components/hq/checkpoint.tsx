@@ -10,6 +10,11 @@ import {
   ROBOTS, STAGES, WHALE, coinKey, idleOf, liveIndex, lookOf, stoppedBy,
   type Checkpoint, type CheckpointEvent, type LiveBelt, type LiveCoin,
 } from "@/lib/hq/checkpoint";
+import {
+  MANAGER, MANAGER_LOOK, award, banter, motivate, praiseBuy, praiseStop, scoldRug, topStopper,
+  voiceOf,
+  type Line,
+} from "@/lib/hq/checkpoint-chatter";
 
 /**
  * THE CHECKPOINT (Karthik, 2026-10-02: "show this 30 checks as 30 agents look
@@ -153,12 +158,15 @@ function who(coin: LiveCoin): string {
 /** One person, drawn with HQ's own character rig, feeling what their check
  *  is doing: curious while a coin is in front of them, cheering when it
  *  passes, cross when they stop it, and their own moods in between. */
-function PersonFigure({ index, state, now }: { index: number; state: BotState; now: number }) {
+function PersonFigure({ index, state, now, talking }: {
+  index: number; state: BotState; now: number; talking?: Emotion;
+}) {
   const look = lookOf(index);
   const mood: { emotion: Emotion; pose: Pose } =
     state === "stop" ? { emotion: "angry", pose: "standing" }
     : state === "pass" ? { emotion: "happy", pose: "cheering" }
     : state === "scan" ? { emotion: "surprised", pose: "holding_tablet" }
+    : talking ? { emotion: talking, pose: "talking_briefly" }
     : idleOf(index, now);
   const box = portraitViewBox(look as CharacterDefinition, "bust");
   const [x, y, w, h] = box.split(" ").map(Number) as [number, number, number, number];
@@ -199,6 +207,148 @@ function Coin({ label, extra, state }: { label: string | null; extra: number; st
   );
 }
 
+/** How long each line stays up. */
+const TALK_MS = 4_500;
+const VOICES_KEY = "memescope.checkpointVoices";
+/** macOS's joke voices (an organ, bells, a whisper...): a person never sounds like these. */
+const NOVELTY_VOICES =
+  /albert|bad news|bahh|bells|boing|bubbles|cellos|good news|jester|organ|superstar|trinoids|whisper|wobble|zarvox|fred|junior|ralph|kathy|grandma|grandpa|eddy|flo|reed|rocko|sandy|shelley/i;
+
+/**
+ * The office's talk (2026-10-04). The manager reacts to REAL events as they
+ * land on the belt — a stop, a buy, a bought coin that rugged — and between
+ * them hands out the award (from the stop counts on record), nudges people,
+ * or two neighbours chat. One line at a time, every few seconds.
+ */
+function useChatter(tracks: Track[], data: Checkpoint | undefined, on: boolean): Line | null {
+  const [line, setLine] = useState<Line | null>(null);
+  const queue = useRef<Line[]>([]);
+  const heard = useRef<Set<string> | null>(null);
+  const scolded = useRef<Set<string>>(new Set());
+  const tick = useRef(0);
+
+  // Real events, each once. What was already on the belt when the page opened
+  // is not news.
+  useEffect(() => {
+    const settled = tracks.filter((t) => t.coin.status !== "checking" && t.shown === t.target);
+    if (heard.current === null) {
+      heard.current = new Set(settled.map((t) => coinKey(t.coin)));
+      return;
+    }
+    for (const t of settled) {
+      const key = coinKey(t.coin);
+      if (heard.current.has(key)) continue;
+      heard.current.add(key);
+      const seed = Date.now() / 1000;
+      if (t.coin.status === "bought") queue.current.push(praiseBuy(t.coin.symbol, seed));
+      // A stop the records pin on no one (the wallet gate's) has no one to praise.
+      else if (ROBOTS[t.target]) queue.current.push(praiseStop(t.target, t.coin.symbol, seed));
+    }
+  }, [tracks]);
+
+  useEffect(() => {
+    for (const r of data?.rugged_buys ?? []) {
+      const key = `${r.symbol}|${r.at}`;
+      if (scolded.current.has(key)) continue;
+      scolded.current.add(key);
+      queue.current.push(scoldRug(r.symbol, Date.parse(r.at) / 1000));
+    }
+  }, [data]);
+
+  useEffect(() => {
+    if (!on) return;
+    const id = window.setInterval(() => {
+      tick.current += 1;
+      const seed = Math.floor(Date.now() / 1000);
+      let next = queue.current.shift() ?? null;
+      if (!next && tick.current % 7 === 0) next = award(data, seed) ?? motivate(seed);
+      else if (!next && tick.current % 5 === 0) next = motivate(seed);
+      else if (!next) {
+        const [ask, answer] = banter(seed);
+        next = ask;
+        queue.current.unshift(answer);
+      }
+      setLine(next);
+    }, TALK_MS);
+    return () => window.clearInterval(id);
+  }, [on, data]);
+
+  return line;
+}
+
+/** Speak each new line aloud, in that person's own voice, when voices are on. */
+function useVoice(line: Line | null, voices: boolean) {
+  useEffect(() => {
+    if (!voices || !line || typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    if (document.visibilityState !== "visible") return;
+    const synth = window.speechSynthesis;
+    const english = synth.getVoices().filter((v) => v.lang.toLowerCase().startsWith("en")
+      && !NOVELTY_VOICES.test(v.name));
+    const u = new SpeechSynthesisUtterance(line.text.replace(/[^\p{L}\p{N}\p{P}\s]/gu, ""));
+    const { pitch, rate } = voiceOf(line.who);
+    u.pitch = pitch;
+    u.rate = rate;
+    if (english.length) u.voice = english[(line.who === "manager" ? 0 : line.who + 1) % english.length]!;
+    synth.cancel();
+    synth.speak(u);
+  }, [line, voices]);
+}
+
+function useVoicesSetting(): [boolean, () => void] {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    try { setOn(window.localStorage.getItem(VOICES_KEY) === "on"); } catch { /* private mode */ }
+  }, []);
+  const toggle = () => setOn((was) => {
+    const next = !was;
+    try { window.localStorage.setItem(VOICES_KEY, next ? "on" : "off"); } catch { /* private mode */ }
+    if (!next && typeof window !== "undefined" && "speechSynthesis" in window) window.speechSynthesis.cancel();
+    return next;
+  });
+  return [on, toggle];
+}
+
+/** Marco, the floor manager, at his desk above the three halls. */
+function ManagerDesk({ talk, data, now }: { talk: Line | null; data: Checkpoint | undefined; now: number }) {
+  const speaking = talk?.who === "manager" ? talk : null;
+  const top = topStopper(data);
+  const box = portraitViewBox(MANAGER_LOOK as CharacterDefinition, "bust");
+  const idle = idleOf(7, now);
+  return (
+    <div className="cp-manager mx-4 mt-3 flex items-center gap-3 rounded-lg border px-3 py-2" data-testid="cp-manager">
+      <div className="relative shrink-0">
+        <svg viewBox={box} width={60} height={68} aria-hidden="true" className="cp-person overflow-visible">
+          <g className="cp-body">
+            <Character character={MANAGER_LOOK}
+                       pose={speaking ? "talking_briefly" : idle.pose === "stretching" ? "standing" : idle.pose}
+                       emotion={speaking ? speaking.mood : "neutral"} />
+          </g>
+        </svg>
+      </div>
+      <div className="min-w-0">
+        <div className="text-[12px] font-semibold text-ink">
+          {MANAGER.first} <span className="font-normal text-ink-3">· {MANAGER.name}</span>
+        </div>
+        {speaking ? (
+          <div key={speaking.text} className="cp-say mt-1" data-testid="cp-manager-bubble">{speaking.text}</div>
+        ) : (
+          <div className="text-[11px] text-ink-3">
+            Watches all thirty: praises every catch, scolds every rug that gets through.
+          </div>
+        )}
+      </div>
+      {top ? (
+        <div className="ml-auto hidden shrink-0 rounded-md border border-line px-2 py-1 text-right text-[11px] sm:block">
+          <div className="uppercase tracking-wider text-ink-3">Award</div>
+          <div className="font-semibold text-ink">
+            🏆 {ROBOTS[top.index]!.first} · {top.count.toLocaleString("en-US")} stops
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function CheckpointOffice({ data, live, now: nowProp, motionOverride }: {
   data: Checkpoint | undefined;
   live: LiveBelt | undefined;
@@ -212,6 +362,9 @@ export function CheckpointOffice({ data, live, now: nowProp, motionOverride }: {
   const now = nowProp ?? clock;
   const tracks = useLiveBelt(live?.coins, motion);
   const [picked, setPicked] = useState<number | null>(null);
+  const [voices, toggleVoices] = useVoicesSetting();
+  const talk = useChatter(tracks, data, motionOverride !== false);
+  useVoice(talk, voices);
 
   const fresh = (t: number) => t > 0 && now - t < FRESH_MS;
   const stateOf = (i: number): BotState => {
@@ -268,15 +421,22 @@ export function CheckpointOffice({ data, live, now: nowProp, motionOverride }: {
           {data ? (
             <span className="text-ink-2"><b className="text-down">{totalStopped.toLocaleString("en-US")}</b> stops on record</span>
           ) : null}
+          <button type="button" onClick={toggleVoices} aria-pressed={voices}
+                  className={`rounded-md border px-2 py-0.5 text-[11px] ${voices ? "border-accent text-accent" : "border-line text-ink-3"}`}
+                  data-testid="cp-voices">
+            {voices ? "🔊 Voices on" : "🔈 Voices off"}
+          </button>
         </div>
       </header>
 
       {/* The rig's shared gradients, once for all thirty-one figures. */}
       <svg width="0" height="0" aria-hidden="true" className="absolute"><RigDefs /></svg>
+      <ManagerDesk talk={talk} data={data} now={now} />
       <div className="grid gap-3 p-4 xl:grid-cols-[minmax(0,4fr)_minmax(0,4fr)_minmax(0,8fr)]">
         {STAGES.map((stage) => (
           <Hall key={stage.id} stage={stage} stateOf={stateOf} data={data} onBelt={onBelt}
-                stamp={stamp} recentStops={recentStops} onPick={setPicked} picked={picked} now={now} />
+                stamp={stamp} recentStops={recentStops} onPick={setPicked} picked={picked} now={now}
+                talk={talk} />
         ))}
       </div>
 
@@ -331,8 +491,9 @@ export function CheckpointOffice({ data, live, now: nowProp, motionOverride }: {
   );
 }
 
-function Hall({ stage, stateOf, data, onBelt, stamp, recentStops, onPick, picked, now }: {
+function Hall({ stage, stateOf, data, onBelt, stamp, recentStops, onPick, picked, now, talk }: {
   now: number;
+  talk: Line | null;
   stage: (typeof STAGES)[number];
   stateOf: (i: number) => BotState;
   data: Checkpoint | undefined;
@@ -377,8 +538,11 @@ function Hall({ stage, stateOf, data, onBelt, stamp, recentStops, onPick, picked
                 <span className="cp-bubble" data-testid={`cp-bubble-${r.id}`}>{r.stopLine}</span>
               ) : stamped === "bought" ? (
                 <span className="cp-bubble cp-bubble-yes">All 30 said yes!</span>
+              ) : talk?.who === i ? (
+                <span className="cp-bubble cp-bubble-talk" data-testid={`cp-talk-${r.id}`}>{talk.text}</span>
               ) : null}
-              <PersonFigure index={i} state={stateOf(i)} now={now} />
+              <PersonFigure index={i} state={stateOf(i)} now={now}
+                            talking={talk?.who === i ? talk.mood : undefined} />
               <span className="cp-desk" aria-hidden="true">
                 <span className="cp-led" /><span className="cp-led" /><span className="cp-led" />
               </span>

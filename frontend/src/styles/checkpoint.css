@@ -169,3 +169,22 @@
 @keyframes cp-eye-blink { 0%, 93%, 100% { transform: scaleY(1); } 95%, 97% { transform: scaleY(0.1); } }
 @keyframes cp-cheer { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
 @keyframes cp-bubble { from { opacity: 0; transform: translateX(-50%) scale(0.6); } to { opacity: 1; transform: translateX(-50%) scale(1); } }
+
+/* Talk (2026-10-04): neighbours chat in a quiet bubble; Marco's is brass. */
+.cp-bubble-talk { border-color: var(--color-line); font-weight: 500; }
+.cp-bubble-talk::after { border-top-color: var(--color-line); }
+.cp-say {
+  position: relative; display: inline-block; max-width: 46ch; padding: 3px 9px;
+  border: 1px solid var(--hq-brass); border-radius: 9px; background: var(--color-surface);
+  font-size: 12px; line-height: 1.3; font-weight: 600; color: var(--color-ink);
+  transform-origin: 0 50%; animation: cp-bubble-left 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.cp-say::before {
+  content: ""; position: absolute; right: 100%; top: 8px;
+  border: 5px solid transparent; border-right-color: var(--hq-brass);
+}
+.cp-manager {
+  border-color: color-mix(in oklch, var(--hq-brass) 45%, var(--color-line));
+  background: linear-gradient(90deg, color-mix(in oklch, var(--hq-brass) 10%, transparent), transparent 70%);
+}
+@keyframes cp-bubble-left { from { opacity: 0; transform: scale(0.6); } to { opacity: 1; transform: scale(1); } }
