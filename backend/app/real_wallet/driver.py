@@ -88,7 +88,7 @@ class RealWalletDriver:
         """The owner's wallet first, exactly as before; then each family
         member's own wallet, each on its own balance, switch and limits."""
         now = now or datetime.now(UTC)
-        # Before any wallet buys: one more rug under $150 stops them all.
+        # Before any wallet buys: one more rug under $50 stops them all.
         if await rug_brake.pull_if_due(self._session, now, lambda: self._owner_worth(now)):
             return DriverOutcome(0, "rug_brake")
         owner = await self._owner_tick(now)
