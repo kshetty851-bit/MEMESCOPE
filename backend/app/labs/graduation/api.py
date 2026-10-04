@@ -1444,6 +1444,69 @@ KARTHIK_GRID_COLUMNS = ((25_000, None), (50_000, None), (75_000, None),
 KARTHIK_BAND_BOOKS = ("KARTHIK_Q25_5M", "KARTHIK_Q50_5M")
 
 
+#: Coins whose creator launched another coin before them (the real wallets'
+#: CREATOR_LAUNCHED_BEFORE, one query for the whole book).
+_REPEAT_CREATOR_SQL = text("""
+    select d.mint_address from discovered_tokens d
+    where d.mint_address = any(:m) and exists (
+        select 1 from discovered_tokens d2
+        where d2.creator_address = d.creator_address
+          and d2.block_time < d.block_time and d2.mint_address <> d.mint_address)
+""")
+
+#: What the main wallet did with each coin: bought it, or the reason it did not.
+_REAL_DID_SQL = text("""
+    select i.mint_address, i.state, i.failure_reason, p.id is not null as bought
+    from real_wallet_live_intents i
+    left join real_wallet_positions p
+      on p.mint_address = i.mint_address and p.wallet_public_key = i.wallet_public_key
+    where i.side = 'BUY' and i.wallet_public_key = :w and i.mint_address = any(:m)
+""")
+
+
+def _real_status(state: str | None, failure: str | None,
+                 bought: bool) -> dict[str, str | None]:
+    """A trade's real-wallet tag for the page, in plain words."""
+    if bought:
+        return {"status": "bought", "why": None}
+    why = failure or state or "not sent"
+    if why.startswith("safety:CREATOR_LAUNCHED_BEFORE"):
+        why = "creator launched before"
+    elif why.startswith("safety:"):
+        why = "safety check: " + why.removeprefix("safety:").lower().replace("_", " ")
+    elif why.startswith("guard:"):
+        why = "order guard"
+    return {"status": "skipped", "why": why}
+
+
+async def _real_did(db: AsyncSession, rows: Sequence[Any]
+                    ) -> tuple[dict[str, dict[str, str | None]], datetime]:
+    """Since the main wallet's current Start: what it did with each of the
+    book's coins (2026-10-05). A tag, never a figure the book rests on, so an
+    unreadable wallet record leaves the trades untagged rather than failing
+    the page."""
+    never = datetime.max.replace(tzinfo=UTC)
+    try:
+        from app.core.config import settings as app_settings
+        from app.real_wallet.autotrade import AutotradeSwitchService
+
+        started = (await AutotradeSwitchService(db).state()).started_at or never
+        owner = app_settings.REAL_WALLET_PUBLIC_KEY.strip()
+        recent = [r.mint for r in rows if r.opened_at >= started]
+        real: dict[str, dict[str, str | None]] = {}
+        if owner and recent:
+            for mint, state, failure, bought in (await db.execute(
+                    _REAL_DID_SQL, {"w": owner, "m": recent})).all():
+                real[mint] = _real_status(state, failure, bool(bought))
+            for m in recent:
+                real.setdefault(m, {
+                    "status": "skipped", "why": "not tried (wallet busy, off or out of cash)"})
+        return real, started
+    except Exception:  # a tag is never worth the page
+        logger.warning("karthik_real_tags_unread", exc_info=True)
+        return {}, never
+
+
 def _opened_order(row: Any) -> tuple[datetime, str]:
     """Open time, then mint. Replayed rows share their sample's timestamp, so
     two coins can open in the same instant; one trade at a time takes the
@@ -1817,6 +1880,13 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     every = [r for r in sorted([*small, *signals], key=_opened_order)
              if lo <= float(r.liq_open_usd or 0)
              and (hi is None or float(r.liq_open_usd or 0) < hi)]
+    # The real wallets refuse a coin whose creator launched one before
+    # (CREATOR_LAUNCHED_BEFORE, 2026-10-03); the book does too since 2026-10-05
+    # (Karthik: "make sure all the buy trades matches with real wallet").
+    if every:
+        repeat = set((await db.execute(_REPEAT_CREATOR_SQL,
+                                       {"m": [r.mint for r in every]})).scalars())
+        every = [r for r in every if r.mint not in repeat]
     # As many at once as the balance allows (2026-10-03), not one at a time.
     rows = every
     walk = _funded_walk(
@@ -1831,6 +1901,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     # populations on one line -- it read "0 rugs of 11 trades, 12 wins" -- and
     # would have credited the book with dodging a rug it simply had no money
     # for, or blamed it for one it never bought.
+    real, real_from = await _real_did(db, rows)
     took = [(row, money) for row, money in zip(rows, walk.pnl, strict=True)
             if money is not None]
     pnl = [money for _, money in took]
@@ -1910,6 +1981,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
             "pct": (Decimal(str(100 * float(row.net_return))).quantize(cents)),
             "pnl_usd": Decimal(str(money)).quantize(cents),
             "pool_usd": row.liq_open_usd,
+            "real": real.get(row.mint) if row.opened_at >= real_from else None,
         } for row, money in reversed(took)],
     }
 

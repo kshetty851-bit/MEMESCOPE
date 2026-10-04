@@ -7,6 +7,8 @@ export interface KarthikTrade {
   pct: string;
   pnl_usd: string;
   pool_usd: string | null;
+  /** Since the main wallet's current Start: did it buy this coin too? */
+  real?: { status: "bought" | "skipped"; why: string | null } | null;
 }
 
 export interface KarthikBook {
