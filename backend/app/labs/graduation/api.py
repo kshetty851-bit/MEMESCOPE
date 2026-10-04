@@ -1611,7 +1611,8 @@ def _karthik_days(took: Sequence[tuple[Any, float]], start: datetime,
         lo, hi = start + timedelta(days=n - 1), start + timedelta(days=n)
         if lo > end:
             break
-        money = [m for row, m in took if lo <= row.closed_at < hi]
+        closed = [(row, m) for row, m in took if lo <= row.closed_at < hi]
+        money = [m for _, m in closed]
         opened = balance
         balance += sum(money)
         out.append({
@@ -1620,6 +1621,10 @@ def _karthik_days(took: Sequence[tuple[Any, float]], start: datetime,
             "to": hi,
             "running": hi > now,
             "trades": len(money),
+            # Rugs that day, by the book's own line (Karthik, 2026-10-05:
+            # "mention how many rugs on the daily profits box per day").
+            "rugs": sum(1 for row, _ in closed
+                        if float(row.net_return) <= float(config.OPERATOR_RUG_MOVE)),
             "pnl_usd": Decimal(str(sum(money))).quantize(cents),
             # Of the balance this day OPENED with, so the days multiply out to
             # the book's total rather than each being measured off a different

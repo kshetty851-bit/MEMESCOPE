@@ -269,6 +269,7 @@ async def test_karthik_days_are_24h_from_the_open_not_calendar_days() -> None:
 
     assert [d["n"] for d in book["days"]] == sorted(days, reverse=True)
     assert days[1]["trades"] == 2                      # not 3: C closed on day 2
+    assert (days[1]["rugs"], days[2]["rugs"]) == (0, 1)  # D, -50%, is on the rug line
     assert days[2]["trades"] == 2
     # Day 1: two $50 tickets at +10% on a $500 book.
     assert days[1]["pnl_usd"] == Decimal("10.00")
