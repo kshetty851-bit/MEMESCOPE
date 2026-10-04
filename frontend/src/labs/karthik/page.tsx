@@ -260,6 +260,17 @@ function Row({ trade }: { trade: KarthikTrade }) {
       >
         {usd(trade.pnl_usd)}
       </td>
+      <td className="py-1.5 pl-3 text-right text-[11px]" data-testid="trade-real">
+        {trade.real?.status === "bought" ? (
+          <span className="text-up" title="The real main wallet bought this coin too">✓ bought</span>
+        ) : trade.real ? (
+          <span className="text-ink-3" title={`The real main wallet did not: ${trade.real.why ?? ""}`}>
+            ✗ {trade.real.why}
+          </span>
+        ) : (
+          <span className="text-ink-dim" title="Before the main wallet's current start">—</span>
+        )}
+      </td>
     </tr>
   );
 }
@@ -496,6 +507,7 @@ export function TradeList({ data }: { data: KarthikBook }) {
                     <th className="py-1 pr-3 text-right font-normal">pool</th>
                     <th className="py-1 pr-3 text-right font-normal">result</th>
                     <th className="py-1 text-right font-normal">money</th>
+                    <th className="py-1 pl-3 text-right font-normal">real wallet</th>
                   </tr>
                 </thead>
                 <tbody>

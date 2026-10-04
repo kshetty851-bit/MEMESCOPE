@@ -436,3 +436,16 @@ async def test_coins_opened_in_the_same_instant_are_always_taken_in_one_order() 
     assert taken == [f"C{i:02d}" for i in range(10)]
     assert taken == sorted(t["symbol"] for t in two["trades_list"])
     assert one["balance_usd"] == two["balance_usd"]
+
+
+def test_each_trade_says_what_the_real_wallet_did() -> None:
+    """2026-10-05: the book and the real wallet must visibly match."""
+    from app.labs.graduation.api import _real_status
+
+    assert _real_status("confirmed", None, True) == {"status": "bought", "why": None}
+    assert _real_status("blocked", "safety:CREATOR_LAUNCHED_BEFORE", False)["why"] \
+        == "creator launched before"
+    assert _real_status("blocked", "guard:POLICY_REJECTED,OPEN_POSITION_LIMIT", False)["why"] \
+        == "order guard"
+    assert _real_status("blocked", "safety:SELL_ROUTE_UNAVAILABLE", False)["why"] \
+        == "safety check: sell route unavailable"
