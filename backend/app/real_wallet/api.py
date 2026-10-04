@@ -818,7 +818,8 @@ async def status(viewer: OptionalUser, session: DbSession) -> dict[str, object]:
             ),
             "entry_size_configured": configured_entry_size_usd() is not None,
             "max_trade_usd": _decimal(settings.REAL_WALLET_MAX_TRADE_USD),
-            "max_open_positions": settings.REAL_WALLET_MAX_OPEN_POSITIONS,
+            "max_open_positions": (settings.REAL_WALLET_OWNER_MAX_OPEN
+                                   or settings.REAL_WALLET_MAX_OPEN_POSITIONS),
             "max_total_exposure_usd": _decimal(settings.REAL_WALLET_MAX_TOTAL_EXPOSURE_USD),
             "max_daily_notional_usd": _decimal(settings.REAL_WALLET_MAX_DAILY_NOTIONAL_USD),
             "max_daily_trades": settings.REAL_WALLET_MAX_DAILY_TRADES,

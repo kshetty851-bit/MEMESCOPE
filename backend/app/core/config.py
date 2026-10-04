@@ -1062,6 +1062,11 @@ class Settings(BaseSettings):
     #: cap and the rug brake still bound it. Empty in code; production sets
     #: USER1 -> 25 in docker-compose.yml.
     REAL_WALLET_MEMBER_MAX_OPEN: dict[str, int] = Field(default_factory=dict)
+    #: The owner's own open-position limit, in place of
+    #: `REAL_WALLET_MAX_OPEN_POSITIONS` (Karthik, 2026-10-04: the main wallet
+    #: on G-Q50, "several at once"). That setting stays the user wallets'
+    #: default. None keeps the platform's. Production sets it in compose.
+    REAL_WALLET_OWNER_MAX_OPEN: int | None = Field(default=None, ge=1)
     # Phase 2 is a separate, deliberately tiny manual-devnet workflow. These
     # values are used by the API and signer to enforce the same small envelope;
     # the signer-file *path* is intentionally not a Settings field because the

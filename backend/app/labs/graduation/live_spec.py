@@ -547,7 +547,9 @@ BY_ID = {s.id: s for s in STRATEGIES}
 #: G-Q150 added 2026-09-25 at his request ("integrate 150K pool to real wallet"),
 #: G-QMID was offered on 2026-09-26 and withdrawn the same day, when Karthik
 #: chose $150k and up (which is G-Q150) instead; it stays in STRATEGIES.
-OFFERED: tuple[str, ...] = ("G-QUIET", "G-QUIET4", "G-Q150")
+#: G-Q50 offered 2026-10-04 at his request ("integrate 50k pool stratergy to
+#: main wallet also"), after USER 1 had run it since the day before.
+OFFERED: tuple[str, ...] = ("G-QUIET", "G-QUIET4", "G-Q150", "G-Q50")
 
 
 def _entry_age_s() -> int:
