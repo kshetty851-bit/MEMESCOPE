@@ -297,19 +297,15 @@ export function SizeGrid({ data }: { data: KarthikBook }) {
   if (!w?.floors?.length || !w.sizes?.every((row) => Array.isArray(row.cells))) return null;
   return (
     <>
-      <GridPanel data={data} title="If each trade had been — on 10x the money, since the lab started" rows={w.sizes} />
-      {/* Karthik, 2026-10-03: the same sizes on ten times the money, shown
-          as the balance each would have now. */}
-      {w.sizes_wide?.length ? (
-        <GridPanel data={data}
-                   title={`If each trade had been — on 10x the money${w.wide_from ? `, from ${day(w.wide_from)}` : ""}`}
-                   rows={w.sizes_wide} value from={w.wide_from} testId="size-grid-wide" />
-      ) : null}
+      {/* One table since 2026-10-04: the book starts on 1 Oct, so the second
+          (from-1-Oct) table would repeat this one. Shown as balances. */}
+      <GridPanel data={data} title={`If each trade had been — on 10x the money, from ${day(data.started_at)}`}
+                 rows={w.sizes} value />
     </>
   );
 }
 
-function GridPanel({ data, title, rows, value = false, from, testId }: {
+function GridPanel({ data, title, rows, value = false, from, testId = "size-grid" }: {
   data: KarthikBook;
   title: string;
   rows: KarthikBook["whatif"]["sizes"];
