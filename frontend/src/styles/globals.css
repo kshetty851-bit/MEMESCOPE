@@ -1280,3 +1280,11 @@
 .sol-pulse {
   animation: sol-pulse 2s ease-in-out infinite;
 }
+
+/* Karthik's Lab world clocks (2026-10-04): the accent ring breathes. The
+   global reduced-motion rule stills it. */
+.wclock-ring {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  animation: breathe 4s ease-in-out infinite;
+}
