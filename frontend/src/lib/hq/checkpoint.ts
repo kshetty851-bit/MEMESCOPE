@@ -38,7 +38,7 @@ export const STAGES: readonly { id: StageId; title: string; blurb: string }[] = 
 export const ROBOTS: readonly Robot[] = [
   // Hall 1 — the rule and the rug blocks.
   { id: "hatch", first: "Hana", stopLine: "Not graduated yet!", name: "Hatch", stage: "rule", job: "It has just graduated from pump.fun", codes: [] },
-  { id: "depth", first: "Diego", stopLine: "Pool's too shallow!", name: "Depth", stage: "rule", job: "The pool holds at least $75,000", codes: [] },
+  { id: "depth", first: "Diego", stopLine: "Pool's too shallow!", name: "Depth", stage: "rule", job: "The pool holds at least $50,000", codes: [] },
   { id: "hush", first: "Hiro", stopLine: "Too noisy in there!", name: "Hush", stage: "rule", job: "The pool is still quiet: under 100 trades", codes: [] },
   { id: "recall", first: "Rosa", stopLine: "Seen these ruggers before!", name: "Recall", stage: "rule", job: "Not from wallets behind repeat rugs", codes: ["repeat_rug_operator"] },
   { id: "tracer", first: "Tariq", stopLine: "Linked to a recent rug!", name: "Tracer", stage: "rule", job: "Not linked to a recent rug", codes: ["linked_to_recent_rug"] },

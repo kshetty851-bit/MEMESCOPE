@@ -66,7 +66,7 @@ describe("the Checkpoint office, live", () => {
       { symbol: "NEWC", graduated_at: "2026-10-02T19:09:40Z", status: "checking", robot: "depth",
         code: null, note: "waiting for the pool to show" },
       { symbol: "SMOL", graduated_at: "2026-10-02T19:08:00Z", status: "stopped", robot: "depth",
-        code: null, note: "pool $20,203, under $75,000" },
+        code: null, note: "pool $20,203, under $50,000" },
       { symbol: "RUGGO", graduated_at: "2026-10-02T19:06:00Z", status: "stopped", robot: null,
         code: "linked_to_recent_rug", note: "a rug block refused it" },
       { symbol: "HELD", graduated_at: "2026-10-02T19:05:00Z", status: "stopped", robot: null,
@@ -93,7 +93,7 @@ describe("the Checkpoint office, live", () => {
     render(<CheckpointOffice data={data} live={live} motionOverride={false} now={now} />);
     const list = screen.getByTestId("cp-live-list");
     expect(list).toHaveTextContent("NEWCDiego · Depthwaiting for the pool to show20s ago");
-    expect(list).toHaveTextContent("SMOLDiego · Depthpool $20,203, under $75,000");
+    expect(list).toHaveTextContent("SMOLDiego · Depthpool $20,203, under $50,000");
     expect(list).toHaveTextContent("RUGGOTariq · Tracer");
     expect(list).toHaveTextContent("HELDWallet gatepassed the rule; the wallet did not take it");
     expect(list).toHaveTextContent("WINNYBoughtpassed all 30 and was bought");

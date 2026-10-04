@@ -28,7 +28,9 @@ def test_it_waits_for_the_pool_then_calls_it_missing():
 def test_a_shallow_pool_stops_at_depth_with_its_size():
     out = where(Coin(graduated=GRAD, liquidity=Decimal("20203")), at(40))
     assert (out["status"], out["robot"]) == ("stopped", "depth")
-    assert out["note"] == "pool $20,203, under $75,000"
+    assert out["note"] == "pool $20,203, under $50,000"
+    # $50k+ since 2026-10-04 (G-Q50): a $60k pool goes on to the next check.
+    assert where(Coin(graduated=GRAD, liquidity=Decimal("60000")), at(40))["robot"] != "depth"
 
 
 def test_a_rug_block_stops_it_by_its_code():
