@@ -11,8 +11,8 @@ import {
   type Checkpoint, type CheckpointEvent, type LiveBelt, type LiveCoin,
 } from "@/lib/hq/checkpoint";
 import {
-  MANAGER, MANAGER_LOOK, award, banter, motivate, praiseBuy, praiseStop, scoldRug, topStopper,
-  voiceOf,
+  MANAGER, MANAGER_LOOK, award, banter, motivate, praiseBuy, praiseStop, scoldRug, solo,
+  topStopper, voiceOf,
   type Line,
 } from "@/lib/hq/checkpoint-chatter";
 
@@ -263,6 +263,7 @@ function useChatter(tracks: Track[], data: Checkpoint | undefined, on: boolean):
       let next = queue.current.shift() ?? null;
       if (!next && tick.current % 7 === 0) next = award(data, seed) ?? motivate(seed);
       else if (!next && tick.current % 5 === 0) next = motivate(seed);
+      else if (!next && tick.current % 3 === 0) next = solo(seed);
       else if (!next) {
         const [ask, answer] = banter(seed);
         next = ask;
@@ -277,9 +278,34 @@ function useChatter(tracks: Track[], data: Checkpoint | undefined, on: boolean):
 }
 
 /** Speak each new line aloud, in that person's own voice, when voices are on. */
-function useVoice(line: Line | null, voices: boolean) {
+/**
+ * Browsers let a page speak only after the visitor has touched it (a tap, a
+ * click, a key). Voices are ON by default (Karthik, 2026-10-04), so the first
+ * such touch anywhere on the page unlocks them — on iOS it must speak inside
+ * that touch, hence the silent first word.
+ */
+function useSpeechUnlocked(): boolean {
+  const [unlocked, setUnlocked] = useState(false);
   useEffect(() => {
-    if (!voices || !line || typeof window === "undefined" || !("speechSynthesis" in window)) return;
+    const nav = navigator as Navigator & { userActivation?: { hasBeenActive: boolean } };
+    if (nav.userActivation?.hasBeenActive) { setUnlocked(true); return; }
+    const unlock = () => {
+      try {
+        if ("speechSynthesis" in window) window.speechSynthesis.speak(new SpeechSynthesisUtterance(" "));
+      } catch { /* no speech here */ }
+      setUnlocked(true);
+    };
+    const events = ["pointerdown", "keydown", "touchstart"] as const;
+    events.forEach((e) => window.addEventListener(e, unlock, { once: true, passive: true }));
+    return () => events.forEach((e) => window.removeEventListener(e, unlock));
+  }, []);
+  return unlocked;
+}
+
+/** Speak each new line aloud, in that person's own voice, when voices are on. */
+function useVoice(line: Line | null, voices: boolean, unlocked: boolean) {
+  useEffect(() => {
+    if (!voices || !unlocked || !line || typeof window === "undefined" || !("speechSynthesis" in window)) return;
     if (document.visibilityState !== "visible") return;
     const synth = window.speechSynthesis;
     const english = synth.getVoices().filter((v) => v.lang.toLowerCase().startsWith("en")
@@ -291,13 +317,14 @@ function useVoice(line: Line | null, voices: boolean) {
     if (english.length) u.voice = english[(line.who === "manager" ? 0 : line.who + 1) % english.length]!;
     synth.cancel();
     synth.speak(u);
-  }, [line, voices]);
+  }, [line, voices, unlocked]);
 }
 
+/** ON unless this browser turned them off (default flipped 2026-10-04). */
 function useVoicesSetting(): [boolean, () => void] {
-  const [on, setOn] = useState(false);
+  const [on, setOn] = useState(true);
   useEffect(() => {
-    try { setOn(window.localStorage.getItem(VOICES_KEY) === "on"); } catch { /* private mode */ }
+    try { setOn(window.localStorage.getItem(VOICES_KEY) !== "off"); } catch { /* private mode */ }
   }, []);
   const toggle = () => setOn((was) => {
     const next = !was;
@@ -363,8 +390,9 @@ export function CheckpointOffice({ data, live, now: nowProp, motionOverride }: {
   const tracks = useLiveBelt(live?.coins, motion);
   const [picked, setPicked] = useState<number | null>(null);
   const [voices, toggleVoices] = useVoicesSetting();
+  const unlocked = useSpeechUnlocked();
   const talk = useChatter(tracks, data, motionOverride !== false);
-  useVoice(talk, voices);
+  useVoice(talk, voices, unlocked);
 
   const fresh = (t: number) => t > 0 && now - t < FRESH_MS;
   const stateOf = (i: number): BotState => {
@@ -424,7 +452,7 @@ export function CheckpointOffice({ data, live, now: nowProp, motionOverride }: {
           <button type="button" onClick={toggleVoices} aria-pressed={voices}
                   className={`rounded-md border px-2 py-0.5 text-[11px] ${voices ? "border-accent text-accent" : "border-line text-ink-3"}`}
                   data-testid="cp-voices">
-            {voices ? "🔊 Voices on" : "🔈 Voices off"}
+            {!voices ? "🔈 Voices off" : unlocked ? "🔊 Voices on" : "🔊 Tap anywhere to hear them"}
           </button>
         </div>
       </header>

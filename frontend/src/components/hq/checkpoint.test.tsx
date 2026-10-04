@@ -130,13 +130,13 @@ describe("the Checkpoint office, live", () => {
 
 
 describe("the office talks", () => {
-  it("has Marco at his desk, a voices switch that starts off, and a bubble every few seconds", () => {
+  it("has Marco at his desk, voices on by default, and a bubble every few seconds", () => {
     vi.useFakeTimers();
     try {
       render(<CheckpointOffice data={data} live={{ now: "2026-10-02T19:10:00Z", coins: [] }}
                                motionOverride now={Date.parse("2026-10-02T19:10:00Z")} />);
       expect(screen.getByTestId("cp-manager")).toHaveTextContent("Marco");
-      expect(screen.getByTestId("cp-voices")).toHaveAttribute("aria-pressed", "false");
+      expect(screen.getByTestId("cp-voices")).toHaveAttribute("aria-pressed", "true");
       act(() => { vi.advanceTimersByTime(4_600); });
       const bubbles = document.querySelectorAll(".cp-bubble-talk, .cp-say");
       expect(bubbles.length).toBe(1);
