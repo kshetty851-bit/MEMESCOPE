@@ -588,6 +588,8 @@ class RealWalletExecutor:
                 equity_usd=equity_usd,
                 side=str(intent.side or "BUY"),
                 spend_lamports=None if raw_spend is None else int(raw_spend),
+                # The same per-wallet limit the driver used to authorise it.
+                max_open_positions=family_wallets.max_open_for(wallet),
             ),
         )
         return canary.allowed

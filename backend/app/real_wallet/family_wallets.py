@@ -81,6 +81,19 @@ def address(member: str) -> str | None:
         return None
 
 
+def max_open_for(public_key: str) -> int | None:
+    """This wallet's own open-position limit: the owner's
+    (`REAL_WALLET_OWNER_MAX_OPEN`) or a member's (`REAL_WALLET_MEMBER_MAX_OPEN`),
+    or None for the platform's. ONE answer for the driver that authorises a
+    buy and the executor that re-checks it before sending (2026-10-05: the
+    executor asked the platform's 1 and refused DOTF while a coin was held,
+    so Karthik's Lab showed a trade the real wallet never took)."""
+    if public_key == settings.REAL_WALLET_PUBLIC_KEY.strip():
+        return settings.REAL_WALLET_OWNER_MAX_OPEN
+    member = member_for(public_key)
+    return settings.REAL_WALLET_MEMBER_MAX_OPEN.get(member) if member else None
+
+
 def member_for(public_key: str) -> str | None:
     """Whose wallet this is, or None. Raises on a bad map: a signer asking
     this question must not read a malformed map as "nobody's"."""
