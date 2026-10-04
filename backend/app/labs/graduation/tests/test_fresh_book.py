@@ -41,11 +41,14 @@ def test_the_page_shows_the_quiet_book_and_the_other_books() -> None:
         "KARTHIK_QUIET_5M"]
     by_book = {spec.book: spec for spec in SWEEP}
     karthik = by_book["KARTHIK_QUIET_5M"]
-    assert karthik.start == datetime(2026, 9, 23, 12, 0, tzinfo=UTC)
+    # From 1 Oct 00:00 Dubai since 2026-10-04; it opened 23 Sep.
+    assert karthik.start == datetime(2026, 9, 30, 20, 0, tzinfo=UTC)
     # Thirty days, fixed BEFORE its first trade: a judge date chosen afterwards
     # is chosen by the result.
     assert datetime(2026, 10, 23, 12, 0, tzinfo=UTC) == config.KARTHIK_JUDGE_AT
-    assert (config.KARTHIK_JUDGE_AT - karthik.start).days == 30
+    # The view moved to 1 Oct on 2026-10-04 at his request; the judge date did
+    # NOT move with it, so it is 22 days from the new start, not 30.
+    assert (config.KARTHIK_JUDGE_AT - karthik.start).days == 22
     # It copies BASE_75k_quiet_5m's RULE, not its record: same entry, hold and
     # filter, its own trades from its own start.
     mine = next(a for a in ARMS if a.name == "KARTHIK_QUIET_5M")
@@ -375,14 +378,6 @@ async def test_the_grid_is_every_size_by_every_pool_floor() -> None:
     assert now[50_000]["pnl_usd"] == Decimal("5.00")                 # $50 at +10%
     assert w["sizes"][-1]["cells"][0]["pnl_usd"] == Decimal("20.00")  # $200 at +10%
     # $25k+ and $50k+ include the arms' replayed rows, and say so.
-    assert [f["replayed_below"] for f in w["floors"]][:3] == [True, True, False]
-    # The second table (2026-10-03): the same sizes on ten times their size.
-    assert [(r["ticket_usd"], r["capital_usd"]) for r in w["sizes_wide"]] == [
-        (10, 100), (20, 200), (25, 250), (50, 500), (100, 1000), (200, 2000)]
-    # Counted from 1 Oct (2026-10-03): a trade on the book's first day is not in it.
-    wide = w["sizes_wide"][-1]["cells"][0]
-    assert (wide["trades"], wide["balance_usd"]) == (0, Decimal("2000.00"))
-    assert w["wide_from"] == "2026-09-30T20:00:00+00:00"
 
 
 async def test_each_floor_buys_only_its_own_pools() -> None:

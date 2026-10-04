@@ -20,8 +20,17 @@ export const MANAGER_LOOK: CharacterLook = {
   hairTone: "h2", outfit: "blazer", accessory: "clipboard", palette: "brass", defaultPose: "standing",
 };
 
-/** Who is talking: a person's index, or the manager. */
-export type Speaker = number | "manager";
+/** Marco's team leader (2026-10-04: "marco has one team leader who reads out
+ *  all profit loss and congrats the team motivating them"). */
+export const TEAM_LEAD = { first: "Layla", name: "Team Leader" } as const;
+
+export const LEAD_LOOK: CharacterLook = {
+  id: "checkpoint-lead", bodyType: "slim", headShape: "oval", skinTone: "s2", hair: "ponytail",
+  hairTone: "h1", outfit: "turtleneck", accessory: "tablet", palette: "teal", defaultPose: "standing",
+};
+
+/** Who is talking: a person's index, the manager, or his team leader. */
+export type Speaker = number | "manager" | "lead";
 export interface Line { who: Speaker; text: string; mood: Emotion }
 
 /** A small deterministic pick, so a test can pin every line. */
@@ -256,8 +265,71 @@ export function solo(seed: number): Line {
 export const LINE_TEMPLATES = PRAISE_STOP.length + PRAISE_BUY.length + SCOLD.length + AWARD.length
   + MOTIVATE.length + ASK_ANSWER.length * 2 + SOLO.length;
 
+// --- Layla, reading out the money ---------------------------------------------
+// Real figures only: Karthik's Lab's public summary (the paper book from 1 Oct)
+// and, for a signed-in viewer, the real wallets' closed trades. She never
+// reads a number she was not given.
+
+export interface LabSummary {
+  started_at: string; capital_usd: string; pnl_usd: string; trades: number; wins: number; rugs: number;
+}
+export interface WalletProfitRow {
+  label: string; all_pnl_usd: string; today_pnl_usd: string; today_trades: number; today_won: number;
+}
+
+const money = (v: number) => `${v < 0 ? "minus " : "plus "}$${Math.abs(v).toFixed(2)}`;
+
+const LAB_UP = [
+  "Numbers! Karthik's Lab since 1 Oct: {pnl} on {cap}, {trades} trades, {wins} wins. Brilliant work, team!",
+  "Lab update: {pnl} since 1 Oct over {trades} trades. That's your checking paying off. Well done!",
+  "Karthik's Lab is {pnl} since 1 Oct. {wins} wins out of {trades}. Proud of every one of you!",
+  "Report: {pnl} since 1 Oct, {rugs} rugs got through. Let's make that zero. Great job so far!",
+];
+const LAB_DOWN = [
+  "Lab update: {pnl} since 1 Oct over {trades} trades. Heads up, team — every check counts!",
+  "We're {pnl} since 1 Oct. {rugs} rugs hurt us. Sharper eyes and we'll turn it around!",
+  "Karthik's Lab is {pnl} since 1 Oct. Not our best — let's earn it back, one clean coin at a time.",
+];
+const WALLETS = [
+  "Real wallets since 28 Sep: {list}. {verdict}",
+  "Money check! {list}. {verdict}",
+  "Here's the real money: {list}. {verdict}",
+];
+const TODAY = [
+  "Today so far: {trades} trades, {won} won, {pnl} on the main wallet. {verdict}",
+  "Today's score on the main wallet: {won} wins from {trades} trades, {pnl}. {verdict}",
+];
+const UP_VERDICT = ["Keep it up!", "Fantastic, team!", "That's what thirty sharp eyes do!", "Marco, they deserve coffee!"];
+const DOWN_VERDICT = ["Heads up, we can do better!", "Focus, team — we'll get it back!", "Tighter checks, everyone!"];
+
+export function reportLab(lab: LabSummary | undefined, seed: number): Line | null {
+  if (!lab) return null;
+  const pnl = Number(lab.pnl_usd);
+  return { who: "lead", mood: pnl >= 0 ? "happy" : "sad", text: fill(pick(pnl >= 0 ? LAB_UP : LAB_DOWN, seed), {
+    pnl: money(pnl), cap: `$${Number(lab.capital_usd).toFixed(0)}`,
+    trades: String(lab.trades), wins: String(lab.wins), rugs: String(lab.rugs) }) };
+}
+
+export function reportWallets(rows: WalletProfitRow[] | undefined, seed: number): Line | null {
+  if (!rows?.length) return null;
+  const total = rows.reduce((n, r) => n + Number(r.all_pnl_usd), 0);
+  const list = rows.map((r) => `${r.label} ${money(Number(r.all_pnl_usd))}`).join(", ");
+  return { who: "lead", mood: total >= 0 ? "happy" : "sad", text: fill(pick(WALLETS, seed), {
+    list, verdict: pick(total >= 0 ? UP_VERDICT : DOWN_VERDICT, seed + 1) }) };
+}
+
+export function reportToday(rows: WalletProfitRow[] | undefined, seed: number): Line | null {
+  const main = rows?.[0];
+  if (!main || !main.today_trades) return null;
+  const pnl = Number(main.today_pnl_usd);
+  return { who: "lead", mood: pnl >= 0 ? "happy" : "sad", text: fill(pick(TODAY, seed), {
+    trades: String(main.today_trades), won: String(main.today_won), pnl: money(pnl),
+    verdict: pick(pnl >= 0 ? UP_VERDICT : DOWN_VERDICT, seed + 2) }) };
+}
+
 /** The voice each speaker gets: a pitch and rate of their own. */
 export function voiceOf(who: Speaker): { pitch: number; rate: number } {
   if (who === "manager") return { pitch: 0.75, rate: 0.95 };
+  if (who === "lead") return { pitch: 1.15, rate: 1.02 };
   return { pitch: 0.8 + ((who * 37) % 60) / 100, rate: 0.95 + ((who * 13) % 20) / 100 };
 }

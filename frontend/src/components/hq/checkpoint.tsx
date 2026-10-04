@@ -11,8 +11,9 @@ import {
   type Checkpoint, type CheckpointEvent, type LiveBelt, type LiveCoin,
 } from "@/lib/hq/checkpoint";
 import {
-  MANAGER, MANAGER_LOOK, award, banter, motivate, praiseBuy, praiseStop, scoldRug, solo,
-  topStopper, voiceOf,
+  LEAD_LOOK, MANAGER, MANAGER_LOOK, TEAM_LEAD, award, banter, motivate, praiseBuy, praiseStop,
+  reportLab, reportToday, reportWallets, scoldRug, solo, topStopper, voiceOf,
+  type LabSummary, type WalletProfitRow,
   type Line,
 } from "@/lib/hq/checkpoint-chatter";
 
@@ -67,6 +68,24 @@ function useLive() {
     refetchInterval: POLL_MS,
     staleTime: POLL_MS / 2,
   });
+}
+
+/** What Layla reads out: Karthik's Lab's public summary, and (signed-in
+ *  viewers only — the endpoint refuses everyone else) the real wallets. */
+function useMoneyReports(): { lab?: LabSummary; wallets?: WalletProfitRow[] } {
+  const lab = useQuery({
+    queryKey: ["hq", "checkpoint", "lab-summary"],
+    queryFn: () => api.get<LabSummary>("/labs/graduation/karthik/summary"),
+    refetchInterval: 60_000, staleTime: 30_000, retry: false,
+  });
+  const wallets = useQuery({
+    queryKey: ["hq", "checkpoint", "wallets-profit"],
+    queryFn: () => api.get<{ wallets: WalletProfitRow[] }>("/real-wallet/wallets-profit"),
+    // A visitor without the site code is refused once, then not asked again.
+    refetchInterval: (query) => (query.state.status === "error" ? false : 60_000),
+    staleTime: 30_000, retry: false,
+  });
+  return { lab: lab.data, wallets: wallets.data?.wallets };
 }
 
 function useMotion(): boolean {
@@ -220,7 +239,8 @@ const NOVELTY_VOICES =
  * them hands out the award (from the stop counts on record), nudges people,
  * or two neighbours chat. One line at a time, every few seconds.
  */
-function useChatter(tracks: Track[], data: Checkpoint | undefined, on: boolean): Line | null {
+function useChatter(tracks: Track[], data: Checkpoint | undefined, on: boolean,
+                    money: { lab?: LabSummary; wallets?: WalletProfitRow[] } = {}): Line | null {
   const [line, setLine] = useState<Line | null>(null);
   const queue = useRef<Line[]>([]);
   const heard = useRef<Set<string> | null>(null);
@@ -261,6 +281,13 @@ function useChatter(tracks: Track[], data: Checkpoint | undefined, on: boolean):
       tick.current += 1;
       const seed = Math.floor(Date.now() / 1000);
       let next = queue.current.shift() ?? null;
+      // Layla's money round, every sixth line: the lab, then the real wallets
+      // (signed-in viewers only), then today's score.
+      if (!next && tick.current % 6 === 0) {
+        const round = Math.floor(tick.current / 6) % 3;
+        next = (round === 1 ? reportWallets(money.wallets, seed) : round === 2 ? reportToday(money.wallets, seed) : null)
+          ?? reportLab(money.lab, seed);
+      }
       if (!next && tick.current % 7 === 0) next = award(data, seed) ?? motivate(seed);
       else if (!next && tick.current % 5 === 0) next = motivate(seed);
       else if (!next && tick.current % 3 === 0) next = solo(seed);
@@ -272,7 +299,7 @@ function useChatter(tracks: Track[], data: Checkpoint | undefined, on: boolean):
       setLine(next);
     }, TALK_MS);
     return () => window.clearInterval(id);
-  }, [on, data]);
+  }, [on, data, money.lab, money.wallets]);
 
   return line;
 }
@@ -314,7 +341,8 @@ function useVoice(line: Line | null, voices: boolean, unlocked: boolean) {
     const { pitch, rate } = voiceOf(line.who);
     u.pitch = pitch;
     u.rate = rate;
-    if (english.length) u.voice = english[(line.who === "manager" ? 0 : line.who + 1) % english.length]!;
+    const slot = line.who === "manager" ? 0 : line.who === "lead" ? 1 : line.who + 2;
+    if (english.length) u.voice = english[slot % english.length]!;
     synth.cancel();
     synth.speak(u);
   }, [line, voices, unlocked]);
@@ -335,37 +363,50 @@ function useVoicesSetting(): [boolean, () => void] {
   return [on, toggle];
 }
 
-/** Marco, the floor manager, at his desk above the three halls. */
-function ManagerDesk({ talk, data, now }: { talk: Line | null; data: Checkpoint | undefined; now: number }) {
-  const speaking = talk?.who === "manager" ? talk : null;
-  const top = topStopper(data);
-  const box = portraitViewBox(MANAGER_LOOK as CharacterDefinition, "bust");
-  const idle = idleOf(7, now);
+/** One person at the managers' desk: their figure and what they are saying. */
+function DeskPerson({ look, first, title, blurb, speaking, now, idleSeed, testId }: {
+  look: typeof MANAGER_LOOK; first: string; title: string; blurb: string;
+  speaking: Line | null; now: number; idleSeed: number; testId: string;
+}) {
+  const box = portraitViewBox(look as CharacterDefinition, "bust");
+  const idle = idleOf(idleSeed, now);
   return (
-    <div className="cp-manager mx-4 mt-3 flex items-center gap-3 rounded-lg border px-3 py-2" data-testid="cp-manager">
-      <div className="relative shrink-0">
-        <svg viewBox={box} width={60} height={68} aria-hidden="true" className="cp-person overflow-visible">
-          <g className="cp-body">
-            <Character character={MANAGER_LOOK}
-                       pose={speaking ? "talking_briefly" : idle.pose === "stretching" ? "standing" : idle.pose}
-                       emotion={speaking ? speaking.mood : "neutral"} />
-          </g>
-        </svg>
-      </div>
+    <div className="flex min-w-0 flex-1 items-center gap-3" data-testid={testId}>
+      <svg viewBox={box} width={56} height={64} aria-hidden="true" className="cp-person shrink-0 overflow-visible">
+        <g className="cp-body">
+          <Character character={look}
+                     pose={speaking ? "talking_briefly" : idle.pose === "stretching" ? "standing" : idle.pose}
+                     emotion={speaking ? speaking.mood : "neutral"} />
+        </g>
+      </svg>
       <div className="min-w-0">
         <div className="text-[12px] font-semibold text-ink">
-          {MANAGER.first} <span className="font-normal text-ink-3">· {MANAGER.name}</span>
+          {first} <span className="font-normal text-ink-3">· {title}</span>
         </div>
         {speaking ? (
-          <div key={speaking.text} className="cp-say mt-1" data-testid="cp-manager-bubble">{speaking.text}</div>
+          <div key={speaking.text} className="cp-say mt-1" data-testid={`${testId}-bubble`}>{speaking.text}</div>
         ) : (
-          <div className="text-[11px] text-ink-3">
-            Watches all thirty: praises every catch, scolds every rug that gets through.
-          </div>
+          <div className="text-[11px] text-ink-3">{blurb}</div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Marco, the floor manager, and Layla, his team leader, above the halls. */
+function ManagerDesk({ talk, data, now }: { talk: Line | null; data: Checkpoint | undefined; now: number }) {
+  const top = topStopper(data);
+  return (
+    <div className="cp-manager mx-4 mt-3 flex flex-wrap items-center gap-x-6 gap-y-3 rounded-lg border px-3 py-2"
+         data-testid="cp-manager">
+      <DeskPerson look={MANAGER_LOOK} first={MANAGER.first} title={MANAGER.name} testId="cp-manager-marco"
+                  blurb="Watches all thirty: praises every catch, scolds every rug that gets through."
+                  speaking={talk?.who === "manager" ? talk : null} now={now} idleSeed={7} />
+      <DeskPerson look={LEAD_LOOK} first={TEAM_LEAD.first} title={TEAM_LEAD.name} testId="cp-manager-lead"
+                  blurb="Reads out the profit and loss, cheers the wins, rallies after the losses."
+                  speaking={talk?.who === "lead" ? talk : null} now={now} idleSeed={19} />
       {top ? (
-        <div className="ml-auto hidden shrink-0 rounded-md border border-line px-2 py-1 text-right text-[11px] sm:block">
+        <div className="hidden shrink-0 rounded-md border border-line px-2 py-1 text-right text-[11px] sm:block">
           <div className="uppercase tracking-wider text-ink-3">Award</div>
           <div className="font-semibold text-ink">
             🏆 {ROBOTS[top.index]!.first} · {top.count.toLocaleString("en-US")} stops
@@ -376,9 +417,11 @@ function ManagerDesk({ talk, data, now }: { talk: Line | null; data: Checkpoint 
   );
 }
 
-export function CheckpointOffice({ data, live, now: nowProp, motionOverride }: {
+export function CheckpointOffice({ data, live, now: nowProp, motionOverride, money = {} }: {
   data: Checkpoint | undefined;
   live: LiveBelt | undefined;
+  /** What Layla reads out (`useMoneyReports`); none in tests. */
+  money?: { lab?: LabSummary; wallets?: WalletProfitRow[] };
   now?: number;
   /** Tests pass false; the page asks the browser. */
   motionOverride?: boolean;
@@ -391,7 +434,7 @@ export function CheckpointOffice({ data, live, now: nowProp, motionOverride }: {
   const [picked, setPicked] = useState<number | null>(null);
   const [voices, toggleVoices] = useVoicesSetting();
   const unlocked = useSpeechUnlocked();
-  const talk = useChatter(tracks, data, motionOverride !== false);
+  const talk = useChatter(tracks, data, motionOverride !== false, money);
   useVoice(talk, voices, unlocked);
 
   const fresh = (t: number) => t > 0 && now - t < FRESH_MS;
@@ -598,7 +641,8 @@ function Hall({ stage, stateOf, data, onBelt, stamp, recentStops, onPick, picked
 export function CheckpointLive() {
   const q = useCheckpoint();
   const live = useLive();
-  return <CheckpointOffice data={q.data} live={live.data} />;
+  const money = useMoneyReports();
+  return <CheckpointOffice data={q.data} live={live.data} money={money} />;
 }
 
 /**

@@ -4,8 +4,8 @@ import { ROBOTS, type Checkpoint } from "@/lib/hq/checkpoint";
 import { EMPLOYEES } from "@/lib/hq/employees";
 
 import {
-  LINE_TEMPLATES, MANAGER, award, banter, praiseBuy, praiseStop, scoldRug, solo, topStopper,
-  voiceOf,
+  LINE_TEMPLATES, MANAGER, TEAM_LEAD, award, banter, praiseBuy, praiseStop, reportLab, reportToday,
+  reportWallets, scoldRug, solo, topStopper, voiceOf,
 } from "./checkpoint-chatter";
 
 const data: Checkpoint = {
@@ -66,5 +66,34 @@ describe("plenty to say", () => {
       expect(scoldRug("ADTF", seed).text).toContain("ADTF");
       expect(praiseBuy("WINNY", seed).text).toContain("WINNY");
     }
+  });
+});
+
+
+describe("Layla reads out the money", () => {
+  const lab = { started_at: "2026-09-30T20:00:00Z", capital_usd: "500", pnl_usd: "173.30",
+                trades: 272, wins: 250, rugs: 8 };
+  it("reads the lab's real figures, cheering a profit and rallying a loss", () => {
+    const up = reportLab(lab, 0)!;
+    expect(up.who).toBe("lead");
+    expect(up.text).toContain("plus $173.30");
+    expect(up.mood).toBe("happy");
+    const down = reportLab({ ...lab, pnl_usd: "-12.5" }, 0)!;
+    expect(down.text).toContain("minus $12.50");
+    expect(down.mood).toBe("sad");
+    expect(reportLab(undefined, 0)).toBeNull();
+  });
+
+  it("reads the real wallets only when they were given, and today only when it traded", () => {
+    const rows = [
+      { label: "Karthik", all_pnl_usd: "4.20", today_pnl_usd: "1.10", today_trades: 3, today_won: 2 },
+      { label: "Paper 1", all_pnl_usd: "-2.00", today_pnl_usd: "0", today_trades: 0, today_won: 0 },
+    ];
+    expect(reportWallets(rows, 0)!.text).toContain("Karthik plus $4.20, Paper 1 minus $2.00");
+    expect(reportToday(rows, 0)!.text).toContain("plus $1.10");
+    expect(reportWallets(undefined, 0)).toBeNull();
+    expect(reportToday([{ ...rows[0]!, today_trades: 0 }], 0)).toBeNull();
+    expect([MANAGER.first, ...ROBOTS.map((r) => r.first)]).not.toContain(TEAM_LEAD.first);
+    expect(EMPLOYEES.map((e) => e.name)).not.toContain(TEAM_LEAD.first);
   });
 });

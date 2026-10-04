@@ -1062,7 +1062,10 @@ FRESH_BOOKS: tuple[FreshBookSpec, ...] = (
     # means to start the real wallet on.
     # RESIZED 2026-10-03 to $500 at $50, with the book moved to $50k+ pools
     # (KARTHIK_BOOK_POOLS): at $100 the $50k+ book went broke on 24 Sep.
-    FreshBookSpec("KARTHIK_QUIET_5M", datetime(2026, 9, 23, 12, 0, tzinfo=UTC),
+    # FROM 1 OCT 00:00 DUBAI since 2026-10-04 (Karthik: "in karthik lab, juz
+    # keep data from october 1 and show profit loss as per that"): the book,
+    # its days, trades and grid all count from then. It opened 23 Sep 12:00Z.
+    FreshBookSpec("KARTHIK_QUIET_5M", datetime(2026, 9, 30, 20, 0, tzinfo=UTC),
                   Decimal(500), Decimal(50)),
 )
 

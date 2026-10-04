@@ -1428,12 +1428,8 @@ async def fresh_held(book: str = "", db: AsyncSession = Depends(get_db)) -> Fres
 #: Karthik, 2026-10-03: "change size on all 1st table shud be 10x like below
 #: table" -- both tables now run each size on ten times its size.
 KARTHIK_WHATIF_SIZES = tuple((t, 10 * t) for t in (10, 20, 25, 50, 100, 200))
-#: The same sizes (Karthik, 2026-10-03: "$10 on 100, 20 on 200 ... 200 on
-#: 2000"), a second table under the first, counted from 1 Oct.
-KARTHIK_WHATIF_SIZES_WIDE = KARTHIK_WHATIF_SIZES
-#: ...and counted from 1 Oct, 00:00 Dubai (Karthik, 2026-10-03: "show from
-#: october 1 instead").
-KARTHIK_WHATIF_WIDE_FROM = datetime(2026, 9, 30, 20, 0, tzinfo=UTC)
+#: (A second, from-1-Oct table went on 2026-10-04: the book itself starts on
+#: 1 Oct now, so it would repeat this one.)
 #: The pool floors across the page's grid (Karthik, 2026-09-27).
 #: Karthik, 2026-09-30: "remove 25k 50k ... 300k 500k", keep 200k.
 #: Each column is (at least, under); None = no upper bound. Karthik,
@@ -1531,11 +1527,6 @@ def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
                    "current": (t, c) == (ticket, capital),
                    "cells": [cell(col, float(t), float(c)) for col in KARTHIK_GRID_COLUMNS]}
                   for t, c in KARTHIK_WHATIF_SIZES],
-        "wide_from": KARTHIK_WHATIF_WIDE_FROM.isoformat(),
-        "sizes_wide": [{"ticket_usd": t, "capital_usd": c, "current": False,
-                        "cells": [cell(col, float(t), float(c), KARTHIK_WHATIF_WIDE_FROM)
-                                  for col in KARTHIK_GRID_COLUMNS]}
-                       for t, c in KARTHIK_WHATIF_SIZES_WIDE],
     }
 
 
