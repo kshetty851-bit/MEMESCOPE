@@ -70,6 +70,8 @@ export interface KarthikDay {
   /** True for the period still in progress, which is not yet a full day. */
   running: boolean;
   trades: number;
+  /** Trades that day that lost a rug's worth (2026-10-05). */
+  rugs?: number;
   pnl_usd: string;
   /** Of the balance this period OPENED with -- a day's return, not a share
    *  of the starting $500 like the figures above it. */

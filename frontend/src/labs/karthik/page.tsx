@@ -204,7 +204,12 @@ function Days({ days, judgeAt }: { days: KarthikDay[]; judgeAt: string }) {
               {pnl >= 0 ? "+" : ""}
               {usd(d.pnl_usd)}
             </div>
-            <div className="text-[11px] tabular-nums text-ink-dim">{d.trades} trades</div>
+            <div className="text-[11px] tabular-nums text-ink-dim">
+              {d.trades} trades
+              {d.rugs != null ? (
+                <span className={d.rugs ? "text-down" : ""}> · {d.rugs} rug{d.rugs === 1 ? "" : "s"}</span>
+              ) : null}
+            </div>
           </div>
         );
       })}
