@@ -2550,3 +2550,140 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
                      if board.called else
                      f"{leader.name} leads but is not called — " + "; ".join(fails))
     return board
+
+
+# --- Pool Lab (Karthik, 2026-10-05; the maths is in `pool_lab`) ---------------
+
+_POOL_SAMPLES = text("""
+select m.mint, m.ts as grad, s.ts, s.pair_address, s.price_native, s.price_usd,
+       s.liquidity_usd, coalesce(s.txns_m5_buys, 0) + coalesce(s.txns_m5_sells, 0) as txs,
+       t.symbol
+from grad_migrations m
+join grad_postgrad_samples s on s.mint = m.mint and s.ts >= m.ts
+                             and s.ts <= m.ts + interval '12 minutes'
+left join grad_tokens t on t.mint = m.mint
+where m.ts >= :start
+order by m.mint, s.ts
+""")
+#: (computed at, payload). The $10k backtest replays every graduation since
+#: 1 Oct, about a minute of work, so it is built behind the page.
+_POOL: tuple[datetime, dict[str, Any]] | None = None
+_POOL_LOCK = asyncio.Lock()
+_POOL_TTL = timedelta(minutes=10)
+
+
+async def _pool_rows(db: AsyncSession, books: Sequence[str], since: datetime,
+                     floor: int) -> list[Any]:
+    """Real-time closed rows of `books` from `since` on pools at or above
+    `floor`, without what the real wallets refuse (repeat creators)."""
+    rows = [r for r in (await db.scalars(
+        select(GradPaperPosition)
+        .where(GradPaperPosition.book.in_(books), GradPaperPosition.closed_at.is_not(None),
+               GradPaperPosition.excluded.is_(None), GradPaperPosition.net_return.is_not(None),
+               GradPaperPosition.opened_at >= since,
+               GradPaperPosition.close_reason.is_distinct_from("replayed"))
+        .order_by(GradPaperPosition.opened_at))).all()
+        if _fresh_entry(r) and float(r.liq_open_usd or 0) >= floor]
+    if rows:
+        repeat = set((await db.execute(
+            _REPEAT_CREATOR_SQL, {"m": [r.mint for r in rows]})).scalars())
+        rows = [r for r in rows if r.mint not in repeat]
+    # One position per coin: several books can hold the same mint.
+    seen: set[str] = set()
+    return [r for r in sorted(rows, key=_opened_order)
+            if not (r.mint in seen or seen.add(r.mint))]
+
+
+async def _pool_lab_build(db: AsyncSession) -> dict[str, Any]:
+    from app.labs.graduation import pool_lab as pl
+    from app.labs.graduation.tournament import settle
+
+    now = datetime.now(UTC)
+    cents = Decimal("0.01")
+    sol = await db.scalar(
+        select(GradPostgradSample.price_usd / GradPostgradSample.price_native)
+        .where(GradPostgradSample.price_usd > 0, GradPostgradSample.price_native > 0)
+        .order_by(GradPostgradSample.ts.desc()).limit(1))
+
+    def sizes(rows: Sequence[Any]) -> list[dict[str, Any]]:
+        rows = sorted(rows, key=_opened_order)
+        return [{"ticket_usd": t, "capital_usd": 10 * t,
+                 **_karthik_line(rows, sol, size=float(t), capital=10.0 * t, cents=cents)}
+                for t in pl.SIZES]
+
+    # $10k backtest: every graduation since 1 Oct, replayed with the real
+    # wallets' refusals (rug blocks where recorded, repeat creators).
+    blocked = set(await db.scalars(
+        select(GradOperator.mint).where(GradOperator.blocked_reason.is_not(None))))
+    by = pl.group_samples(await db.execute(
+        _POOL_SAMPLES, {"start": pl.FROM - timedelta(minutes=15)}))
+    rebuilt = []
+    for mint, samples in by.items():
+        if mint in blocked:
+            continue
+        got = pl.replay(samples, timedelta(minutes=5))
+        if got is None:
+            continue
+        position, quote, depth, closed_at = got
+        if position.opened_at < pl.FROM or float(position.liq_open_usd) < 10_000:
+            continue
+        settle(position, quote, depth, "replayed", closed_at)
+        if _fresh_entry(position):
+            rebuilt.append(position)
+    if rebuilt:
+        repeat = set((await db.execute(
+            _REPEAT_CREATOR_SQL, {"m": [r.mint for r in rebuilt]})).scalars())
+        rebuilt = [r for r in rebuilt if r.mint not in repeat]
+    db.expunge_all()
+    ten_live = await _pool_rows(db, (pl.TEN_K_BOOK,), pl.START, 10_000)
+
+    # $50k: ten user wallets on Karthik's book's real-time trades.
+    penalty = _size_penalty(pl.WALLET_TICKET, float(config.PAPER_NOTIONAL_USD), sol)
+    fifty = await _pool_rows(db, ("KARTHIK_QUIET_5M", "KARTHIK_Q50_5M"), pl.FROM, 50_000)
+
+    def trades(rows: Sequence[Any]) -> list[tuple[Any, ...]]:
+        return [(r.opened_at, r.closed_at, float(r.net_return),
+                 (float(r.impact_open or 0), float(r.impact_close or 0))) for r in rows]
+
+    def wallets(rows: Sequence[Any]) -> dict[str, Any]:
+        capped = pl.wallets_payload(pl.ten_wallets(trades(rows), penalty, cap=pl.COIN_CAP))
+        uncapped = pl.wallets_payload(pl.ten_wallets(trades(rows), penalty, cap=None))
+        return {**capped, "uncapped_total_usd": uncapped["total_usd"],
+                "uncapped_pnl_usd": uncapped["pnl_usd"], "coins": len(rows)}
+
+    live50 = [r for r in fifty if r.opened_at >= pl.START]
+    return {
+        "started_at": pl.START, "backtest_from": pl.FROM, "computed_at": now,
+        "ten_k": {"backtest": sizes(rebuilt), "live": sizes(ten_live),
+                  "backtest_coins": len(rebuilt), "live_coins": len(ten_live)},
+        "fifty_k": {"backtest": wallets(fifty), "live": wallets(live50),
+                    "ticket_usd": pl.WALLET_TICKET, "start_usd": pl.WALLET_START,
+                    "coin_cap_usd": pl.COIN_CAP},
+    }
+
+
+async def _pool_lab_refresh() -> None:
+    from app.db.session import SessionFactory
+
+    global _POOL
+    async with _POOL_LOCK:
+        try:
+            async with SessionFactory() as session:
+                _POOL = (datetime.now(UTC), await _pool_lab_build(session))
+        except Exception:
+            logger.warning("pool_lab_build_failed", exc_info=True)
+
+
+@router.get("/pool-lab",
+            summary="Pool Lab: $10k pools at 10x sizes, $50k pools on ten wallets")
+async def pool_lab_view() -> dict[str, Any]:
+    """Served from memory and rebuilt behind the page every `_POOL_TTL`: the
+    first visit after a restart says it is computing rather than waiting."""
+    from app.labs.graduation import pool_lab as pl
+
+    now = datetime.now(UTC)
+    if (_POOL is None or now - _POOL[0] >= _POOL_TTL) and not _POOL_LOCK.locked():
+        _spawn(_pool_lab_refresh())
+    if _POOL is None:
+        return {"computing": True, "started_at": pl.START, "backtest_from": pl.FROM}
+    return _POOL[1]
