@@ -292,6 +292,12 @@ class RealWalletDriver:
             Decimal(balance_lamports) / _LAMPORTS_PER_SOL * sol_price
             + await repo.open_exposure_usd(wallet)
         )
+        # Checked here, before a buy, where the worth is already read: no extra
+        # RPC on a pass with nothing to buy.
+        # ponytail: a family wallet can buy a coin the owner already holds
+        # without the owner reaching this line; the next owner candidate stops it.
+        if await rug_brake.stop_below_floor(self._session, now, equity_usd):
+            return DriverOutcome(0, "balance_floor")
         entry_usd = configured_entry_size_usd(equity_usd)
         if entry_usd is None or entry_usd <= 0:
             return DriverOutcome(0, "entry_size_not_configured")

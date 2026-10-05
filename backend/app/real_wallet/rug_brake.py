@@ -72,3 +72,25 @@ async def pull_if_due(session: AsyncSession, now: datetime,
         actor=ACTOR, at=now,
         reason=f"rug while the main wallet was worth ${value:.2f}, under ${BELOW_USD}")
     return True
+
+
+#: The balance floor (Karthik, 2026-10-05: "real wallet - stop trade if balance
+#: falls below 107$"): `settings.REAL_WALLET_BALANCE_FLOOR_USD`, $107 in
+#: compose. Unlike the brake above it needs no rug: the main wallet worth under
+#: it before a buy stops the trading, every wallet with it.
+FLOOR_ACTOR = "balance_floor"
+
+
+async def stop_below_floor(session: AsyncSession, now: datetime, worth: Decimal) -> bool:
+    """Stop the trading if the main wallet is worth under the floor. True when
+    it stopped it. Starting again while still under it stops again at the next
+    buy, by design: the floor is lowered by asking, not by Start."""
+    from app.core.config import settings
+
+    floor = settings.REAL_WALLET_BALANCE_FLOOR_USD
+    if not floor or worth >= floor:
+        return False
+    await AutotradeSwitchService(session).stop(
+        actor=FLOOR_ACTOR, at=now,
+        reason=f"main wallet worth ${worth:.2f}, under the ${floor:.0f} floor")
+    return True
