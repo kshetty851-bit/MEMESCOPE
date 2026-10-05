@@ -17,6 +17,10 @@ and so is anything opened at or after the book's first live trade, so a coin
 the live arm bought for itself is never overwritten by a copy.
 
     docker exec -w /app memescope-backend-N python scripts/seed_quiet_4m.py [--apply]
+
+2026-10-05: also any pair, e.g. the Pool Lab's $10k book moving to 3m:
+
+    python scripts/seed_quiet_4m.py POOL_10K_QUIET_5M POOL_10K_QUIET_3M [--apply]
 """
 
 from __future__ import annotations
@@ -31,8 +35,8 @@ from app.db.session import SessionFactory
 from app.labs.graduation.models import GradPaperPosition, GradPostgradSample
 from app.labs.graduation.tournament import BY_NAME, Mark, exit_mark, seen_at, settle, valued
 
-SOURCE = "BASE_75k_quiet_5m"
-TARGET = "BASE_75k_quiet_4m"
+_PAIR = [a for a in sys.argv[1:] if not a.startswith("--")]
+SOURCE, TARGET = _PAIR if _PAIR else ("BASE_75k_quiet_5m", "BASE_75k_quiet_4m")
 
 #: Copied verbatim: everything the entry decided. The exit fields are the only
 #: thing this script computes.
@@ -78,7 +82,7 @@ async def main(apply: bool) -> None:
                 # says so rather than inventing one.
                 copy.peak_quote = row.peak_quote
                 settle(copy, row.close_quote, row.liq_close_usd,
-                       f"{row.close_reason}_unmarked_at_4m", row.closed_at)
+                       f"{row.close_reason}_unmarked_at_{hold.seconds // 60}m", row.closed_at)
                 kept_close += 1
             else:
                 seen = [m for m in marks if (t := seen_at(m)) is not None and t <= due]
@@ -90,7 +94,7 @@ async def main(apply: bool) -> None:
             session.add(copy)
             made += 1
             print(f"{row.symbol or row.mint[:8]:<10} 5m {100 * float(row.net_return):>+7.2f}%"
-                  f"  ->  4m {100 * float(copy.net_return):>+7.2f}%  {copy.close_reason}")
+                  f"  ->  {hold.seconds // 60}m {100 * float(copy.net_return):>+7.2f}%  {copy.close_reason}")
         if apply:
             await session.commit()
         wrote = "WRITTEN" if apply else "dry run, nothing written"

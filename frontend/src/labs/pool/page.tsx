@@ -168,7 +168,7 @@ export function TenKBookPanel({ book, now }: { book: TenKBook; now: number }) {
             Open now · {book.open.length}
           </div>
           {book.open.length === 0 ? (
-            <p className="text-[12px] text-ink-dim">Nothing held right now. Each trade sells after five minutes.</p>
+            <p className="text-[12px] text-ink-dim">Nothing held right now. Each trade sells after three minutes.</p>
           ) : (
             <table className="w-full text-[13px]" data-testid="pool-open">
               <tbody>
