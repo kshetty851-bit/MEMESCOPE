@@ -802,6 +802,11 @@ ARMS: tuple[Arm, ...] = (
     Arm("BASE_50k_quiet_5m", "floor50", 5, quiet=True,
         note="every graduation over $50k whose pool is still quiet (under "
              "100 trades) when it is bought, out at 5m"),
+    # Karthik, 2026-10-05: the Pool Lab's live $10k book (`pool_lab`). Starts
+    # empty; the lab's backtest before it is a replay.
+    Arm("POOL_10K_QUIET_5M", "floor10k", 5, quiet=True,
+        note="every graduation over $10k whose pool is still quiet (under "
+             "100 trades) when it is bought, out at 5m"),
 )
 
 BY_NAME: dict[str, Arm] = {a.name: a for a in ARMS}
@@ -821,7 +826,8 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: BAND_55k_2m/_5m/_blk_5m/_quiet_5m. The history below is why there were 20.
 #: 2026-10-03: KARTHIK_Q25_5M back, for the $25k+ column on his page, and
 #: BASE_50k_quiet_5m for USER 1's G-Q50.
-assert len(ARMS) == 15, (
+#: 2026-10-05: POOL_10K_QUIET_5M for the Pool Lab.
+assert len(ARMS) == 16, (
     "the BASELINE, B3 at four and five minutes, the $500k+flow candidate, the "
     "fast pair E75/E75T, the quiet arms (75k at four and five, 150k, 75-300k), "
     "the $50k quiet arm, the band's pump-only arm and Karthik's three (KARTHIK_QUIET_5M, "
@@ -849,10 +855,10 @@ assert all(a.tp is None and a.trail is None for a in ARMS), (
 assert all(a.stop is None or a.stop == Decimal("0.10") for a in ARMS), (
     "one stop level, so the twins differ in ONE thing. Sweeping levels here "
     "would be fitting a parameter on the same data that suggested it")
-#: Fourteen since KARTHIK_Q25_5M and BASE_50k_quiet_5m (2026-10-03); under 42.
-assert len([a for a in ARMS if not a.is_control]) == 14, (
+#: Fifteen since KARTHIK_Q25_5M, BASE_50k_quiet_5m and POOL_10K (2026-10-05).
+assert len([a for a in ARMS if not a.is_control]) == 15, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Fourteen arms are now judged against it, so the bar is if anything "
+    "draws. Fifteen arms are now judged against it, so the bar is if anything "
     "CONSERVATIVE — the luckiest of twelve reaches less than the luckiest "
     "of forty-two. Left as it is deliberately: a bar that is too hard costs a "
     "real finding some time, where one that is too easy costs a false one nothing")

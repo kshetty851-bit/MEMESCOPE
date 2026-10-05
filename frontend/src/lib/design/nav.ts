@@ -77,6 +77,15 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Paper only. $400 at $200 a trade on the quiet rule, judged 23 Oct.",
       },
+      // Karthik, 2026-10-05: small pools at every size, and ten user wallets
+      // sharing the same coins.
+      {
+        href: "/pool-lab",
+        label: "Pool Lab",
+        icon: IconSpark,
+        status: "ready",
+        note: "Paper only. $10k pools at 10x sizes; $50k pools on ten wallets.",
+      },
     ],
   },
   {
