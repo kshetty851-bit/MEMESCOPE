@@ -30,7 +30,9 @@ from typing import Any
 #: The timer: the live columns count from here.
 # Reset 2026-10-05 (Karthik: "i want to see 10k pool starting now so reset
 # their profit"): the $10k book is live-only from here, no backtest.
-START = datetime(2026, 10, 5, 16, 45, tzinfo=UTC)
+# 16:44, not 16:45: its first buy (FAME) landed at 16:44:58, two seconds
+# before the timer, and Karthik saw it bought but not in the book.
+START = datetime(2026, 10, 5, 16, 44, tzinfo=UTC)
 #: The backtests count from 1 Oct, 00:00 Dubai.
 FROM = datetime(2026, 9, 30, 20, 0, tzinfo=UTC)
 TEN_K_BOOK = "POOL_10K_QUIET_5M"
