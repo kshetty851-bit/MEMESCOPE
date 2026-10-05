@@ -7,7 +7,8 @@ import { useEffect, useState } from "react";
 import { Panel, PanelHeader, PanelTitle } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/states";
-import { formatElapsed } from "@/labs/karthik/page";
+import { Days, formatElapsed, Row } from "@/labs/karthik/page";
+import type { KarthikDay, KarthikTrade } from "@/labs/karthik/types";
 import { api } from "@/lib/api-client";
 
 /** The thirty, working for the $10k book; loaded after the page so HQ's
@@ -53,12 +54,29 @@ interface WalletBook {
   uncapped_pnl_usd: number;
   coins: number;
 }
+interface OpenTrade {
+  symbol: string | null;
+  mint: string;
+  opened_at: string;
+  pool_usd: string | null;
+  /** After costs, at the last mark; null before the first one. */
+  pct_now: string | null;
+}
+/** The $10k book at $50 on $500, laid out like Karthik's Lab. */
+interface TenKBook {
+  ticket_usd: number;
+  capital_usd: number;
+  balance_usd: string;
+  days: KarthikDay[];
+  closed: (KarthikTrade & { rugged: boolean })[];
+  open: OpenTrade[];
+}
 export interface PoolLab {
   computing?: boolean;
   started_at: string;
   backtest_from: string;
   computed_at?: string;
-  ten_k?: { live: SizeLine[]; live_coins: number };
+  ten_k?: { live: SizeLine[]; live_coins: number; book?: TenKBook };
   fifty_k?: { backtest: WalletBook; live: WalletBook; ticket_usd: number; start_usd: number;
               coin_cap_usd: number };
 }
@@ -126,6 +144,72 @@ export function TenKTable({ data }: { data: NonNullable<PoolLab["ten_k"]> }) {
           {data.live_coins} real-time paper trades since the timer started, from the $10k paper
           book. Bigger sizes pay more pool impact, so profit does not grow in step with size.
         </p>
+      </div>
+    </Panel>
+  );
+}
+
+/** Karthik, 2026-10-05: "10k pool should show open and closed trades too and
+ *  daily profits and rugs same like karthik lab". */
+export function TenKBookPanel({ book, now }: { book: TenKBook; now: number }) {
+  const t = usd(book.ticket_usd).replace(".00", "");
+  return (
+    <Panel>
+      <PanelHeader>
+        <PanelTitle>
+          $10k+ book · {t} on {usd(book.capital_usd).replace(".00", "")} · balance{" "}
+          <span className="tabular-nums">{usd(book.balance_usd)}</span>
+        </PanelTitle>
+      </PanelHeader>
+      <div className="space-y-4 p-3" data-testid="pool-ten-k-book">
+        {book.days.length ? <Days days={book.days} /> : null}
+        <div className="overflow-x-auto">
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-ink-2">
+            Open now · {book.open.length}
+          </div>
+          {book.open.length === 0 ? (
+            <p className="text-[12px] text-ink-dim">Nothing held right now. Each trade sells after five minutes.</p>
+          ) : (
+            <table className="w-full text-[13px]" data-testid="pool-open">
+              <tbody>
+                {book.open.map((o) => (
+                  <tr key={o.mint} className="border-t border-line/60">
+                    <td className="py-1.5 pr-3 tabular-nums">{formatElapsed(now - new Date(o.opened_at).getTime())} ago</td>
+                    <td className="py-1.5 pr-3 font-medium">
+                      <a href={`https://dexscreener.com/solana/${o.mint}`} target="_blank" rel="noreferrer"
+                         className="text-accent underline-offset-2 hover:underline">
+                        {o.symbol || `${o.mint.slice(0, 6)}…`} <span aria-hidden>↗</span>
+                      </a>
+                    </td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums text-ink-dim">{usd(o.pool_usd)}</td>
+                    <td className={`py-1.5 text-right tabular-nums ${o.pct_now == null ? "text-ink-dim" : tone(o.pct_now)}`}>
+                      {o.pct_now == null ? "—" : `${Number(o.pct_now) >= 0 ? "+" : ""}${Number(o.pct_now).toFixed(2)}%`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+        <details className="overflow-x-auto">
+          <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wider text-ink-2">
+            Closed · {book.closed.length} · {book.closed.filter((c) => c.rugged).length} rugs
+          </summary>
+          <table className="mt-1 w-full text-[13px]" data-testid="pool-closed">
+            <thead className="text-[11px] uppercase tracking-wider text-ink-dim">
+              <tr>
+                <th className="py-1 pr-3 text-left font-normal">bought</th>
+                <th className="py-1 pr-3 text-left font-normal">coin</th>
+                <th className="py-1 pr-3 text-right font-normal">pool</th>
+                <th className="py-1 pr-3 text-right font-normal">result</th>
+                <th className="py-1 text-right font-normal">money</th>
+              </tr>
+            </thead>
+            <tbody>
+              {book.closed.map((c) => <Row key={`${c.mint}-${c.opened_at}`} trade={c} real={false} />)}
+            </tbody>
+          </table>
+        </details>
       </div>
     </Panel>
   );
@@ -219,7 +303,8 @@ export function PoolLabPage() {
   const q = useQuery({
     queryKey: ["pool-lab"],
     queryFn: () => api.get<PoolLab>("/labs/graduation/pool-lab"),
-    refetchInterval: (query) => (query.state.data?.computing ? 10_000 : 60_000),
+    // The worker rebuilds every minute; open trades last five.
+    refetchInterval: (query) => (query.state.data?.computing ? 10_000 : 30_000),
   });
   const now = useNow();
   if (q.isLoading) return <Skeleton className="h-64 w-full" />;
@@ -250,6 +335,7 @@ export function PoolLabPage() {
         <p className="text-sm text-ink-3">Working out the backtest — about a minute after a restart.</p>
       ) : (
         <>
+          {d.ten_k.book ? <TenKBookPanel book={d.ten_k.book} now={now} /> : null}
           <TenKTable data={d.ten_k} />
           <FiftyKTables data={d.fifty_k} />
         </>

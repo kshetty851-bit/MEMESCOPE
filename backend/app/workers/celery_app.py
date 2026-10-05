@@ -309,11 +309,12 @@ celery_app.conf.beat_schedule = {
         "task": "app.labs.graduation.scheduler.graduation_features_tick",
         "schedule": crontab(minute="*/10"),
     },
-    # The Pool Lab (2026-10-05): built here once every 15 minutes and served
-    # from Redis, so no API process ever replays the graduations itself.
+    # The Pool Lab (2026-10-05): built here and served from Redis, so no API
+    # process builds it. Every minute since its replay went: it now only reads
+    # the books, and its open trades turn over in five minutes.
     "graduation-pool-lab": {
         "task": "app.labs.graduation.scheduler.graduation_pool_lab_tick",
-        "schedule": crontab(minute="*/15"),
+        "schedule": crontab(minute="*"),
     },
     # The lab's forward paper book. Gated by LAB_GRADUATION_PAPER_ENABLED on
     # top of the lab flag, so turning the recorder on does not start a book.

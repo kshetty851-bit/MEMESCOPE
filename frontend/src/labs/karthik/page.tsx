@@ -160,9 +160,10 @@ export function day30(days: KarthikDay[], judgeAt: string, now = Date.now()) {
   return { expected: balance + avg * left, worstPace: balance + worst * left, avg, basedOn: done.length };
 }
 
-function Days({ days, judgeAt }: { days: KarthikDay[]; judgeAt: string }) {
+/** Also the Pool Lab's $10k book's days (2026-10-05), which has no judge date. */
+export function Days({ days, judgeAt }: { days: KarthikDay[]; judgeAt?: string }) {
   if (days.length === 0) return null;
-  const guess = day30(days, judgeAt);
+  const guess = judgeAt ? day30(days, judgeAt) : null;
   return (
     // Wrapped, not scrolled (Karthik, 2026-10-03: "so i dont need to slide").
     <div className="grid grid-cols-[repeat(auto-fill,minmax(112px,1fr))] gap-2">
@@ -217,7 +218,8 @@ function Days({ days, judgeAt }: { days: KarthikDay[]; judgeAt: string }) {
   );
 }
 
-function Row({ trade }: { trade: KarthikTrade }) {
+/** One closed trade; the Pool Lab's $10k book has no real-wallet column. */
+export function Row({ trade, real = true }: { trade: KarthikTrade; real?: boolean }) {
   const pct = Number(trade.pct);
   return (
     <tr className="border-t border-line/60">
@@ -265,7 +267,7 @@ function Row({ trade }: { trade: KarthikTrade }) {
       >
         {usd(trade.pnl_usd)}
       </td>
-      <td className="py-1.5 pl-3 text-right text-[11px]" data-testid="trade-real">
+      {real ? <td className="py-1.5 pl-3 text-right text-[11px]" data-testid="trade-real">
         {trade.real?.status === "bought" ? (
           <span className="text-up" title="The real main wallet bought this coin too">✓ bought</span>
         ) : trade.real ? (
@@ -275,7 +277,7 @@ function Row({ trade }: { trade: KarthikTrade }) {
         ) : (
           <span className="text-ink-dim" title="Before the main wallet's current start">—</span>
         )}
-      </td>
+      </td> : null}
     </tr>
   );
 }
