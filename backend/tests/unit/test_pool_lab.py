@@ -1,11 +1,9 @@
 """The Pool Lab's maths (2026-10-05): ten wallets on one coin pay one after
-another, the per-coin cap admits five, and a single bad exit print is no price."""
+another, and the per-coin cap admits five."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
-from types import SimpleNamespace
 
 from app.labs.graduation import pool_lab as pl
 
@@ -49,16 +47,3 @@ def test_a_wallet_never_spends_money_it_does_not_have():
     wallets = pl.ten_wallets(coins, 0.0, cap=None)
     assert all(w.trades == 10 for w in wallets)
     assert all(abs(w.worth() - pl.WALLET_START) < 1e-9 for w in wallets)
-
-
-def test_a_single_spike_is_not_an_exit():
-    def s(sec, price, liq=20_000):
-        return SimpleNamespace(
-            ts=T0 + timedelta(seconds=sec),
-            price_native=Decimal(str(price)),
-            liquidity_usd=Decimal(liq),
-        )
-
-    rows = [s(0, 1), s(300, 6), s(310, 1.1), s(320, 1.1)]
-    got = pl.confirmed_exit(rows, T0 + timedelta(seconds=300), Decimal(1), Decimal(20_000))
-    assert got is not None and got.ts == T0 + timedelta(seconds=310)

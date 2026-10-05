@@ -1534,6 +1534,7 @@ def _karthik_line(rows: Sequence[Any], sol: Decimal | None, *, size: float,
                     if capital else Decimal(0)),
         "trades": w.funded,
         "skipped": w.skipped,
+        "wins": sum(1 for _, m in took if m > 0),
         "rugs": sum(1 for r, _ in took
                     if float(r.net_return) <= float(config.OPERATOR_RUG_MOVE)),
         "lowest_usd": Decimal(str(w.low)).quantize(cents),
@@ -2554,21 +2555,10 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
 
 # --- Pool Lab (Karthik, 2026-10-05; the maths is in `pool_lab`) ---------------
 
-_POOL_SAMPLES = text("""
-select m.mint, m.ts as grad, s.ts, s.pair_address, s.price_native, s.price_usd,
-       s.liquidity_usd, coalesce(s.txns_m5_buys, 0) + coalesce(s.txns_m5_sells, 0) as txs,
-       t.symbol
-from grad_migrations m
-join grad_postgrad_samples s on s.mint = m.mint and s.ts >= m.ts
-                             and s.ts <= m.ts + interval '12 minutes'
-left join grad_tokens t on t.mint = m.mint
-where m.ts >= :start
-order by m.mint, s.ts
-""")
-#: Where the job runner leaves the Pool Lab (`scheduler.pool_lab_tick`). The
-#: $10k backtest replays every graduation since 1 Oct: built ONCE, every 15
-#: minutes, by the worker, never by the API's processes (2026-10-05: four
-#: gunicorn workers each building it at once took the API toward its 1 GB cap).
+#: Where the job runner leaves the Pool Lab (`scheduler.pool_lab_tick`): built
+#: ONCE, every 15 minutes, by the worker, never by the API's processes
+#: (2026-10-05: four gunicorn workers each replaying it took the API toward its
+#: 1 GB cap; the replay itself went the same day with the $10k backtest).
 POOL_LAB_KEY = "graduation:pool_lab"
 
 
@@ -2596,8 +2586,6 @@ async def _pool_rows(db: AsyncSession, books: Sequence[str], since: datetime,
 
 async def _pool_lab_build(db: AsyncSession) -> dict[str, Any]:
     from app.labs.graduation import pool_lab as pl
-    from app.labs.graduation.tournament import settle
-
     now = datetime.now(UTC)
     cents = Decimal("0.01")
     sol = await db.scalar(
@@ -2611,30 +2599,6 @@ async def _pool_lab_build(db: AsyncSession) -> dict[str, Any]:
                  **_karthik_line(rows, sol, size=float(t), capital=10.0 * t, cents=cents)}
                 for t in pl.SIZES]
 
-    # $10k backtest: every graduation since 1 Oct, replayed with the real
-    # wallets' refusals (rug blocks where recorded, repeat creators).
-    blocked = set(await db.scalars(
-        select(GradOperator.mint).where(GradOperator.blocked_reason.is_not(None))))
-    by = pl.group_samples(await db.execute(
-        _POOL_SAMPLES, {"start": pl.FROM - timedelta(minutes=15)}))
-    rebuilt = []
-    for mint, samples in by.items():
-        if mint in blocked:
-            continue
-        got = pl.replay(samples, timedelta(minutes=5))
-        if got is None:
-            continue
-        position, quote, depth, closed_at = got
-        if position.opened_at < pl.FROM or float(position.liq_open_usd) < 10_000:
-            continue
-        settle(position, quote, depth, "replayed", closed_at)
-        if _fresh_entry(position):
-            rebuilt.append(position)
-    if rebuilt:
-        repeat = set((await db.execute(
-            _REPEAT_CREATOR_SQL, {"m": [r.mint for r in rebuilt]})).scalars())
-        rebuilt = [r for r in rebuilt if r.mint not in repeat]
-    db.expunge_all()
     ten_live = await _pool_rows(db, (pl.TEN_K_BOOK,), pl.START, 10_000)
 
     # $50k: ten user wallets on Karthik's book's real-time trades.
@@ -2654,8 +2618,8 @@ async def _pool_lab_build(db: AsyncSession) -> dict[str, Any]:
     live50 = [r for r in fifty if r.opened_at >= pl.START]
     return {
         "started_at": pl.START, "backtest_from": pl.FROM, "computed_at": now,
-        "ten_k": {"backtest": sizes(rebuilt), "live": sizes(ten_live),
-                  "backtest_coins": len(rebuilt), "live_coins": len(ten_live)},
+        # Live only since 2026-10-05: no backtest for the $10k book.
+        "ten_k": {"live": sizes(ten_live), "live_coins": len(ten_live)},
         "fifty_k": {"backtest": wallets(fifty), "live": wallets(live50),
                     "ticket_usd": pl.WALLET_TICKET, "start_usd": pl.WALLET_START,
                     "coin_cap_usd": pl.COIN_CAP},

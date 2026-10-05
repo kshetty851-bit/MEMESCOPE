@@ -272,6 +272,8 @@ export const LINE_TEMPLATES = PRAISE_STOP.length + PRAISE_BUY.length + SCOLD.len
 
 export interface LabSummary {
   started_at: string; capital_usd: string; pnl_usd: string; trades: number; wins: number; rugs: number;
+  /** Which book and since when, as Layla says them (default: Karthik's Lab, 1 Oct). */
+  name?: string; since?: string;
 }
 export interface WalletProfitRow {
   label: string; all_pnl_usd: string; today_pnl_usd: string; today_trades: number; today_won: number;
@@ -280,15 +282,15 @@ export interface WalletProfitRow {
 const money = (v: number) => `${v < 0 ? "minus " : "plus "}$${Math.abs(v).toFixed(2)}`;
 
 const LAB_UP = [
-  "Numbers! Karthik's Lab since 1 Oct: {pnl} on {cap}, {trades} trades, {wins} wins. Brilliant work, team!",
-  "Lab update: {pnl} since 1 Oct over {trades} trades. That's your checking paying off. Well done!",
-  "Karthik's Lab is {pnl} since 1 Oct. {wins} wins out of {trades}. Proud of every one of you!",
-  "Report: {pnl} since 1 Oct, {rugs} rugs got through. Let's make that zero. Great job so far!",
+  "Numbers! {lab} since {since}: {pnl} on {cap}, {trades} trades, {wins} wins. Brilliant work, team!",
+  "Lab update: {pnl} since {since} over {trades} trades. That's your checking paying off. Well done!",
+  "{lab} is {pnl} since {since}. {wins} wins out of {trades}. Proud of every one of you!",
+  "Report: {pnl} since {since}, {rugs} rugs got through. Let's make that zero. Great job so far!",
 ];
 const LAB_DOWN = [
-  "Lab update: {pnl} since 1 Oct over {trades} trades. Heads up, team — every check counts!",
-  "We're {pnl} since 1 Oct. {rugs} rugs hurt us. Sharper eyes and we'll turn it around!",
-  "Karthik's Lab is {pnl} since 1 Oct. Not our best — let's earn it back, one clean coin at a time.",
+  "Lab update: {pnl} since {since} over {trades} trades. Heads up, team — every check counts!",
+  "We're {pnl} since {since}. {rugs} rugs hurt us. Sharper eyes and we'll turn it around!",
+  "{lab} is {pnl} since {since}. Not our best — let's earn it back, one clean coin at a time.",
 ];
 const WALLETS = [
   "Real wallets since 28 Sep: {list}. {verdict}",
@@ -307,6 +309,7 @@ export function reportLab(lab: LabSummary | undefined, seed: number): Line | nul
   const pnl = Number(lab.pnl_usd);
   return { who: "lead", mood: pnl >= 0 ? "happy" : "sad", text: fill(pick(pnl >= 0 ? LAB_UP : LAB_DOWN, seed), {
     pnl: money(pnl), cap: `$${Number(lab.capital_usd).toFixed(0)}`,
+    lab: lab.name ?? "Karthik's Lab", since: lab.since ?? "1 Oct",
     trades: String(lab.trades), wins: String(lab.wins), rugs: String(lab.rugs) }) };
 }
 

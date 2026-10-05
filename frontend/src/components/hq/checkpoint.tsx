@@ -61,10 +61,10 @@ function useCheckpoint() {
   });
 }
 
-function useLive() {
+function useLive(pool?: "10k") {
   return useQuery({
-    queryKey: ["hq", "checkpoint", "live"],
-    queryFn: () => api.get<LiveBelt>("/real-wallet/checkpoint/live"),
+    queryKey: ["hq", "checkpoint", "live", pool ?? "real"],
+    queryFn: () => api.get<LiveBelt>(`/real-wallet/checkpoint/live${pool ? `?pool=${pool}` : ""}`),
     refetchInterval: POLL_MS,
     staleTime: POLL_MS / 2,
   });
@@ -417,7 +417,10 @@ function ManagerDesk({ talk, data, now }: { talk: Line | null; data: Checkpoint 
   );
 }
 
-export function CheckpointOffice({ data, live, now: nowProp, motionOverride, money = {} }: {
+export function CheckpointOffice({ data, live, now: nowProp, motionOverride, money = {}, mode = "real" }: {
+  /** "pool10k" (2026-10-05): the same thirty checking for the Pool Lab's $10k
+   *  paper book — Diego's floor is $10,000 and a buy is the book's. */
+  mode?: "real" | "pool10k";
   data: Checkpoint | undefined;
   live: LiveBelt | undefined;
   /** What Layla reads out (`useMoneyReports`); none in tests. */
@@ -476,7 +479,9 @@ export function CheckpointOffice({ data, live, now: nowProp, motionOverride, mon
         <div>
           <h2 className="text-base font-semibold text-ink">The Checkpoint</h2>
           <p className="text-xs text-ink-3">
-            30 people check every coin before the real wallet buys it — live, as each coin graduates.
+            {mode === "pool10k"
+              ? "The same 30 people checking every coin for the $10k paper book — live, as each coin graduates."
+              : "30 people check every coin before the real wallet buys it — live, as each coin graduates."}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-4 text-xs tabular-nums">
@@ -507,7 +512,7 @@ export function CheckpointOffice({ data, live, now: nowProp, motionOverride, mon
         {STAGES.map((stage) => (
           <Hall key={stage.id} stage={stage} stateOf={stateOf} data={data} onBelt={onBelt}
                 stamp={stamp} recentStops={recentStops} onPick={setPicked} picked={picked} now={now}
-                talk={talk} />
+                talk={talk} mode={mode} />
         ))}
       </div>
 
@@ -538,7 +543,7 @@ export function CheckpointOffice({ data, live, now: nowProp, motionOverride, mon
               <div className="text-sm font-semibold text-ink">
                 {robot.first} · {robot.name} <span className="font-normal text-ink-3">· {STAGES.find((s) => s.id === robot.stage)!.title}</span>
               </div>
-              <div className="text-ink-2">{robot.job}</div>
+              <div className="text-ink-2">{jobOf(robot, mode)}</div>
               <div className="mt-0.5 text-ink-3">
                 {stoppedBy(robot, data) === null
                   ? "Guards every buy. Its refusals aren't recorded, so it shows no count."
@@ -562,8 +567,9 @@ export function CheckpointOffice({ data, live, now: nowProp, motionOverride, mon
   );
 }
 
-function Hall({ stage, stateOf, data, onBelt, stamp, recentStops, onPick, picked, now, talk }: {
+function Hall({ stage, stateOf, data, onBelt, stamp, recentStops, onPick, picked, now, talk, mode }: {
   now: number;
+  mode: "real" | "pool10k";
   talk: Line | null;
   stage: (typeof STAGES)[number];
   stateOf: (i: number) => BotState;
@@ -593,7 +599,7 @@ function Hall({ stage, stateOf, data, onBelt, stamp, recentStops, onPick, picked
             <button key={r.id} type="button" onClick={() => onPick(i)}
                     className="cp-bot relative flex w-[76px] flex-col items-center rounded-lg pt-1"
                     data-state={stateOf(i)} data-testid={`cp-bot-${r.id}`}
-                    aria-pressed={picked === i} aria-label={`${r.first} (${r.name}): ${r.job}`}
+                    aria-pressed={picked === i} aria-label={`${r.first} (${r.name}): ${jobOf(r, mode)}`}
                     style={{ "--cp-delay": `${(i * 0.37) % 3}s` } as React.CSSProperties}>
               {here.length ? (
                 <Coin label={here[0]!.coin.symbol} extra={here.length - 1}
@@ -636,6 +642,17 @@ function Hall({ stage, stateOf, data, onBelt, stamp, recentStops, onPick, picked
       <div className="cp-belt h-2.5 w-full" aria-hidden="true" />
     </div>
   );
+}
+
+/** A person's check in words; Diego's floor follows the office's mode. */
+function jobOf(r: (typeof ROBOTS)[number], mode: "real" | "pool10k"): string {
+  return mode === "pool10k" && r.id === "depth" ? "The pool holds at least $10,000" : r.job;
+}
+
+/** The office for the Pool Lab's $10k paper book (2026-10-05). */
+export function CheckpointPool10k({ money }: { money?: { lab?: LabSummary } }) {
+  const live = useLive("10k");
+  return <CheckpointOffice data={undefined} live={live.data} money={money} mode="pool10k" />;
 }
 
 export function CheckpointLive() {

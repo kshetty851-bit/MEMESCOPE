@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import dynamic from "next/dynamic";
 import { useEffect, useState } from "react";
 
 import { Panel, PanelHeader, PanelTitle } from "@/components/ui/panel";
@@ -8,6 +9,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/states";
 import { formatElapsed } from "@/labs/karthik/page";
 import { api } from "@/lib/api-client";
+
+/** The thirty, working for the $10k book; loaded after the page so HQ's
+ *  drawings stay out of its bundle. */
+const CheckpointPool10k = dynamic(
+  () => import("@/components/hq/checkpoint").then((m) => m.CheckpointPool10k),
+  { ssr: false },
+);
 
 /**
  * POOL LAB (Karthik, 2026-10-05: "build Pool LAB - lets start 10k pool WITH
@@ -25,6 +33,7 @@ interface SizeLine {
   pnl_pct: string;
   trades: number;
   rugs: number;
+  wins?: number;
   lowest_usd: string;
 }
 interface WalletRow {
@@ -49,7 +58,7 @@ export interface PoolLab {
   started_at: string;
   backtest_from: string;
   computed_at?: string;
-  ten_k?: { backtest: SizeLine[]; live: SizeLine[]; backtest_coins: number; live_coins: number };
+  ten_k?: { live: SizeLine[]; live_coins: number };
   fifty_k?: { backtest: WalletBook; live: WalletBook; ticket_usd: number; start_usd: number;
               coin_cap_usd: number };
 }
@@ -78,55 +87,44 @@ function useNow(): number {
   return now;
 }
 
-/** $10k+ pools: each size on ten times its balance, backtest and live. */
+/** $10k+ pools: each size on ten times its balance, live since the timer. */
 export function TenKTable({ data }: { data: NonNullable<PoolLab["ten_k"]> }) {
-  const live = new Map(data.live.map((l) => [l.ticket_usd, l]));
   return (
     <Panel>
       <PanelHeader>
-        <PanelTitle>$10k+ pools · quiet rule · each size on 10× its balance</PanelTitle>
+        <PanelTitle>$10k+ pools · quiet rule · each size on 10× its balance · live</PanelTitle>
       </PanelHeader>
       <div className="overflow-x-auto p-3" data-testid="pool-ten-k">
-        <table className="w-full min-w-[40rem] text-[12px] tabular-nums">
+        <table className="w-full min-w-[34rem] text-[12px] tabular-nums">
           <thead className="text-[11px] uppercase tracking-wider text-ink-dim">
             <tr>
               <th className="py-1 pr-3 text-left font-normal">size</th>
-              <th className="px-2 text-right font-normal">backtest · balance</th>
+              <th className="px-2 text-right font-normal">balance</th>
               <th className="px-2 text-right font-normal">profit</th>
-              <th className="px-2 text-right font-normal">trades / rugs</th>
-              <th className="px-2 text-right font-normal">lowest</th>
-              <th className="px-2 text-right font-normal">live · balance</th>
-              <th className="pl-2 text-right font-normal">profit</th>
+              <th className="px-2 text-right font-normal">trades</th>
+              <th className="px-2 text-right font-normal">rugs</th>
+              <th className="pl-2 text-right font-normal">lowest</th>
             </tr>
           </thead>
           <tbody>
-            {data.backtest.map((b) => {
-              const l = live.get(b.ticket_usd);
-              return (
-                <tr key={b.ticket_usd} className="border-t border-line/60">
-                  <td className="whitespace-nowrap py-1.5 pr-3">
-                    {usd(b.ticket_usd).replace(".00", "")}
-                    <span className="text-ink-dim"> on {usd(b.capital_usd).replace(".00", "")}</span>
-                  </td>
-                  <td className="px-2 text-right font-semibold text-ink">{usd(b.balance_usd)}</td>
-                  <td className={`px-2 text-right ${tone(b.pnl_usd)}`}>{usd(b.pnl_usd, true)}</td>
-                  <td className="px-2 text-right text-ink-3">{b.trades} / <span className={b.rugs ? "text-down" : ""}>{b.rugs}</span></td>
-                  <td className="px-2 text-right text-ink-3">{usd(b.lowest_usd)}</td>
-                  <td className="px-2 text-right font-semibold text-ink">{l ? usd(l.balance_usd) : "—"}</td>
-                  <td className={`pl-2 text-right ${l ? tone(l.pnl_usd) : "text-ink-3"}`}>
-                    {l ? usd(l.pnl_usd, true) : "—"}
-                  </td>
-                </tr>
-              );
-            })}
+            {data.live.map((l) => (
+              <tr key={l.ticket_usd} className="border-t border-line/60">
+                <td className="whitespace-nowrap py-1.5 pr-3">
+                  {usd(l.ticket_usd).replace(".00", "")}
+                  <span className="text-ink-dim"> on {usd(l.capital_usd).replace(".00", "")}</span>
+                </td>
+                <td className="px-2 text-right font-semibold text-ink">{usd(l.balance_usd)}</td>
+                <td className={`px-2 text-right ${tone(l.pnl_usd)}`}>{usd(l.pnl_usd, true)}</td>
+                <td className="px-2 text-right text-ink-3">{l.trades}</td>
+                <td className={`px-2 text-right ${l.rugs ? "text-down" : "text-ink-3"}`}>{l.rugs}</td>
+                <td className="pl-2 text-right text-ink-3">{usd(l.lowest_usd)}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
         <p className="mt-2 text-[11px] leading-relaxed text-ink-dim">
-          Backtest: {data.backtest_coins} coins since 1 Oct, rebuilt from the saved price readings
-          (no $10k arm existed before), with every exit price confirmed by the next reading so a
-          single bad print cannot count, and the real wallet&apos;s rug and repeat-creator blocks
-          applied. Live: {data.live_coins} real-time paper trades since the timer started. Bigger
-          sizes pay more pool impact, which is why profit does not grow in step with size.
+          {data.live_coins} real-time paper trades since the timer started, from the $10k paper
+          book. Bigger sizes pay more pool impact, so profit does not grow in step with size.
         </p>
       </div>
     </Panel>
@@ -208,6 +206,15 @@ export function FiftyKTables({ data }: { data: NonNullable<PoolLab["fifty_k"]> }
   );
 }
 
+/** What Layla reads out in the Pool Lab: the $10k book at $50 on $500. */
+function layla(d: PoolLab) {
+  const line = d.ten_k?.live.find((l) => l.ticket_usd === 50);
+  if (!line) return {};
+  return { lab: { started_at: d.started_at, capital_usd: String(line.capital_usd), pnl_usd: line.pnl_usd,
+                  trades: line.trades, wins: line.wins ?? 0, rugs: line.rugs,
+                  name: "The $10k paper book", since: "the timer" } };
+}
+
 export function PoolLabPage() {
   const q = useQuery({
     queryKey: ["pool-lab"],
@@ -238,6 +245,7 @@ export function PoolLabPage() {
           </div>
         </div>
       </div>
+      <CheckpointPool10k money={layla(d)} />
       {d.computing || !d.ten_k || !d.fifty_k ? (
         <p className="text-sm text-ink-3">Working out the backtest — about a minute after a restart.</p>
       ) : (
