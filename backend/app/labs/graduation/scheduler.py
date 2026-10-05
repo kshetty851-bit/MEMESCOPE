@@ -40,6 +40,7 @@ FLOWS_TASK = "app.labs.graduation.scheduler.graduation_flows_tick"
 FLOWS_PER_PASS = 10
 FLOWS_INTERVAL_SECONDS = 120
 RUGS_TASK = "app.labs.graduation.scheduler.graduation_rugs_tick"
+POOL_LAB_TASK = "app.labs.graduation.scheduler.graduation_pool_lab_tick"
 #: Graduations judged per pass: ~10 s of index reads on production at 200.
 RUGS_PER_PASS = 200
 RUGS_INTERVAL_SECONDS = 120
@@ -380,3 +381,35 @@ celery_app.conf.beat_schedule.setdefault("graduation-lab-paper", {
     "task": PAPER_TASK,
     "schedule": float(config.PAPER_INTERVAL_SECONDS),
 })
+
+
+
+@celery_app.task(name=POOL_LAB_TASK)
+def graduation_pool_lab_tick() -> dict[str, Any]:
+    from app.workers.runtime import run_async
+
+    return run_async(pool_lab_tick())
+
+
+async def pool_lab_tick() -> dict[str, Any]:
+    """Build the Pool Lab once and leave it in Redis for the API to serve
+    (2026-10-05). A client of its own per run: the API's shared one belongs to
+    another event loop."""
+    import json
+
+    from redis.asyncio import Redis
+
+    from app.core.config import settings
+    from app.labs.graduation.api import POOL_LAB_KEY, _pool_lab_build
+
+    if not config.enabled():
+        return {"skipped": "graduation_disabled"}
+    async with SessionFactory() as session:
+        payload = await _pool_lab_build(session)
+    redis = Redis.from_url(settings.REDIS_URI, decode_responses=True)
+    try:
+        await redis.set(POOL_LAB_KEY, json.dumps(payload, default=str), ex=3600)
+    finally:
+        await redis.aclose()
+    return {"ten_k_coins": payload["ten_k"]["backtest_coins"],
+            "fifty_k_coins": payload["fifty_k"]["backtest"]["coins"]}

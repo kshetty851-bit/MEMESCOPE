@@ -2565,11 +2565,11 @@ left join grad_tokens t on t.mint = m.mint
 where m.ts >= :start
 order by m.mint, s.ts
 """)
-#: (computed at, payload). The $10k backtest replays every graduation since
-#: 1 Oct, about a minute of work, so it is built behind the page.
-_POOL: tuple[datetime, dict[str, Any]] | None = None
-_POOL_LOCK = asyncio.Lock()
-_POOL_TTL = timedelta(minutes=10)
+#: Where the job runner leaves the Pool Lab (`scheduler.pool_lab_tick`). The
+#: $10k backtest replays every graduation since 1 Oct: built ONCE, every 15
+#: minutes, by the worker, never by the API's processes (2026-10-05: four
+#: gunicorn workers each building it at once took the API toward its 1 GB cap).
+POOL_LAB_KEY = "graduation:pool_lab"
 
 
 async def _pool_rows(db: AsyncSession, books: Sequence[str], since: datetime,
@@ -2662,28 +2662,16 @@ async def _pool_lab_build(db: AsyncSession) -> dict[str, Any]:
     }
 
 
-async def _pool_lab_refresh() -> None:
-    from app.db.session import SessionFactory
-
-    global _POOL
-    async with _POOL_LOCK:
-        try:
-            async with SessionFactory() as session:
-                _POOL = (datetime.now(UTC), await _pool_lab_build(session))
-        except Exception:
-            logger.warning("pool_lab_build_failed", exc_info=True)
-
-
 @router.get("/pool-lab",
             summary="Pool Lab: $10k pools at 10x sizes, $50k pools on ten wallets")
 async def pool_lab_view() -> dict[str, Any]:
-    """Served from memory and rebuilt behind the page every `_POOL_TTL`: the
-    first visit after a restart says it is computing rather than waiting."""
+    """What the job runner last built; "computing" until its first pass."""
+    import json
+
+    from app.core.redis import init_redis
     from app.labs.graduation import pool_lab as pl
 
-    now = datetime.now(UTC)
-    if (_POOL is None or now - _POOL[0] >= _POOL_TTL) and not _POOL_LOCK.locked():
-        _spawn(_pool_lab_refresh())
-    if _POOL is None:
+    raw = await (await init_redis()).get(POOL_LAB_KEY)
+    if not raw:
         return {"computing": True, "started_at": pl.START, "backtest_from": pl.FROM}
-    return _POOL[1]
+    return json.loads(raw)
