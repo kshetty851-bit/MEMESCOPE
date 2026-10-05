@@ -96,7 +96,7 @@ def where(coin: Coin, now: datetime) -> dict[str, Any]:
 
 #: The Pool Lab's $10k paper book (2026-10-05): the office in its $10k mode.
 POOL_FLOOR_10K = Decimal(10_000)
-POOL_10K_BOOK = "POOL_10K_QUIET_5M"
+POOL_10K_BOOK = "POOL_10K_QUIET_3M"
 
 
 def where_pool(coin: Coin, now: datetime,

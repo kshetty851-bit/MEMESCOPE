@@ -802,11 +802,13 @@ ARMS: tuple[Arm, ...] = (
     Arm("BASE_50k_quiet_5m", "floor50", 5, quiet=True,
         note="every graduation over $50k whose pool is still quiet (under "
              "100 trades) when it is bought, out at 5m"),
-    # Karthik, 2026-10-05: the Pool Lab's live $10k book (`pool_lab`). Starts
-    # empty; the lab's backtest before it is a replay.
-    Arm("POOL_10K_QUIET_5M", "floor10k", 5, quiet=True,
+    # Karthik, 2026-10-05: the Pool Lab's live $10k book (`pool_lab`). Out at
+    # 3m since that evening ("revise 10k pool selling at 3m"): it replaced
+    # POOL_10K_QUIET_5M, whose trades `scripts/seed_quiet_4m.py` re-priced at
+    # three minutes into this book.
+    Arm("POOL_10K_QUIET_3M", "floor10k", 3, quiet=True,
         note="every graduation over $10k whose pool is still quiet (under "
-             "100 trades) when it is bought, out at 5m"),
+             "100 trades) when it is bought, out at 3m"),
 )
 
 BY_NAME: dict[str, Arm] = {a.name: a for a in ARMS}
@@ -826,7 +828,8 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: BAND_55k_2m/_5m/_blk_5m/_quiet_5m. The history below is why there were 20.
 #: 2026-10-03: KARTHIK_Q25_5M back, for the $25k+ column on his page, and
 #: BASE_50k_quiet_5m for USER 1's G-Q50.
-#: 2026-10-05: POOL_10K_QUIET_5M for the Pool Lab.
+#: 2026-10-05: POOL_10K_QUIET_5M for the Pool Lab, the same day made
+#: POOL_10K_QUIET_3M.
 assert len(ARMS) == 16, (
     "the BASELINE, B3 at four and five minutes, the $500k+flow candidate, the "
     "fast pair E75/E75T, the quiet arms (75k at four and five, 150k, 75-300k), "
@@ -834,8 +837,10 @@ assert len(ARMS) == 16, (
     f"KARTHIK_Q50_5M, KARTHIK_Q25_5M) — not {len(ARMS)}. Retired and deleted "
     "arms' rules stay in ENTRY_RULES, and `_manage` settles what they still "
     "held as `arm_retired`")
-assert {a.hold for a in ARMS} == {4, 5}, (
-    "Four and five minutes. The two-minute arms (the A/B pair and BAND_55k_2m) "
+assert {a.hold for a in ARMS} == {3, 4, 5}, (
+    "Three, four and five minutes. Three is the Pool Lab's $10k book alone "
+    "(POOL_10K_QUIET_3M, Karthik 2026-10-05), from entry, on tiny pools whose "
+    "re-priced first 17 trades did best there. The two-minute arms (the A/B pair and BAND_55k_2m) "
     "went with every losing arm on 2026-10-01. Before that — from 2026-09-17 — "
     "two "
     "and three counted from GRADUATION rather than from entry, which is a "

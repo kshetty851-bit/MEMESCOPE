@@ -30,12 +30,14 @@ from typing import Any
 #: The timer: the live columns count from here.
 # Reset 2026-10-05 (Karthik: "i want to see 10k pool starting now so reset
 # their profit"): the $10k book is live-only from here, no backtest.
-# 16:44, not 16:45: its first buy (FAME) landed at 16:44:58, two seconds
-# before the timer, and Karthik saw it bought but not in the book.
-START = datetime(2026, 10, 5, 16, 44, tzinfo=UTC)
+# Then from the book's FIRST trade (15:59:14), when it moved to a 3-minute
+# sell the same evening ("revise 10k pool selling at 3m, change the profit
+# assuming we started since 1st trade"): its trades before the change are its
+# 5-minute twin's, re-priced at three minutes (`scripts/seed_quiet_4m.py`).
+START = datetime(2026, 10, 5, 15, 59, tzinfo=UTC)
 #: The backtests count from 1 Oct, 00:00 Dubai.
 FROM = datetime(2026, 9, 30, 20, 0, tzinfo=UTC)
-TEN_K_BOOK = "POOL_10K_QUIET_5M"
+TEN_K_BOOK = "POOL_10K_QUIET_3M"
 SIZES = (10, 20, 25, 50, 100, 200)
 WALLETS = 10
 WALLET_TICKET = 50.0
