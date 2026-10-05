@@ -2584,6 +2584,45 @@ async def _pool_rows(db: AsyncSession, books: Sequence[str], since: datetime,
             if not (r.mint in seen or seen.add(r.mint))]
 
 
+async def _pool_ten_k_book(db: AsyncSession, rows: Sequence[Any], sol: Decimal | None,
+                           cents: Decimal) -> dict[str, Any]:
+    """The $10k book at $50 on $500, laid out like Karthik's Lab (2026-10-05:
+    "10k pool should show open and closed trades too and daily profits and
+    rugs same like karthik lab"): its days, every closed trade, what it holds."""
+    from app.labs.graduation import pool_lab as pl
+
+    rows = sorted(rows, key=_opened_order)
+    walk = _funded_walk([(r.opened_at, r.closed_at, float(r.net_return),
+                          float(r.impact_open or 0), float(r.impact_close or 0)) for r in rows],
+                        sol, ticket=pl.WALLET_TICKET, start=pl.WALLET_START)
+    took = [(r, m) for r, m in zip(rows, walk.pnl, strict=True) if m is not None]
+    held = (await db.scalars(
+        select(GradPaperPosition)
+        .where(GradPaperPosition.book == pl.TEN_K_BOOK, GradPaperPosition.closed_at.is_(None),
+               GradPaperPosition.excluded.is_(None), GradPaperPosition.opened_at >= pl.START)
+        .order_by(GradPaperPosition.opened_at.desc()))).all()
+
+    def move(p: Any) -> Decimal | None:
+        live = net_return(p, p.last_quote)  # after costs, as the trade list's open rows
+        return None if live is None else (100 * live).quantize(cents)
+
+    return {
+        "ticket_usd": pl.WALLET_TICKET, "capital_usd": pl.WALLET_START,
+        "balance_usd": Decimal(str(walk.cash)).quantize(cents),
+        "days": _karthik_days(took, pl.START, pl.WALLET_START, cents),
+        "closed": [{"symbol": r.symbol, "mint": r.mint, "opened_at": r.opened_at,
+                    "closed_at": r.closed_at, "pool_usd": r.liq_open_usd,
+                    "pct": Decimal(str(100 * float(r.net_return))).quantize(cents),
+                    "pnl_usd": Decimal(str(m)).quantize(cents),
+                    "rugged": float(r.net_return) <= float(config.OPERATOR_RUG_MOVE)}
+                   for r, m in reversed(took)],
+        "open": [{"symbol": p.symbol, "mint": p.mint, "opened_at": p.opened_at,
+                  "pool_usd": p.liq_open_usd, "pct_now": move(p),
+                  "marked_at": p.marked_at}
+                 for p in held],
+    }
+
+
 async def _pool_lab_build(db: AsyncSession) -> dict[str, Any]:
     from app.labs.graduation import pool_lab as pl
     now = datetime.now(UTC)
@@ -2600,6 +2639,7 @@ async def _pool_lab_build(db: AsyncSession) -> dict[str, Any]:
                 for t in pl.SIZES]
 
     ten_live = await _pool_rows(db, (pl.TEN_K_BOOK,), pl.START, 10_000)
+    ten_book = await _pool_ten_k_book(db, ten_live, sol, cents)
 
     # $50k: ten user wallets on Karthik's book's real-time trades.
     penalty = _size_penalty(pl.WALLET_TICKET, float(config.PAPER_NOTIONAL_USD), sol)
@@ -2619,7 +2659,7 @@ async def _pool_lab_build(db: AsyncSession) -> dict[str, Any]:
     return {
         "started_at": pl.START, "backtest_from": pl.FROM, "computed_at": now,
         # Live only since 2026-10-05: no backtest for the $10k book.
-        "ten_k": {"live": sizes(ten_live), "live_coins": len(ten_live)},
+        "ten_k": {"live": sizes(ten_live), "live_coins": len(ten_live), "book": ten_book},
         "fifty_k": {"backtest": wallets(fifty), "live": wallets(live50),
                     "ticket_usd": pl.WALLET_TICKET, "start_usd": pl.WALLET_START,
                     "coin_cap_usd": pl.COIN_CAP},
