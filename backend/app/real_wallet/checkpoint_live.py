@@ -92,3 +92,36 @@ def where(coin: Coin, now: datetime) -> dict[str, Any]:
     if now - coin.graduated > RULE_WAIT:
         return out("stopped", "the rule did not take it", robot="hush")
     return out("checking", "checking the pool is quiet", robot="hush")
+
+
+#: The Pool Lab's $10k paper book (2026-10-05): the office in its $10k mode.
+POOL_FLOOR_10K = Decimal(10_000)
+POOL_10K_BOOK = "POOL_10K_QUIET_5M"
+
+
+def where_pool(coin: Coin, now: datetime,
+               floor: Decimal = POOL_FLOOR_10K) -> dict[str, Any]:
+    """`where` for a paper book with no wallet behind it: a coin is BOUGHT
+    when the book bought it (`coin.bought_at`), and the wallet's gate and
+    safety lab have nothing to say. Pools under $50k carry no rug-block record
+    (the lab records the wallets behind $50k+ pools only)."""
+    def out(status: str, note: str, robot: str | None = None,
+            code: str | None = None) -> dict[str, Any]:
+        return {"status": status, "robot": robot, "code": code, "note": note}
+
+    if coin.bought_at is not None:
+        return out("bought", "passed the checks; the $10k paper book bought it",
+                   robot="wallet")
+    if coin.liquidity is None:
+        if now - coin.graduated > POOL_WAIT:
+            return out("stopped", "its pool never showed", robot="depth")
+        return out("checking", "waiting for the pool to show", robot="depth")
+    if coin.liquidity < floor:
+        return out("stopped", f"pool ${coin.liquidity:,.0f}, under ${floor:,.0f}",
+                   robot="depth")
+    if coin.blocked:
+        return out("stopped", "a rug block refused it", code=coin.blocked)
+    if now - coin.graduated > RULE_WAIT:
+        return out("stopped", "the rule did not take it (a busy pool, or a late entry)",
+                   robot="hush")
+    return out("checking", "checking the pool is quiet", robot="hush")

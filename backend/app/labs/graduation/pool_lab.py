@@ -2,17 +2,14 @@
 this 10x splits. and another table build 50k pool - 50$ on 500$ each with 10
 user wallets backtest, keep the trade price real way, start the timer too").
 
-Two books, each shown twice — a BACKTEST from 1 Oct 00:00 Dubai and a LIVE
-record from the lab's own start (`START`, the timer):
+Two books:
 
-* $10k+ pools, the quiet rule, every size on ten times its balance. Live from
-  its own paper arm (`TEN_K_BOOK`). The backtest has no arm to read before
-  `START`, so it REPLAYS every graduation from the post-graduation samples,
-  exactly as `scripts/seed_karthik_bands.py` does, with one extra guard: the
-  exit reading must be confirmed by the next one (within `CONFIRM`). Tiny
-  pools print single readings 5-7x off; an exit nobody could repeat is not a
-  price.
-* $50k+ pools, ten user wallets at $50 on $500 each, on the real-time
+* $10k+ pools, the quiet rule, every size on ten times its balance: LIVE ONLY,
+  from its own paper arm (`TEN_K_BOOK`) since `START` (the timer). Its replayed
+  backtest went on 2026-10-05 at Karthik's request ("reset their profit");
+  the tiny-pool replays rested on a few 5-7x prints anyway.
+* $50k+ pools, ten user wallets at $50 on $500 each — a BACKTEST from 1 Oct
+  00:00 Dubai and LIVE from `START` — on the real-time
   trades of Karthik's book (never replayed rows), the coins the real wallets
   refuse taken out. "The real way": wallets that buy the same coin buy ONE
   AFTER ANOTHER, so each pays the price the ones before it pushed up, and they
@@ -26,14 +23,14 @@ a different order size on each leg, and `api._size_penalty` for the flat fee.
 
 from __future__ import annotations
 
-from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
-from decimal import Decimal
+from datetime import UTC, datetime
 from typing import Any
 
 #: The timer: the live columns count from here.
-START = datetime(2026, 10, 5, 17, 0, tzinfo=UTC)
+# Reset 2026-10-05 (Karthik: "i want to see 10k pool starting now so reset
+# their profit"): the $10k book is live-only from here, no backtest.
+START = datetime(2026, 10, 5, 16, 45, tzinfo=UTC)
 #: The backtests count from 1 Oct, 00:00 Dubai.
 FROM = datetime(2026, 9, 30, 20, 0, tzinfo=UTC)
 TEN_K_BOOK = "POOL_10K_QUIET_5M"
@@ -43,8 +40,6 @@ WALLET_TICKET = 50.0
 WALLET_START = 500.0
 #: The real wallets' per-coin cap across user wallets (REAL_WALLET_MAX_COIN_USD).
 COIN_CAP = 250.0
-#: An exit reading must sit within this fraction of the next reading.
-CONFIRM = 0.30
 RUG = -0.5
 NEVER = datetime.min.replace(tzinfo=UTC)
 
@@ -141,97 +136,3 @@ def wallets_payload(wallets: list[Wallet]) -> dict[str, Any]:
         "pnl_usd": round(total - WALLET_START * len(rows), 2),
         "trades": sum(r["trades"] for r in rows),
     }
-
-
-def confirmed_exit(
-    rows: list[Any], at: datetime, entry_price: Decimal, entry_depth: Decimal
-) -> Any | None:
-    """The first sample at or after `at` that the pool's depth can support
-    (the seed script's guard) AND the next reading confirms."""
-    later = [r for r in rows if r.ts >= at]
-    for i, r in enumerate(later):
-        price = Decimal(r.price_native)
-        if price > entry_price * (Decimal(r.liquidity_usd) / entry_depth) ** 2 * Decimal(
-            "1.5"
-        ):
-            continue
-        nxt = later[i + 1] if i + 1 < len(later) else None
-        if nxt is None:
-            return None
-        ratio = float(Decimal(nxt.price_native) / price) if price else 0.0
-        if abs(ratio - 1) <= CONFIRM:
-            return r
-    return None
-
-
-def group_samples(rows: Any) -> dict[str, list[Any]]:
-    by: dict[str, list[Any]] = defaultdict(list)
-    for r in rows:
-        by[r.mint].append(r)
-    return by
-
-
-def replay(
-    samples: list[Any], hold: timedelta
-) -> tuple[Any, Decimal, Decimal, datetime] | None:
-    """One coin as the quiet rule would have bought it, rebuilt from its
-    samples: `seed_karthik_bands.replay` with the confirmed exit."""
-    from app.labs.graduation import config
-    from app.labs.graduation.backtest import amm_buy, amm_impact
-    from app.labs.graduation.models import GradPaperPosition
-    from app.labs.graduation.paper import _rate, costs
-    from app.labs.graduation.tournament import graduation_pool
-
-    notional = config.PAPER_NOTIONAL_USD
-    pool = graduation_pool(samples[0].mint)
-    rows = [
-        r
-        for r in samples
-        if r.pair_address == pool
-        and r.price_native
-        and r.price_native > 0
-        and r.liquidity_usd
-        and r.price_usd
-    ]
-    if not rows:
-        return None
-    e = rows[0]
-    depth, price = Decimal(e.liquidity_usd), Decimal(e.price_native)
-    if e.txs >= config.QUIET_MAX_POOL_TXS:
-        return None
-    impact = amm_impact(notional, depth)
-    rate = _rate(Decimal(e.price_usd), price)
-    if impact is None or impact > config.PAPER_MAX_IMPACT or rate is None:
-        return None
-    quote_amount = (notional / rate).quantize(Decimal("0.000000001"))
-    fee_bps = config.pool_fee_bps(price)
-    fill = amm_buy(
-        price,
-        order_usd=notional,
-        liquidity_usd=depth,
-        fee_fraction=costs(quote_amount, pool_fee_bps=fee_bps).fee_fraction,
-    )
-    if fill is None or fill <= 0:
-        return None
-    x = confirmed_exit(rows, e.ts + hold, price, depth)
-    if x is None:
-        return None
-    position = GradPaperPosition(
-        mint=e.mint,
-        symbol=(e.symbol or None),
-        opened_at=e.ts,
-        open_quote=price,
-        open_fill=fill,
-        notional_usd=notional,
-        sol_usd_at_open=rate,
-        notional_quote=quote_amount,
-        tokens=(quote_amount / fill),
-        peak_quote=price,
-        last_quote=Decimal(x.price_native),
-        liq_open_usd=depth,
-        impact_open=impact,
-        pool_fee_bps=fee_bps,
-        graduated_at=e.grad,
-        marked_at=x.ts,
-    )
-    return position, Decimal(x.price_native), Decimal(x.liquidity_usd), x.ts

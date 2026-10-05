@@ -411,5 +411,5 @@ async def pool_lab_tick() -> dict[str, Any]:
         await redis.set(POOL_LAB_KEY, json.dumps(payload, default=str), ex=3600)
     finally:
         await redis.aclose()
-    return {"ten_k_coins": payload["ten_k"]["backtest_coins"],
+    return {"ten_k_coins": payload["ten_k"]["live_coins"],
             "fifty_k_coins": payload["fifty_k"]["backtest"]["coins"]}

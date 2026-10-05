@@ -625,11 +625,54 @@ LIVE_WINDOW = timedelta(minutes=10)
 LIVE_MAX = 24
 
 
+async def _checkpoint_live_10k(session: Any) -> dict[str, object]:
+    from app.real_wallet import checkpoint_live as live
+
+    now = datetime.now(UTC)
+    grads = (await session.execute(
+        select(GradMigration.mint, GradMigration.ts)
+        .where(GradMigration.ts >= now - LIVE_WINDOW)
+        .order_by(GradMigration.ts.desc()).limit(LIVE_MAX))).all()
+    coins = {m: live.Coin(graduated=ts) for m, ts in grads}
+    symbols: dict[str, str] = {}
+    if coins:
+        mints = list(coins)
+        for m, liq in (await session.execute(
+                select(GradPostgradSample.mint, GradPostgradSample.liquidity_usd)
+                .where(GradPostgradSample.mint.in_(mints),
+                       GradPostgradSample.liquidity_usd.is_not(None))
+                .order_by(GradPostgradSample.mint, GradPostgradSample.ts)
+                .distinct(GradPostgradSample.mint))).all():
+            coins[m].liquidity = Decimal(liq)
+        for m, why in (await session.execute(
+                select(GradOperator.mint, GradOperator.blocked_reason)
+                .where(GradOperator.mint.in_(mints)))).all():
+            coins[m].blocked = why
+        for m, at in (await session.execute(
+                select(GradPaperPosition.mint, GradPaperPosition.opened_at)
+                .where(GradPaperPosition.mint.in_(mints),
+                       GradPaperPosition.book == live.POOL_10K_BOOK))).all():
+            coins[m].bought_at = at
+        symbols = {m: s for m, s in (await session.execute(
+            select(GradToken.mint, GradToken.symbol).where(GradToken.mint.in_(mints)))).all()
+            if s}
+    return {"now": now.isoformat(), "coins": [
+        {"symbol": symbols.get(m), "graduated_at": ts.isoformat(),
+         **live.where_pool(coins[m], now)}
+        for m, ts in grads]}
+
+
 @router.get("/checkpoint/live", summary="Where each new graduation is in the checks, now")
-async def checkpoint_live_view(session: DbSession) -> dict[str, object]:
+async def checkpoint_live_view(session: DbSession,
+                               pool: str | None = None) -> dict[str, object]:
     """Karthik, 2026-10-02: "i want real time token checks". Every coin that
     graduated in the last ten minutes and the check it has reached, from the
-    records each check leaves (`checkpoint_live.where`). Names only."""
+    records each check leaves (`checkpoint_live.where`). Names only.
+
+    `pool=10k` (2026-10-05): the same office for the Pool Lab's $10k paper
+    book (`checkpoint_live.where_pool`) — no wallet, the book's own buys."""
+    if pool == "10k":
+        return await _checkpoint_live_10k(session)
     from app.models.real_wallet_execution import RealWalletLiveIntent
     from app.real_wallet import checkpoint_live as live
 

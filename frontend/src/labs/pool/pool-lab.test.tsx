@@ -13,12 +13,12 @@ const book = (pnl: number) => ({
 });
 
 describe("Pool Lab", () => {
-  it("shows every 10x size with its backtest and live columns", () => {
-    render(<TenKTable data={{ backtest: [line(10, "6.50")], live: [line(10, "-1.20")], backtest_coins: 30, live_coins: 2 }} />);
+  it("shows every 10x size, live only since the reset", () => {
+    render(<TenKTable data={{ live: [line(10, "-1.20")], live_coins: 2 }} />);
     const t = screen.getByTestId("pool-ten-k");
     expect(t).toHaveTextContent("$10 on $100");
-    expect(t).toHaveTextContent("+$6.50");
     expect(t).toHaveTextContent("-$1.20");
+    expect(t).not.toHaveTextContent("backtest");
   });
 
   it("shows ten wallets with a total, capped and uncapped", () => {
