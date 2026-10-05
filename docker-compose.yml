@@ -331,6 +331,8 @@ x-backend-env: &backend-env
   REAL_WALLET_MEMBER_MAX_OPEN: '{"USER1": 25}'
   # Karthik, 2026-10-04: the main wallet holds several at once too.
   REAL_WALLET_OWNER_MAX_OPEN: 25
+  # Karthik, 2026-10-05: stop the trading if the main wallet falls below $107.
+  REAL_WALLET_BALANCE_FLOOR_USD: 107
   # The buy-time holder check. Here and not only in config.py: a value the
   # anchor does not name never reaches a container.
   REAL_WALLET_HOLDER_GATE_ENABLED: ${REAL_WALLET_HOLDER_GATE_ENABLED:-false}

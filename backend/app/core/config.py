@@ -1067,6 +1067,11 @@ class Settings(BaseSettings):
     #: on G-Q50, "several at once"). That setting stays the user wallets'
     #: default. None keeps the platform's. Production sets it in compose.
     REAL_WALLET_OWNER_MAX_OPEN: int | None = Field(default=None, ge=1)
+    #: The main wallet's balance floor (Karthik, 2026-10-05: "stop trade if
+    #: balance falls below 107$"): worth under it before a buy stops the
+    #: trading (`rug_brake.stop_below_floor`). 0 is off. Production sets it
+    #: in compose.
+    REAL_WALLET_BALANCE_FLOOR_USD: Decimal = Field(default=Decimal(0), ge=0)
     # Phase 2 is a separate, deliberately tiny manual-devnet workflow. These
     # values are used by the API and signer to enforce the same small envelope;
     # the signer-file *path* is intentionally not a Settings field because the

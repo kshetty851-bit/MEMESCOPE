@@ -100,3 +100,18 @@ async def test_nothing_happens_while_already_stopped(db_session):
         return Decimal(1)
     assert await rug_brake.pull_if_due(db_session, START + timedelta(hours=1), read) is False
     assert asked == [], "a stopped switch needs no balance read"
+
+
+async def test_the_balance_floor_stops_under_107_only(db_session, monkeypatch):
+    from app.core.config import settings
+
+    now = START + timedelta(minutes=5)
+    await _on(db_session)
+    assert await rug_brake.stop_below_floor(db_session, now, Decimal("1")) is False  # off
+    monkeypatch.setattr(settings, "REAL_WALLET_BALANCE_FLOOR_USD", Decimal(107))
+    assert await rug_brake.stop_below_floor(db_session, now, Decimal("107.00")) is False
+    assert (await AutotradeSwitchService(db_session).state()).enabled is True
+    assert await rug_brake.stop_below_floor(db_session, now, Decimal("106.99")) is True
+    state = await AutotradeSwitchService(db_session).state()
+    assert (state.enabled, state.stopped_by) == (False, "balance_floor")
+    assert "$106.99, under the $107 floor" in state.stop_reason
