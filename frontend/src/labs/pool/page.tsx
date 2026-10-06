@@ -239,7 +239,7 @@ export function TenKRuleBook({ book }: { book: TenKBook }) {
     ["Skips the middle", `No pools between ${k(lo)} and ${k(hi)}: they lost money in both halves of this book's first day, and Karthik's Lab's ${k(lo)}–${k(hi)} book lost almost all its money.`],
     ["Only quiet pools", `Fewer than ${r.quiet_max_txs} trades in the pool so far when it buys. A busy start is skipped.`],
     ["Only fresh coins", `It buys within ${r.max_entry_age_s / 60} minutes of the coin graduating, or not at all.`],
-    ["No repeat creators", "Coins whose creator has launched a coin before are left out, as the real wallets refuse them."],
+    ["No repeat creators", "Coins whose creator has launched a coin before are left out: on this book they lost money. (The $50k books buy them again.)"],
     ["Several at once", `${usd(book.ticket_usd)} per trade from a ${usd(book.capital_usd)} balance. It buys every coin that passes while a whole ${usd(book.ticket_usd)} is free.`],
     ["Always sells", `Exactly ${r.hold_minutes} minutes after buying. No price targets, no stop-loss — the clock decides.`],
     ["The risk", `Tiny pools rug often: a rug loses almost the whole trade.${rugs ? ` So far ${rugs} in ${trades} trades.` : ""}`],
@@ -338,7 +338,7 @@ export function FiftyKTables({ data }: { data: NonNullable<PoolLab["fifty_k"]> }
         the ones before it pushed up, and they sell the same way. The real wallets cap user wallets
         at {usd(data.coin_cap_usd).replace(".00", "")} a coin, so {perCoin} wallets share each coin
         and the longest-waiting go first. Coins and results are Karthik&apos;s Lab&apos;s real-time
-        paper trades on $50k+ pools, without the coins the real wallets refuse.
+        paper trades on $50k+ pools.
       </p>
     </Panel>
   );

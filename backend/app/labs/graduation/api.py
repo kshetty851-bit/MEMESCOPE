@@ -1886,13 +1886,9 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     every = [r for r in sorted([*small, *signals], key=_opened_order)
              if lo <= float(r.liq_open_usd or 0)
              and (hi is None or float(r.liq_open_usd or 0) < hi)]
-    # The real wallets refuse a coin whose creator launched one before
-    # (CREATOR_LAUNCHED_BEFORE, 2026-10-03); the book does too since 2026-10-05
-    # (Karthik: "make sure all the buy trades matches with real wallet").
-    if every:
-        repeat = set((await db.execute(_REPEAT_CREATOR_SQL,
-                                       {"m": [r.mint for r in every]})).scalars())
-        every = [r for r in every if r.mint not in repeat]
+    # Repeat creators are bought again since 2026-10-06, here and on the real
+    # wallets (Karthik: "remove repeat creator block from 50k pool ... assume we
+    # had rule since day 1"): the block refused 57 coins, 54 winners, 1 rug.
     # As many at once as the balance allows (2026-10-03), not one at a time.
     rows = every
     walk = _funded_walk(
@@ -2563,9 +2559,10 @@ POOL_LAB_KEY = "graduation:pool_lab"
 
 
 async def _pool_rows(db: AsyncSession, books: Sequence[str], since: datetime,
-                     floor: int) -> list[Any]:
+                     floor: int, *, skip_repeat: bool = True) -> list[Any]:
     """Real-time closed rows of `books` from `since` on pools at or above
-    `floor`, without what the real wallets refuse (repeat creators)."""
+    `floor`, without repeat creators unless `skip_repeat` is False (the $50k
+    books buy them again since 2026-10-06; the $10k book still skips them)."""
     rows = [r for r in (await db.scalars(
         select(GradPaperPosition)
         .where(GradPaperPosition.book.in_(books), GradPaperPosition.closed_at.is_not(None),
@@ -2574,7 +2571,7 @@ async def _pool_rows(db: AsyncSession, books: Sequence[str], since: datetime,
                GradPaperPosition.close_reason.is_distinct_from("replayed"))
         .order_by(GradPaperPosition.opened_at))).all()
         if _fresh_entry(r) and float(r.liq_open_usd or 0) >= floor]
-    if rows:
+    if rows and skip_repeat:
         repeat = set((await db.execute(
             _REPEAT_CREATOR_SQL, {"m": [r.mint for r in rows]})).scalars())
         rows = [r for r in rows if r.mint not in repeat]
@@ -2653,7 +2650,8 @@ async def _pool_lab_build(db: AsyncSession) -> dict[str, Any]:
 
     # $50k: ten user wallets on Karthik's book's real-time trades.
     penalty = _size_penalty(pl.WALLET_TICKET, float(config.PAPER_NOTIONAL_USD), sol)
-    fifty = await _pool_rows(db, ("KARTHIK_QUIET_5M", "KARTHIK_Q50_5M"), pl.FROM, 50_000)
+    fifty = await _pool_rows(db, ("KARTHIK_QUIET_5M", "KARTHIK_Q50_5M"), pl.FROM, 50_000,
+                             skip_repeat=False)
 
     def trades(rows: Sequence[Any]) -> list[tuple[Any, ...]]:
         return [(r.opened_at, r.closed_at, float(r.net_return),
