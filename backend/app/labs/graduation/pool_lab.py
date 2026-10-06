@@ -38,6 +38,10 @@ START = datetime(2026, 10, 5, 15, 59, tzinfo=UTC)
 #: The backtests count from 1 Oct, 00:00 Dubai.
 FROM = datetime(2026, 9, 30, 20, 0, tzinfo=UTC)
 TEN_K_BOOK = "POOL_10K_QUIET_3M"
+#: Pools the $10k book skips (Karthik, 2026-10-06: "apply skip 25k-50k pools
+#: to 10k book and assume we had this rule since start"). The arm stops buying
+#: them (`floor10k_no25_50`); the page leaves out the ones it bought before.
+SKIP_POOL_USD = (25_000, 50_000)
 SIZES = (10, 20, 25, 50, 100, 200)
 WALLETS = 10
 WALLET_TICKET = 50.0

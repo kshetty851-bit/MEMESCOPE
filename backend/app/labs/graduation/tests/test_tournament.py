@@ -1274,3 +1274,17 @@ def test_karthiks_small_pool_checks_buy_only_their_band():
         False, True, True, False]
     assert arms["KARTHIK_Q25_5M"].quiet and arms["KARTHIK_Q50_5M"].quiet
     assert arms["KARTHIK_Q25_5M"].hold == arms["KARTHIK_Q50_5M"].hold == 5
+
+
+def test_the_10k_book_skips_25k_to_50k_pools() -> None:
+    """Karthik, 2026-10-06: the Pool Lab's $10k book leaves $25k-$50k out."""
+    from datetime import UTC, datetime
+
+    from app.labs.graduation.tournament import BY_NAME, accepts
+
+    arm = BY_NAME["POOL_10K_QUIET_3M"]
+    def takes(usd: int) -> bool:
+        return accepts(arm, mint="M", open_at=datetime(2026, 10, 6, tzinfo=UTC),
+                       liquidity=Decimal(usd), fdv=None, sells=None, reuse=None)
+    assert [takes(u) for u in (9_999, 10_000, 24_999, 25_000, 49_999, 50_000)] == [
+        False, True, True, False, False, True]
