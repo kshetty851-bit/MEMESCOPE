@@ -373,6 +373,8 @@ ENTRY_RULES: dict[str, str] = {
     # No live arm since 2026-09-20: BASE_10k_2m was retired when its $500 ran
     # out, and BASE_75k_4m shared `floor75` with the quiet arm.
     "floor10k": "every graduation with a pool at or above $10,000, no selection",
+    "floor10k_no25_50": "every graduation with a pool at or above $10,000, "
+                        "except pools between $25,000 and $50,000",
     # No live arm since 2026-09-21: the four $25k clocks were retired when the
     # depth split showed where their money went.
     "floor25": "every graduation with a pool at or above $25,000 whose liquidity "
@@ -515,6 +517,13 @@ def accepts(arm: Arm, *, mint: str, open_at: datetime, liquidity: Decimal | None
         # the $75k floor leaves out. Not a control: `is_control` names the
         # $75k floor alone, so the board's baseline is unchanged.
         return liquidity is not None and liquidity >= 10_000
+    if e == "floor10k_no25_50":
+        # Karthik, 2026-10-06, for the Pool Lab's $10k book: "apply skip
+        # 25k-50k pools". Its $30k-$50k trades lost in both halves of its first
+        # 149 (17 of 20 lost), and KARTHIK_Q25_5M's $25k-$50k book lost ~$480
+        # of $500 from 1 Oct. POST-HOC: the band was drawn on these trades.
+        return liquidity is not None and liquidity >= 10_000 and not (
+            25_000 <= liquidity < 50_000)
     if e == "deep500_flow":
         # Deep pool AND net buying. Replayed over 2,205 recorded graduations
         # this pair admitted 174 tokens, none of which fell more than 80%
@@ -806,9 +815,10 @@ ARMS: tuple[Arm, ...] = (
     # 3m since that evening ("revise 10k pool selling at 3m"): it replaced
     # POOL_10K_QUIET_5M, whose trades `scripts/seed_quiet_4m.py` re-priced at
     # three minutes into this book.
-    Arm("POOL_10K_QUIET_3M", "floor10k", 3, quiet=True,
-        note="every graduation over $10k whose pool is still quiet (under "
-             "100 trades) when it is bought, out at 3m"),
+    # 2026-10-06: and no $25k-$50k pools (`floor10k_no25_50`).
+    Arm("POOL_10K_QUIET_3M", "floor10k_no25_50", 3, quiet=True,
+        note="every graduation over $10k, except $25k-$50k pools, whose pool "
+             "is still quiet (under 100 trades) when it is bought, out at 3m"),
 )
 
 BY_NAME: dict[str, Arm] = {a.name: a for a in ARMS}

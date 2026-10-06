@@ -97,6 +97,8 @@ def where(coin: Coin, now: datetime) -> dict[str, Any]:
 #: The Pool Lab's $10k paper book (2026-10-05): the office in its $10k mode.
 POOL_FLOOR_10K = Decimal(10_000)
 POOL_10K_BOOK = "POOL_10K_QUIET_3M"
+#: Pools that book skips since 2026-10-06 (`pool_lab.SKIP_POOL_USD`).
+POOL_10K_SKIP = (Decimal(25_000), Decimal(50_000))
 
 
 def where_pool(coin: Coin, now: datetime,
@@ -118,6 +120,9 @@ def where_pool(coin: Coin, now: datetime,
         return out("checking", "waiting for the pool to show", robot="depth")
     if coin.liquidity < floor:
         return out("stopped", f"pool ${coin.liquidity:,.0f}, under ${floor:,.0f}",
+                   robot="depth")
+    if floor == POOL_FLOOR_10K and POOL_10K_SKIP[0] <= coin.liquidity < POOL_10K_SKIP[1]:
+        return out("stopped", f"pool ${coin.liquidity:,.0f}, in the skipped $25k-$50k band",
                    robot="depth")
     if coin.blocked:
         return out("stopped", "a rug block refused it", code=coin.blocked)

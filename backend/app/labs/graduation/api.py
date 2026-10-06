@@ -2638,7 +2638,9 @@ async def _pool_lab_build(db: AsyncSession) -> dict[str, Any]:
                  **_karthik_line(rows, sol, size=float(t), capital=10.0 * t, cents=cents)}
                 for t in pl.SIZES]
 
-    ten_live = await _pool_rows(db, (pl.TEN_K_BOOK,), pl.START, 10_000)
+    lo, hi = pl.SKIP_POOL_USD
+    ten_live = [r for r in await _pool_rows(db, (pl.TEN_K_BOOK,), pl.START, 10_000)
+                if not lo <= float(r.liq_open_usd or 0) < hi]
     ten_book = await _pool_ten_k_book(db, ten_live, sol, cents)
 
     # $50k: ten user wallets on Karthik's book's real-time trades.

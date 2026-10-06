@@ -85,3 +85,6 @@ def test_the_10k_office_buys_with_the_paper_book_and_stops_small_pools():
     assert (bought["status"], bought["robot"]) == ("bought", "wallet")
     waiting = where_pool(Coin(graduated=GRAD, liquidity=Decimal("15000")), at(40))
     assert (waiting["status"], waiting["robot"]) == ("checking", "hush")
+    skipped = where_pool(Coin(graduated=GRAD, liquidity=Decimal("30000")), at(40))
+    assert (skipped["status"], skipped["robot"]) == ("stopped", "depth")
+    assert skipped["note"] == "pool $30,000, in the skipped $25k-$50k band"
