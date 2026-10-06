@@ -63,9 +63,17 @@ interface OpenTrade {
   pct_now: string | null;
 }
 /** The $10k book at $50 on $500, laid out like Karthik's Lab. */
+interface TenKRules {
+  floor_usd: number;
+  skip_pool_usd: [number, number];
+  quiet_max_txs: number;
+  max_entry_age_s: number;
+  hold_minutes: number;
+}
 interface TenKBook {
   ticket_usd: number;
   capital_usd: number;
+  rules?: TenKRules;
   balance_usd: string;
   days: KarthikDay[];
   closed: (KarthikTrade & { rugged: boolean })[];
@@ -215,6 +223,52 @@ export function TenKBookPanel({ book, now }: { book: TenKBook; now: number }) {
   );
 }
 
+const k = (n: number) => `$${Math.round(n / 1000)}k`;
+
+/** The $10k book's rules in plain words (Karthik, 2026-10-06: "write rule book
+ *  in 10k lab"). Every number is the API's, so the words follow the book. */
+export function TenKRuleBook({ book }: { book: TenKBook }) {
+  const r = book.rules;
+  if (!r) return null;
+  const trades = book.closed.length;
+  const rugs = book.closed.filter((c) => c.rugged).length;
+  const [lo, hi] = r.skip_pool_usd;
+  const rules: [string, string][] = [
+    ["What it buys", "New pump.fun coins right after they “graduate” — finish their launch and open a real trading pool."],
+    ["Small pools too", `The pool must hold ${k(r.floor_usd)} or more.`],
+    ["Skips the middle", `No pools between ${k(lo)} and ${k(hi)}: they lost money in both halves of this book's first day, and Karthik's Lab's ${k(lo)}–${k(hi)} book lost almost all its money.`],
+    ["Only quiet pools", `Fewer than ${r.quiet_max_txs} trades in the pool so far when it buys. A busy start is skipped.`],
+    ["Only fresh coins", `It buys within ${r.max_entry_age_s / 60} minutes of the coin graduating, or not at all.`],
+    ["No repeat creators", "Coins whose creator has launched a coin before are left out, as the real wallets refuse them."],
+    ["Several at once", `${usd(book.ticket_usd)} per trade from a ${usd(book.capital_usd)} balance. It buys every coin that passes while a whole ${usd(book.ticket_usd)} is free.`],
+    ["Always sells", `Exactly ${r.hold_minutes} minutes after buying. No price targets, no stop-loss — the clock decides.`],
+    ["The risk", `Tiny pools rug often: a rug loses almost the whole trade.${rugs ? ` So far ${rugs} in ${trades} trades.` : ""}`],
+    ["Paper money", "A simulation on real pool prices, with the price impact and fees of each trade. No real wallet follows it."],
+  ];
+  return (
+    <Panel>
+      <PanelHeader>
+        <PanelTitle>Rule book · $10k book</PanelTitle>
+      </PanelHeader>
+      <ul className="space-y-1.5 p-3 text-[13px] leading-relaxed" data-testid="pool-rule-book">
+        {rules.map(([title, body]) => (
+          <li key={title} className="flex gap-2">
+            <span aria-hidden className="mt-[7px] size-1.5 shrink-0 rounded-full bg-accent" />
+            <span>
+              <b className="text-ink">{title}:</b> <span className="text-ink-dim">{body}</span>
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="px-3 pb-3 text-[11px] text-ink-dim">
+        The timer starts at the book&apos;s first trade. The {r.hold_minutes}-minute sell and the{" "}
+        {k(lo)}–{k(hi)} skip came later (5–6 Oct) and are applied from the first trade, like
+        every rule here.
+      </p>
+    </Panel>
+  );
+}
+
 function WalletTable({ book, testId }: { book: WalletBook; testId: string }) {
   return (
     <table className="w-full min-w-[34rem] text-[12px] tabular-nums" data-testid={testId}>
@@ -335,6 +389,7 @@ export function PoolLabPage() {
         <p className="text-sm text-ink-3">Working out the backtest — about a minute after a restart.</p>
       ) : (
         <>
+          {d.ten_k.book ? <TenKRuleBook book={d.ten_k.book} /> : null}
           {d.ten_k.book ? <TenKBookPanel book={d.ten_k.book} now={now} /> : null}
           <TenKTable data={d.ten_k} />
           <FiftyKTables data={d.fifty_k} />

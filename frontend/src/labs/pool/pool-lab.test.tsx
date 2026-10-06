@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { FiftyKTables, TenKBookPanel, TenKTable } from "./page";
+import { FiftyKTables, TenKBookPanel, TenKRuleBook, TenKTable } from "./page";
 
 const line = (t: number, pnl: string) => ({
   ticket_usd: t, capital_usd: 10 * t, balance_usd: String(10 * t + Number(pnl)), pnl_usd: pnl,
@@ -44,5 +44,21 @@ describe("Pool Lab", () => {
     expect(screen.getByText(/Closed · 1 · 1 rugs/)).toBeInTheDocument();
     expect(screen.getByTestId("pool-closed")).toHaveTextContent("-$45.00");
     expect(screen.queryByTestId("trade-real")).toBeNull();
+  });
+
+  it("writes the $10k book's rules from its own numbers", () => {
+    render(<TenKRuleBook book={{
+      ticket_usd: 50, capital_usd: 500, balance_usd: "600", days: [], open: [],
+      rules: { floor_usd: 10000, skip_pool_usd: [25000, 50000], quiet_max_txs: 100, max_entry_age_s: 120, hold_minutes: 3 },
+      closed: [{ symbol: "A", mint: "M1", opened_at: "2026-10-06T00:00:00Z", closed_at: null, pct: "-90", pnl_usd: "-45", pool_usd: "15000", rugged: true },
+               { symbol: "B", mint: "M2", opened_at: "2026-10-06T00:01:00Z", closed_at: null, pct: "5", pnl_usd: "2.5", pool_usd: "15000", rugged: false }],
+    }} />);
+    const t = screen.getByTestId("pool-rule-book");
+    expect(t).toHaveTextContent("The pool must hold $10k or more.");
+    expect(t).toHaveTextContent("No pools between $25k and $50k");
+    expect(t).toHaveTextContent("Fewer than 100 trades");
+    expect(t).toHaveTextContent("within 2 minutes");
+    expect(t).toHaveTextContent("Exactly 3 minutes after buying");
+    expect(t).toHaveTextContent("So far 1 in 2 trades.");
   });
 });
