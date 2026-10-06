@@ -2606,8 +2606,16 @@ async def _pool_ten_k_book(db: AsyncSession, rows: Sequence[Any], sol: Decimal |
         live = net_return(p, p.last_quote)  # after costs, as the trade list's open rows
         return None if live is None else (100 * live).quantize(cents)
 
+    from app.labs.graduation.tournament import BY_NAME
+
     return {
         "ticket_usd": pl.WALLET_TICKET, "capital_usd": pl.WALLET_START,
+        # The rule book's numbers (Karthik, 2026-10-06: "write rule book in 10k
+        # lab"), from the book itself so the words cannot drift from it.
+        "rules": {"floor_usd": 10_000, "skip_pool_usd": list(pl.SKIP_POOL_USD),
+                  "quiet_max_txs": config.QUIET_MAX_POOL_TXS,
+                  "max_entry_age_s": config.MAX_ENTRY_AGE_S,
+                  "hold_minutes": BY_NAME[pl.TEN_K_BOOK].hold},
         "balance_usd": Decimal(str(walk.cash)).quantize(cents),
         "days": _karthik_days(took, pl.START, pl.WALLET_START, cents),
         "closed": [{"symbol": r.symbol, "mint": r.mint, "opened_at": r.opened_at,
