@@ -129,6 +129,7 @@ export function TenKTable({ data }: { data: NonNullable<PoolLab["ten_k"]> }) {
               <th className="py-1 pr-3 text-left font-normal">size</th>
               <th className="px-2 text-right font-normal">balance</th>
               <th className="px-2 text-right font-normal">profit</th>
+              <th className="px-2 text-right font-normal">return</th>
               <th className="px-2 text-right font-normal">trades</th>
               <th className="px-2 text-right font-normal">rugs</th>
               <th className="pl-2 text-right font-normal">lowest</th>
@@ -143,6 +144,10 @@ export function TenKTable({ data }: { data: NonNullable<PoolLab["ten_k"]> }) {
                 </td>
                 <td className="px-2 text-right font-semibold text-ink">{usd(l.balance_usd)}</td>
                 <td className={`px-2 text-right ${tone(l.pnl_usd)}`}>{usd(l.pnl_usd, true)}</td>
+                {/* Of the starting balance (Karthik, 2026-10-07: "show overall % return"). */}
+                <td className={`px-2 text-right font-semibold ${tone(l.pnl_pct)}`}>
+                  {Number(l.pnl_pct) >= 0 ? "+" : ""}{Number(l.pnl_pct).toFixed(1)}%
+                </td>
                 <td className="px-2 text-right text-ink-3">{l.trades}</td>
                 <td className={`px-2 text-right ${l.rugs ? "text-down" : "text-ink-3"}`}>{l.rugs}</td>
                 <td className="pl-2 text-right text-ink-3">{usd(l.lowest_usd)}</td>
@@ -161,7 +166,11 @@ export function TenKTable({ data }: { data: NonNullable<PoolLab["ten_k"]> }) {
 
 /** Karthik, 2026-10-05: "10k pool should show open and closed trades too and
  *  daily profits and rugs same like karthik lab". */
-export function TenKBookPanel({ book, now }: { book: TenKBook; now: number }) {
+/** The $10k book is judged on day 30 from its first trade (Karthik, 2026-10-07:
+ *  "mention day 30 expected value on the main balance of 10k pool"). */
+export const DAY_30_MS = 30 * 86_400_000;
+
+export function TenKBookPanel({ book, now, startedAt }: { book: TenKBook; now: number; startedAt?: string }) {
   const t = usd(book.ticket_usd).replace(".00", "");
   return (
     <Panel>
@@ -172,7 +181,10 @@ export function TenKBookPanel({ book, now }: { book: TenKBook; now: number }) {
         </PanelTitle>
       </PanelHeader>
       <div className="space-y-4 p-3" data-testid="pool-ten-k-book">
-        {book.days.length ? <Days days={book.days} /> : null}
+        {book.days.length ? (
+          <Days days={book.days}
+                judgeAt={startedAt ? new Date(Date.parse(startedAt) + DAY_30_MS).toISOString() : undefined} />
+        ) : null}
         <div className="overflow-x-auto">
           <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-ink-2">
             Open now · {book.open.length}
@@ -395,7 +407,7 @@ export function PoolLabPage() {
       ) : (
         <>
           {d.ten_k.book ? <TenKRuleBook book={d.ten_k.book} /> : null}
-          {d.ten_k.book ? <TenKBookPanel book={d.ten_k.book} now={now} /> : null}
+          {d.ten_k.book ? <TenKBookPanel book={d.ten_k.book} now={now} startedAt={d.started_at} /> : null}
           <TenKTable data={d.ten_k} />
           <FiftyKTables data={d.fifty_k} />
         </>
