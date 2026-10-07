@@ -18,6 +18,7 @@ describe("Pool Lab", () => {
     const t = screen.getByTestId("pool-ten-k");
     expect(t).toHaveTextContent("$10 on $100");
     expect(t).toHaveTextContent("-$1.20");
+    expect(t).toHaveTextContent("+0.0%");
     expect(t).not.toHaveTextContent("backtest");
   });
 
@@ -61,5 +62,17 @@ describe("Pool Lab", () => {
     expect(t).toHaveTextContent("falls 10% below what it paid, it sells about 3 seconds later");
     expect(t).toHaveTextContent("3 minutes after buying, unless the stop-loss sold it first");
     expect(t).toHaveTextContent("So far 1 in 2 trades.");
+  });
+
+  it("shows the $10k book's day-30 guess from its finished days", () => {
+    const now = Date.now();
+    const day = (n: number, running: boolean, pnl: string, bal: string) => ({
+      n, from: "", to: "", running, trades: 10, rugs: 0, pnl_usd: pnl, pct: "0", balance_usd: bal });
+    render(<TenKBookPanel now={now} startedAt={new Date(now - 1.5 * 86_400_000).toISOString()} book={{
+      ticket_usd: 50, capital_usd: 500, balance_usd: "600", open: [], closed: [],
+      days: [day(2, true, "40", "600"), day(1, false, "60", "560")],
+    }} />);
+    // $600 now plus $60 a day for the 28.5 days left.
+    expect(screen.getByTestId("day-30")).toHaveTextContent("≈ $2,310");
   });
 });
