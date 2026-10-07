@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import tempfile
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
@@ -88,7 +89,9 @@ async def main(apply: bool) -> None:
             before, after = 100 * float(was["net_return"]), 100 * float(row.net_return)
             print(f"{row.symbol or row.mint[:8]:<12} {before:>+8.2f}% -> {after:>+8.2f}%")
         if apply and backup:
-            name = f"/app/restop_backup_{datetime.now(UTC):%Y%m%d%H%M%S}.json"
+            # /app is read-only to the worker's user; the temp dir is not.
+            stamp = f"{datetime.now(UTC):%Y%m%d%H%M%S}"
+            name = f"{tempfile.gettempdir()}/restop_backup_{stamp}.json"
             with open(name, "w") as fh:  # noqa: ASYNC230 - a one-off script
                 json.dump(backup, fh)
             await session.commit()
