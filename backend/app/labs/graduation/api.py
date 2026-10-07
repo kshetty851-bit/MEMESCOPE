@@ -2612,7 +2612,10 @@ async def _pool_ten_k_book(db: AsyncSession, rows: Sequence[Any], sol: Decimal |
         "rules": {"floor_usd": 10_000, "skip_pool_usd": list(pl.SKIP_POOL_USD),
                   "quiet_max_txs": config.QUIET_MAX_POOL_TXS,
                   "max_entry_age_s": config.MAX_ENTRY_AGE_S,
-                  "hold_minutes": BY_NAME[pl.TEN_K_BOOK].hold},
+                  "hold_minutes": BY_NAME[pl.TEN_K_BOOK].hold,
+                  "stop_pct": (float(BY_NAME[pl.TEN_K_BOOK].stop * 100)
+                               if BY_NAME[pl.TEN_K_BOOK].stop else None),
+                  "reaction_s": config.EXIT_REACTION_S},
         "balance_usd": Decimal(str(walk.cash)).quantize(cents),
         "days": _karthik_days(took, pl.START, pl.WALLET_START, cents),
         "closed": [{"symbol": r.symbol, "mint": r.mint, "opened_at": r.opened_at,

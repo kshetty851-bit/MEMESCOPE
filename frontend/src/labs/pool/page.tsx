@@ -69,6 +69,8 @@ interface TenKRules {
   quiet_max_txs: number;
   max_entry_age_s: number;
   hold_minutes: number;
+  stop_pct?: number | null;
+  reaction_s?: number;
 }
 interface TenKBook {
   ticket_usd: number;
@@ -241,7 +243,10 @@ export function TenKRuleBook({ book }: { book: TenKBook }) {
     ["Only fresh coins", `It buys within ${r.max_entry_age_s / 60} minutes of the coin graduating, or not at all.`],
     ["No repeat creators", "Coins whose creator has launched a coin before are left out: on this book they lost money. (The $50k books buy them again.)"],
     ["Several at once", `${usd(book.ticket_usd)} per trade from a ${usd(book.capital_usd)} balance. It buys every coin that passes while a whole ${usd(book.ticket_usd)} is free.`],
-    ["Always sells", `Exactly ${r.hold_minutes} minutes after buying. No price targets, no stop-loss — the clock decides.`],
+    ...(r.stop_pct ? [["Stop-loss", `If the price falls ${r.stop_pct}% below what it paid, it sells about ${r.reaction_s ?? 3} seconds later instead of waiting. Tiny-pool rugs drain over seconds, so most are caught before they reach -50%.`] as [string, string]] : []),
+    ["Always sells", r.stop_pct
+      ? `${r.hold_minutes} minutes after buying, unless the stop-loss sold it first. No price targets.`
+      : `Exactly ${r.hold_minutes} minutes after buying. No price targets, no stop-loss — the clock decides.`],
     ["The risk", `Tiny pools rug often: a rug loses almost the whole trade.${rugs ? ` So far ${rugs} in ${trades} trades.` : ""}`],
     ["Paper money", "A simulation on real pool prices, with the price impact and fees of each trade. No real wallet follows it."],
   ];
@@ -261,9 +266,9 @@ export function TenKRuleBook({ book }: { book: TenKBook }) {
         ))}
       </ul>
       <p className="px-3 pb-3 text-[11px] text-ink-dim">
-        The timer starts at the book&apos;s first trade. The {r.hold_minutes}-minute sell and the{" "}
-        {k(lo)}–{k(hi)} skip came later (5–6 Oct) and are applied from the first trade, like
-        every rule here.
+        The timer starts at the book&apos;s first trade. The {r.hold_minutes}-minute sell, the{" "}
+        {k(lo)}–{k(hi)} skip{r.stop_pct ? " and the stop-loss" : ""} came later (5–7 Oct) and are
+        applied from the first trade, like every rule here.
       </p>
     </Panel>
   );

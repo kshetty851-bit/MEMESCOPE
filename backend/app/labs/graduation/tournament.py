@@ -815,10 +815,15 @@ ARMS: tuple[Arm, ...] = (
     # 3m since that evening ("revise 10k pool selling at 3m"): it replaced
     # POOL_10K_QUIET_5M, whose trades `scripts/seed_quiet_4m.py` re-priced at
     # three minutes into this book.
-    # 2026-10-06: and no $25k-$50k pools (`floor10k_no25_50`).
-    Arm("POOL_10K_QUIET_3M", "floor10k_no25_50", 3, quiet=True,
+    # 2026-10-06: and no $25k-$50k pools (`floor10k_no25_50`). 2026-10-07: and
+    # a 10% stop ("apply -10% stop loss to 10k book"): its tiny-pool rugs drain
+    # over seconds, and a replay of its first 194 trades selling 0-10s after the
+    # stop roughly doubled the book in both halves. `scripts/restop_pool_10k.py`
+    # re-prices its trades from before the stop the same way.
+    Arm("POOL_10K_QUIET_3M", "floor10k_no25_50", 3, quiet=True, stop=Decimal("0.10"),
         note="every graduation over $10k, except $25k-$50k pools, whose pool "
-             "is still quiet (under 100 trades) when it is bought, out at 3m"),
+             "is still quiet (under 100 trades) when it is bought, out at 3m "
+             "or 10% below the price paid"),
 )
 
 BY_NAME: dict[str, Arm] = {a.name: a for a in ARMS}
