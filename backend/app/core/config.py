@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import secrets
+from datetime import datetime
 from decimal import Decimal
 from functools import lru_cache
 from typing import Annotated, Any, Literal
@@ -1367,6 +1368,22 @@ class Settings(BaseSettings):
     # A real TLD, because the response schema validates it as an email address -
     # `.local` and `.example` are reserved names that fail validation.
     DEVELOPMENT_USER_EMAIL: str = "developer@memescope.dev"
+
+    # --- BTC Range Lab (paper only) -------------------------------------------
+    #: Off ships nothing: the beat task returns before it opens a session and
+    #: no candle is fetched. Read by the beat worker (ingest) and the API
+    #: (reports whether the lab is collecting), so it lives in the compose
+    #: anchor - see test_compose_env_contract.
+    LAB_BTC_RANGE_ENABLED: bool = False
+    #: Public, keyless market-data mirror. Not api.binance.com, which answers
+    #: HTTP 451 from some regions; the mirror serves the same klines read-only.
+    LAB_BTC_RANGE_BINANCE_URL: str = "https://data-api.binance.vision"
+    #: When the live paper book starts. FIXED, on purpose: the live book is a
+    #: deterministic replay of the default config over stored closed candles
+    #: from this instant, so moving it would rewrite the record - every trade,
+    #: the equity curve and the drawdown would all change under a reader who
+    #: had already seen them. A new book is a new start date, never an edit.
+    LAB_BTC_RANGE_LIVE_START: datetime = datetime.fromisoformat("2026-10-08T00:00:00+00:00")
 
     # --- Feature flags -------------------------------------------------------
     FEATURE_SCANNER_ENABLED: bool = False

@@ -96,6 +96,15 @@ x-backend-env: &backend-env
   # never reaches a container, and a kill switch that cannot be flipped is not
   # one. Set false to fall back to DexScreener marks alone.
   LAB_GRADUATION_HELD_WRITE_ENABLED: ${LAB_GRADUATION_HELD_WRITE_ENABLED:-true}
+  # BTC Range Lab (paper only; its only network call is a public candle read).
+  # In the anchor because the beat worker ingests and the API reports whether
+  # it is collecting: a flag set on one service would leave the other
+  # reporting "disabled" for ever while the lab looked healthy.
+  LAB_BTC_RANGE_ENABLED: ${LAB_BTC_RANGE_ENABLED:-false}
+  LAB_BTC_RANGE_BINANCE_URL: ${LAB_BTC_RANGE_BINANCE_URL:-https://data-api.binance.vision}
+  # The live paper book's fixed start. Never move it: the record is a replay
+  # from this instant, and moving it rewrites every trade already shown.
+  LAB_BTC_RANGE_LIVE_START: ${LAB_BTC_RANGE_LIVE_START:-2026-10-08T00:00:00Z}
   SOLANA_WS_URL: ${SOLANA_WS_URL:-wss://api.mainnet-beta.solana.com}
   HELIUS_API_KEY: ${HELIUS_API_KEY:-}
   FEATURE_SCANNER_ENABLED: ${FEATURE_SCANNER_ENABLED:-false}

@@ -55,6 +55,8 @@ celery_app = Celery(
         # Graduation Lab. Gated by LAB_GRADUATION_ENABLED (default off):
         # with the flag down its beat tasks return before opening a session.
         "app.labs.graduation.scheduler",
+        # BTC Range Lab (paper only). Gated by LAB_BTC_RANGE_ENABLED (default off).
+        "app.labs.btc_range.scheduler",
         # Momentum Lab. Gated by LAB_MOMENTUM_ENABLED (default off).
         "app.hq_ops.tasks",
     ],
@@ -288,6 +290,14 @@ celery_app.conf.beat_schedule = {
     "lab-sellability-refresh": {
         "task": "app.lab.scheduler.lab_sellability_refresh",
         "schedule": crontab(minute="*/3"),
+    },
+    # BTC Range Lab: a public candle read, every minute. Gated by
+    # LAB_BTC_RANGE_ENABLED (default off): the task returns before it opens a
+    # session or a socket, so registering it starts nothing. Declared here for
+    # the reason above - beat never imports the task module.
+    "btc-range-ingest": {
+        "task": "btc_range.ingest",
+        "schedule": crontab(minute="*"),
     },
     # Graduation Lab. Both gated by LAB_GRADUATION_ENABLED, which ships off:
     # each task returns before it opens a session, so registering them here
