@@ -144,7 +144,11 @@ async def _own_book(session: DbSession, member: str, wallet: str) -> dict[str, o
         "open_positions": await repo.open_positions_count(wallet),
         "open_trade_usd": _money(views.open_trade_value(positions, wallet)),
         "since_first_trade": views.since_payload(await repo.since_first_trade(wallet)),
-        "days": views.days_payload(positions, now),
+        # Every trade, not the latest 100 listed below: the boxes once showed
+        # only the two newest days (Karthik, 2026-10-08: "why it showing only
+        # this 2 days trade in box ? fix it").
+        # ponytail: loads every row; a per-day SQL sum if wallets reach ~50k trades.
+        "days": views.days_payload(await repo.positions(limit=50_000, wallet=wallet), now),
         "positions": await views.positions_payload(session, positions),
     }
 
