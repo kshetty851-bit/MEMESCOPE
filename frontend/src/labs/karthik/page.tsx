@@ -317,7 +317,7 @@ export function SizeGrid({ data }: { data: KarthikBook }) {
     <>
       {/* One table since 2026-10-04: the book starts on 1 Oct, so the second
           (from-1-Oct) table would repeat this one. Shown as balances. */}
-      <GridPanel data={data} title={`If each trade had been — on 10x the money, from ${day(data.started_at)}`}
+      <GridPanel data={data} title={`If each trade had been — on 6x the money, from ${day(data.started_at)}`}
                  rows={w.sizes} value />
     </>
   );
@@ -847,9 +847,9 @@ export function KarthikLabPage() {
         </p>
         <p className="mt-1 max-w-[78ch] text-[12px] leading-relaxed text-ink-dim">
           Resized on {day(data.resized_at)} from {usd(data.previous_capital_usd)} at{" "}
-          {usd(data.previous_ticket_usd)} a trade, after its first day had been
-          seen, and replayed from the same start at the new size. That makes the
-          first day a look back rather than a test: only what happens from{" "}
+          {usd(data.previous_ticket_usd)} a trade, after the days before it had been
+          seen, and replayed from the same start at the new size. That makes those
+          days a look back rather than a test: only what happens from{" "}
           {day(data.resized_at)} on is a fair measure of this size.
         </p>
         {data.pools_usd && data.pools_since ? (

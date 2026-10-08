@@ -18,9 +18,9 @@ const book = {
 } as unknown as KarthikBook;
 
 describe("If each trade had been", () => {
-  it("is one table from 1 Oct on ten times the money, showing the balance", () => {
+  it("is one table from 1 Oct on six times the money, showing the balance", () => {
     render(<SizeGrid data={book} />);
-    expect(screen.getByText(/If each trade had been — on 10x the money, from 1 Oct/)).toBeInTheDocument();
+    expect(screen.getByText(/If each trade had been — on 6x the money, from 1 Oct/)).toBeInTheDocument();
     const grid = screen.getByTestId("size-grid");
     expect(grid).toHaveTextContent("$10 on $100");
     expect(grid).toHaveTextContent("$106.00+$6.00 (+6.0%)");
