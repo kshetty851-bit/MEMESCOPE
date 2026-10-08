@@ -86,6 +86,14 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Paper only. $10k pools at 10x sizes; $50k pools on ten wallets.",
       },
+      // BTC/USDT range strategy (2026-10-08). Paper only: no wallet, no orders.
+      {
+        href: "/btc-range-lab",
+        label: "BTC Range Lab",
+        icon: IconSpark,
+        status: "ready",
+        note: "Paper only. BTC/USDT support and resistance; the strategy's calls and a paper book.",
+      },
     ],
   },
   {

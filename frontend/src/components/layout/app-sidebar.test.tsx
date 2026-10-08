@@ -81,7 +81,13 @@ describe("SidebarContent", () => {
     render(<SidebarContent collapsed={false} />);
     const nav = screen.getByRole("navigation", { name: "Main" });
 
-    for (const label of ["Karthik's Lab", "Graduation Lab", "Real wallet", "HQ"]) {
+    for (const label of [
+      "Karthik's Lab",
+      "Graduation Lab",
+      "BTC Range Lab",
+      "Real wallet",
+      "HQ",
+    ]) {
       expect(within(nav).getByRole("link", { name: label })).toBeInTheDocument();
     }
     expect(screen.getByRole("link", { name: "Settings" })).toBeInTheDocument();
@@ -94,6 +100,7 @@ describe("SidebarContent", () => {
     // left is what this must keep rendering.
     for (const [label, href] of [
       ["Karthik's Lab", "/karthik-lab"],
+      ["BTC Range Lab", "/btc-range-lab"],
       ["Real wallet", "/real-wallet"],
       ["HQ", "/hq"],
     ] as const) {

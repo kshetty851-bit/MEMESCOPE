@@ -117,6 +117,9 @@ export interface CandleOut {
 export interface BookOut {
   started_at: string;
   config_version: number;
+  /** The config this book runs on — the live calls are made with it, not with
+   * whatever /config reports as today's defaults. */
+  config: StrategyConfigOut;
   metrics: MetricsOut;
   long: MetricsOut;
   short: MetricsOut;
