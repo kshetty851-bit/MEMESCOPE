@@ -29,12 +29,15 @@ function Cell({
   label,
   hint,
   className,
+  wrap = false,
   children,
 }: {
   id: string;
   label: string;
   hint?: ReactNode;
   className?: string;
+  /** Let the value break onto a second line instead of ellipsising. */
+  wrap?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -43,7 +46,9 @@ function Cell({
       className={cn("flex min-w-0 flex-col gap-1 bg-surface px-3 py-2.5", className)}
     >
       <span className="text-label font-medium uppercase text-ink-3">{label}</span>
-      <span className="truncate text-md font-medium">{children}</span>
+      <span className={cn("text-md font-medium", wrap ? "break-words" : "truncate")}>
+        {children}
+      </span>
       {hint ? <span className="truncate text-xs text-ink-3">{hint}</span> : null}
     </div>
   );
@@ -93,11 +98,16 @@ export function Hero({
       <Cell
         id="range"
         label="Current range"
+        // A support-resistance pair is two prices; at the 8-column breakpoint
+        // it is wider than the cell, and an ellipsis hid the resistance, the
+        // half of the pair a reader came for. Wrapping keeps both visible.
+        wrap
         hint={range ? `width ${pct(range.width_pct)}` : undefined}
       >
         {range ? (
           <span data-numeric>
-            {usd(range.support, { digits: 0 })}–{usd(range.resistance, { digits: 0 })}
+            {usd(range.support, { digits: 0 })}–<wbr />
+            {usd(range.resistance, { digits: 0 })}
           </span>
         ) : (
           <Num value={null} />
