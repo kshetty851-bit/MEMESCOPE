@@ -1065,15 +1065,19 @@ FRESH_BOOKS: tuple[FreshBookSpec, ...] = (
     # FROM 1 OCT 00:00 DUBAI since 2026-10-04 (Karthik: "in karthik lab, juz
     # keep data from october 1 and show profit loss as per that"): the book,
     # its days, trades and grid all count from then. It opened 23 Sep 12:00Z.
+    # RESIZED 2026-10-08 to $300 at $50 -- six times the trade, not ten
+    # (Karthik: "change karthik lab to 6x and revise profit"): the book never
+    # held more than 4 coins at once, so from 4x up the dollars are the same and
+    # the rest of the balance sat idle; 6x leaves room for busier hours.
     FreshBookSpec("KARTHIK_QUIET_5M", datetime(2026, 9, 30, 20, 0, tzinfo=UTC),
-                  Decimal(500), Decimal(50)),
+                  Decimal(300), Decimal(50)),
 )
 
 #: When Karthik's book changed size, and what it was before. The new size was
 #: chosen AFTER its first day was seen, so everything before this moment is in
 #: sample for the size and the page says so; only what follows is a fair test.
-KARTHIK_RESIZED_AT = datetime(2026, 10, 3, 12, 30, tzinfo=UTC)
-KARTHIK_PREVIOUS_SIZE = (Decimal(100), Decimal(50))
+KARTHIK_RESIZED_AT = datetime(2026, 10, 8, 12, 0, tzinfo=UTC)
+KARTHIK_PREVIOUS_SIZE = (Decimal(500), Decimal(50))
 
 #: When Karthik's book became ONE TRADE AT A TIME (his request, after WOTF).
 #: Replayed from the book's first day, so everything before this is a look

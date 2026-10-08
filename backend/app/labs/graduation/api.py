@@ -1427,7 +1427,8 @@ async def fresh_held(book: str = "", db: AsyncSession = Depends(get_db)) -> Fres
 #: $40, $25 on $50"; the small sizes sat on $100 before).
 #: Karthik, 2026-10-03: "change size on all 1st table shud be 10x like below
 #: table" -- both tables now run each size on ten times its size.
-KARTHIK_WHATIF_SIZES = tuple((t, 10 * t) for t in (10, 20, 25, 50, 100, 200))
+#: 2026-10-08: six times (Karthik: "change karthik lab to 6x").
+KARTHIK_WHATIF_SIZES = tuple((t, 6 * t) for t in (10, 20, 25, 50, 100, 200))
 #: (A second, from-1-Oct table went on 2026-10-04: the book itself starts on
 #: 1 Oct now, so it would repeat this one.)
 #: The pool floors across the page's grid (Karthik, 2026-09-27).
