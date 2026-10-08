@@ -66,6 +66,16 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Watch only. pump.fun curves into graduation; no book.",
       },
+      // Memes that already exist on the internet, matched to tokens, with
+      // attention and market on one clock. Measurement before strategy: it
+      // describes what changed and when, and its ledger is paper only.
+      {
+        href: "/lifecycle-lab",
+        label: "Meme Lifecycle Lab",
+        icon: IconSpark,
+        status: "ready",
+        note: "Paper only. Attention against market, forward data is the verdict.",
+      },
       // Karthik's own book: his money on one rule, judged thirty days after it
       // started. Its own destination rather than a ninth panel on the
       // graduation board, so that his money's record and a pre-registered

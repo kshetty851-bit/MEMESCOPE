@@ -18,6 +18,7 @@ from typing import Any
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
+from app.lifecycle_lab.repository import LifecycleLabRepository
 from app.services.market.priority import refresh_nursery_lane, refresh_priority_lane
 from app.workers.celery_app import celery_app
 from app.workers.runtime import run_async
@@ -71,4 +72,34 @@ async def _refresh() -> dict[str, Any]:
     logger.info("nursery_lane_refreshed", **nursery.as_dict())
     result["nursery"] = dict(nursery.as_dict())
 
+    if settings.FEATURE_LIFECYCLE_LAB_ENABLED:
+        result["lifecycle_lab"] = await _pace_lifecycle_lab()
+
     return result
+
+
+async def _pace_lifecycle_lab() -> dict[str, Any]:
+    """Enrol the Lab's linked mints and hold them to its market cadence.
+
+    Here, on the minute beat, because the cadence is a clamp the worker undoes
+    on every refresh (it reschedules by age tier, up to six hours): a clamp
+    applied every minute is what turns "at most `MLL_MARKET_INTERVAL_SECONDS`"
+    into a gap of interval + one beat. Not the display lane — that lane is a
+    15-second promise, and 200 research tokens on it would be ~1.15M protected
+    snapshots a day on a 38 GB disk.
+
+    Own transaction, after both lanes, and never raises: the Lab is research,
+    and a failure here must not cost the display lane or the nursery a pass.
+    """
+    try:
+        async with SessionFactory() as session:
+            repo = LifecycleLabRepository(session)
+            now = datetime.now(UTC)
+            enrolled = await repo.enrol_linked_mints(now=now)
+            paced = await repo.pace_linked_mints(now=now)
+            await session.commit()
+    except Exception as exc:  # research must never stop the lanes
+        logger.exception("lifecycle_lab_pacing_failed", error=str(exc))
+        return {"failed": True}
+    logger.info("lifecycle_lab_paced", enrolled=enrolled, paced=paced)
+    return {"enrolled": enrolled, "paced": paced}

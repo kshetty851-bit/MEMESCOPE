@@ -1,0 +1,12 @@
+{
+  "synthetic": true,
+  "description": "SYNTHETIC: a JSON body cut off mid-object. Expected: ERROR unparseable.",
+  "url": "https://api.gdeltproject.org/api/v2/doc/doc?query=%22Pepe%22&mode=timelinevolraw&format=json&timespan=6h",
+  "query": "\"Pepe\"",
+  "retrieved_at": "2026-10-03T12:07:00+00:00",
+  "status": 200,
+  "headers": {
+    "content-type": "application/json"
+  },
+  "body": "{\"query_details\": {\"title\": \"Pepe\"}, \"timeline\": [{\"series\": \"Article Count\", \"data\": [{\"date\": \"20261003T110000Z\", \"val"
+}

@@ -32,6 +32,7 @@ from app.karthik import api as karthik
 from app.karthik_ops import api as karthik_ops
 from app.lab import api as lab
 from app.labs.graduation import api as graduation_lab
+from app.lifecycle_lab import api as lifecycle_lab
 from app.momentum import api as momentum
 from app.news import api as news
 from app.paper import api as paper
@@ -125,6 +126,10 @@ api_router.include_router(karthik_ops.router)
 # Graduation Lab. Read-only status board; every route answers
 # `running: false` without a query when LAB_GRADUATION_ENABLED is off.
 api_router.include_router(graduation_lab.router)
+# Meme Lifecycle Lab (docs/MEME_LIFECYCLE_LAB.md). Its own namespace; reads
+# answer `lab_enabled: false` with DISABLED sources while the flag is off, and
+# the only writes are admin curation. Paper only — nothing here can trade.
+api_router.include_router(lifecycle_lab.router)
 # The homepage journey section (public, counts only; see the module).
 api_router.include_router(journey.router)
 # Solana news headlines for the sidebar broadcast. Third-party RSS, read-only.

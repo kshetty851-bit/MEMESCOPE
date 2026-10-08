@@ -55,6 +55,9 @@ celery_app = Celery(
         # Graduation Lab. Gated by LAB_GRADUATION_ENABLED (default off):
         # with the flag down its beat tasks return before opening a session.
         "app.labs.graduation.scheduler",
+        # Meme Lifecycle Lab. Gated by FEATURE_LIFECYCLE_LAB_ENABLED (default
+        # off): every task returns before opening a session.
+        "app.lifecycle_lab.scheduler",
         # Momentum Lab. Gated by LAB_MOMENTUM_ENABLED (default off).
         "app.hq_ops.tasks",
     ],
@@ -394,6 +397,37 @@ celery_app.conf.beat_schedule = {
     "real-wallet-close-empty-accounts": {
         "task": "app.real_wallet.scheduler.real_wallet_close_empty_accounts",
         "schedule": crontab(minute="*/5"),
+    },
+    # Meme Lifecycle Lab (docs/MEME_LIFECYCLE_LAB.md). All gated by
+    # FEATURE_LIFECYCLE_LAB_ENABLED, which ships off. Declared here, not by
+    # the module, for the reason given at the Graduation Lab entries above:
+    # beat never imports the lab's scheduler. Off the :00 minute where they
+    # can be — every other beat task lands there.
+    "lifecycle-collect": {
+        "task": "app.lifecycle_lab.scheduler.lifecycle_collect_tick",
+        # Matches GDELT's 15-minute buckets.
+        "schedule": crontab(minute="1-59/15"),
+    },
+    "lifecycle-detect-events": {
+        "task": "app.lifecycle_lab.scheduler.lifecycle_detect_events_tick",
+        # The replay's 5-minute decision grid; detects at the grid instant.
+        "schedule": crontab(minute="*/5"),
+    },
+    "lifecycle-timeliness": {
+        "task": "app.lifecycle_lab.scheduler.lifecycle_timeliness_tick",
+        "schedule": crontab(minute="4-59/15"),
+    },
+    "lifecycle-forward-replay": {
+        "task": "app.lifecycle_lab.scheduler.lifecycle_forward_replay_tick",
+        "schedule": crontab(minute="11,41"),
+    },
+    "lifecycle-autolink": {
+        "task": "app.lifecycle_lab.scheduler.lifecycle_autolink_tick",
+        "schedule": crontab(minute="23"),
+    },
+    "lifecycle-experiment": {
+        "task": "app.lifecycle_lab.scheduler.lifecycle_experiment_tick",
+        "schedule": crontab(minute="7"),
     },
     "prune-telemetry": {
         "task": "app.workers.retention_tasks.prune_telemetry",
