@@ -1384,6 +1384,13 @@ class Settings(BaseSettings):
     #: the equity curve and the drawdown would all change under a reader who
     #: had already seen them. A new book is a new start date, never an edit.
     LAB_BTC_RANGE_LIVE_START: datetime = datetime.fromisoformat("2026-10-08T00:00:00+00:00")
+    #: The monthly long/short book (`btc_range/monthly.py`, 2026-10-09). Its own
+    #: switch, so candles keep arriving while the range strategy stays stopped:
+    #: the ingest runs when EITHER flag is on.
+    LAB_BTC_MONTHLY_ENABLED: bool = False
+    #: The month its live record starts; earlier months are a backtest. Fixed:
+    #: moving it would relabel months already shown.
+    LAB_BTC_MONTHLY_LIVE_START: datetime = datetime.fromisoformat("2026-10-01T00:00:00+00:00")
 
     # --- Feature flags -------------------------------------------------------
     FEATURE_SCANNER_ENABLED: bool = False

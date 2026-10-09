@@ -1,6 +1,6 @@
 import { api } from "@/lib/api-client";
 
-import type { BacktestIn, BacktestOut, ConfigOut, StatusOut } from "./types";
+import type { BacktestIn, BacktestOut, ConfigOut, MonthlyOut, StatusOut } from "./types";
 
 /**
  * BTC RANGE LAB CLIENT
@@ -11,6 +11,10 @@ import type { BacktestIn, BacktestOut, ConfigOut, StatusOut } from "./types";
  */
 export function fetchStatus(): Promise<StatusOut> {
   return api.get<StatusOut>("/labs/btc-range/status");
+}
+
+export function fetchMonthly(): Promise<MonthlyOut> {
+  return api.get<MonthlyOut>("/labs/btc-range/monthly");
 }
 
 export function fetchConfig(): Promise<ConfigOut> {

@@ -94,7 +94,8 @@ def test_api_declares_only_gets_and_the_one_backtest_post() -> None:
     posts = [path for method, path in routes if method != "get"]
     assert posts == ["/backtest"], routes
     assert [m for m, _ in routes if m not in {"get", "post"}] == []
-    assert sorted(path for method, path in routes if method == "get") == ["/config", "/status"]
+    assert sorted(path for method, path in routes if method == "get") == [
+        "/config", "/monthly", "/status"]
 
 
 def test_api_writes_no_sql() -> None:

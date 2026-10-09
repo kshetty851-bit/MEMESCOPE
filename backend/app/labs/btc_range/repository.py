@@ -163,3 +163,20 @@ async def stats(session: AsyncSession) -> tuple[int, datetime | None, datetime |
     )
     count, first, last = (await session.execute(stmt)).one()
     return int(count), first, last
+
+
+async def monthly_bars(session: AsyncSession, *, start: datetime) -> list[tuple]:  # type: ignore[type-arg]
+    """(month start, open, close, high, low) per UTC month from `start`, over
+    every stored candle including the forming one, ascending. The monthly book
+    (`monthly.py`) needs nothing finer: it enters at the open and holds."""
+    from sqlalchemy import text
+
+    rows = await session.execute(text("""
+        select date_trunc('month', open_time) as m,
+               (array_agg(open order by open_time))[1],
+               (array_agg(close order by open_time desc))[1],
+               max(high), min(low)
+        from btc_candles
+        where symbol = :s and timeframe = :tf and open_time >= :start
+        group by 1 order by 1"""), {"s": SYMBOL, "tf": TIMEFRAME, "start": start})
+    return [tuple(r) for r in rows.all()]

@@ -38,7 +38,7 @@ def btc_range_ingest() -> dict[str, Any]:
 
 async def ingest_tick() -> dict[str, Any]:
     """One ingest pass. Owns its session and commits explicitly."""
-    if not settings.LAB_BTC_RANGE_ENABLED:
+    if not (settings.LAB_BTC_RANGE_ENABLED or settings.LAB_BTC_MONTHLY_ENABLED):
         return {"skipped": "btc_range_disabled"}
     try:
         async with (

@@ -105,6 +105,9 @@ x-backend-env: &backend-env
   # The live paper book's fixed start. Never move it: the record is a replay
   # from this instant, and moving it rewrites every trade already shown.
   LAB_BTC_RANGE_LIVE_START: ${LAB_BTC_RANGE_LIVE_START:-2026-10-08T00:00:00Z}
+  # The monthly long/short book: its own switch for the same candle ingest.
+  LAB_BTC_MONTHLY_ENABLED: ${LAB_BTC_MONTHLY_ENABLED:-false}
+  LAB_BTC_MONTHLY_LIVE_START: ${LAB_BTC_MONTHLY_LIVE_START:-2026-10-01T00:00:00Z}
   SOLANA_WS_URL: ${SOLANA_WS_URL:-wss://api.mainnet-beta.solana.com}
   HELIUS_API_KEY: ${HELIUS_API_KEY:-}
   FEATURE_SCANNER_ENABLED: ${FEATURE_SCANNER_ENABLED:-false}

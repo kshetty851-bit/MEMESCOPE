@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 
-import { fetchConfig, fetchStatus, runBacktest } from "./api";
+import { fetchConfig, fetchMonthly, fetchStatus, runBacktest } from "./api";
 import type { BacktestIn } from "./types";
 
 /**
@@ -41,6 +41,17 @@ export function useBtcRangeConfig() {
     queryFn: fetchConfig,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
+  });
+}
+
+/** The monthly book: one trade a month, marked at the latest price. */
+export function useBtcMonthly() {
+  return useQuery({
+    queryKey: ["btc-range", "monthly"],
+    queryFn: fetchMonthly,
+    refetchInterval: REFRESH_MS,
+    refetchOnWindowFocus: true,
+    staleTime: 0,
   });
 }
 

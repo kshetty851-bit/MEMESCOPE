@@ -5,19 +5,37 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
 import { backtest, config, signal, status, waitSignal } from "./fixtures";
 import { BtcRangeLabPage } from "./page";
+import type { MonthlyOut } from "./types";
 
 vi.mock("./api");
 
-function renderPage() {
+/** Renders the page on the range tab (the monthly book opens first). */
+function renderPage({ monthlyTab = false } = {}) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  return render(
+  const view = render(
     <QueryClientProvider client={client}>
       <BtcRangeLabPage />
     </QueryClientProvider>,
   );
+  if (!monthlyTab) fireEvent.click(screen.getByRole("tab", { name: "Range (stopped)" }));
+  return view;
 }
+
+const SUMMARY = { months: 1, up: 1, total_pnl_usd: "295.80", best_usd: "295.80", worst_usd: "295.80", liquidated: 0 };
+const OCT = {
+  month: "2026-10", side: "long" as const, entry: "83624.00", exit: "84000.00",
+  liquidation_price: "57700.56", liquidated: false, pnl_usd: "11.29", pct: "1.13",
+  running: true, live: true,
+};
+const SEP = { ...OCT, month: "2026-09", side: "short" as const, exit: "82000.00", pnl_usd: "295.80", pct: "29.58", running: false, live: false };
+const monthly = (): MonthlyOut => ({
+  enabled: true, leverage: 3, capital_usd: "1000", fee_pct_per_side: "0.07",
+  live_start: "2026-10-01T00:00:00Z", current_price: "84000.00", current: OCT,
+  live: { ...SUMMARY, months: 0, up: 0, total_pnl_usd: "0", best_usd: null, worst_usd: null },
+  backtest: SUMMARY, months: [OCT, SEP],
+});
 
 /**
  * The product rule: explanations describe what was observed, and the page
@@ -32,6 +50,7 @@ beforeEach(() => {
   vi.mocked(api.fetchStatus).mockResolvedValue(status());
   vi.mocked(api.fetchConfig).mockResolvedValue(config());
   vi.mocked(api.runBacktest).mockResolvedValue(backtest());
+  vi.mocked(api.fetchMonthly).mockResolvedValue(monthly());
 });
 afterEach(() => {
   cleanup();
@@ -82,7 +101,7 @@ describe("BTC Range Lab page", () => {
     const lookback = await screen.findByLabelText("Lookback candles");
     fireEvent.change(lookback, { target: { value: "150" } });
 
-    fireEvent.click(screen.getByRole("tab", { name: "Live (paper)" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Range (stopped)" }));
     expect(await screen.findByTestId("hero")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Strategy Lab" }));
     expect(screen.getByLabelText("Lookback candles")).toHaveValue(150);
@@ -101,6 +120,22 @@ describe("BTC Range Lab page", () => {
   it("draws the entry zones from the config's entry_zone", async () => {
     renderPage();
     expect(await screen.findByTestId("long-zone")).toBeInTheDocument();
+  });
+});
+
+describe("monthly book", () => {
+  it("opens first, with this month's position and every month", async () => {
+    renderPage({ monthlyTab: true });
+    expect(await screen.findByTestId("monthly-current")).toHaveTextContent("LONG");
+    expect(screen.getByTestId("monthly-table")).toHaveTextContent("Sep 2026");
+    expect(screen.getByTestId("monthly-backtest")).toHaveTextContent("+$296");
+    expect(document.body.textContent ?? "").not.toMatch(BANNED);
+  });
+
+  it("shows an error state when the monthly book fails", async () => {
+    vi.mocked(api.fetchMonthly).mockRejectedValue(new Error("boom"));
+    renderPage({ monthlyTab: true });
+    expect(await screen.findByText("Could not load the monthly book")).toBeInTheDocument();
   });
 });
 
