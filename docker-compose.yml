@@ -184,6 +184,14 @@ x-backend-env: &backend-env
   # and a value set on one only would let the two disagree about the lane's
   # size. Capacity 0 disables the lane.
   ENRICHMENT_NURSERY_MAX_TOKENS: ${ENRICHMENT_NURSERY_MAX_TOKENS:-1000}
+  # Coins past their first 30 minutes (2026-10-09 cleanup, Karthik: "do D and E"):
+  # no live path reads them -- every real-wallet check is on a coin under 30
+  # minutes old, and market_refresh fetches its own reading before a buy -- so
+  # they are re-priced far less often. ~2/3 of the 4M snapshots a day were these.
+  ENRICHMENT_TIER_YOUNG_INTERVAL_SECONDS: ${ENRICHMENT_TIER_YOUNG_INTERVAL_SECONDS:-1800}
+  ENRICHMENT_TIER_MATURE_INTERVAL_SECONDS: ${ENRICHMENT_TIER_MATURE_INTERVAL_SECONDS:-7200}
+  ENRICHMENT_TIER_OLD_INTERVAL_SECONDS: ${ENRICHMENT_TIER_OLD_INTERVAL_SECONDS:-86400}
+  ENRICHMENT_RETIRE_AFTER_HOURS: ${ENRICHMENT_RETIRE_AFTER_HOURS:-24}
   ENRICHMENT_NURSERY_INTERVAL_SECONDS: ${ENRICHMENT_NURSERY_INTERVAL_SECONDS:-60}
   # Dead-letter policy. In the anchor because two services read it: the
   # enrichment worker decides when to park a token and the scheduler runs the
