@@ -281,8 +281,10 @@ class GradPostgradSample(Base):
 
     __tablename__ = "grad_postgrad_samples"
     __table_args__ = (
+        # Also the (mint, ts) index every read uses. A second, plain index on
+        # the same columns sat beside it until 2026-10-09 (0113): ~800 MB that
+        # every price sample paid to write and nothing needed.
         UniqueConstraint("mint", "ts", name="uq_grad_postgrad_samples_mint_ts"),
-        Index("ix_grad_postgrad_samples_mint_ts", "mint", "ts"),
         # `paper.switched_mints` asks whether any mint was sampled against two
         # pools. That has to look at every mint however it is indexed, so this
         # only takes it from a sequential scan to an index-only scan — the
