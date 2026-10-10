@@ -348,6 +348,7 @@ x-backend-env: &backend-env
   # Off again 2026-10-06 ("remove from real wallet stratergy bcuz its costing
   # money"): on the $50k+ book it refused 57 coins, 54 of them winners, 1 rug.
   REAL_WALLET_BLOCK_REPEAT_CREATORS: ${REAL_WALLET_BLOCK_REPEAT_CREATORS:-false}
+  REAL_WALLET_CREW_BLOCK_ENABLED: ${REAL_WALLET_CREW_BLOCK_ENABLED:-false}
   # Karthik, 2026-10-03: USER 1 trades the $50k+ quiet rule, several at once.
   REAL_WALLET_MEMBER_STRATEGY: '{"USER1": "G-Q50"}'
   REAL_WALLET_MEMBER_MAX_OPEN: '{"USER1": 25}'

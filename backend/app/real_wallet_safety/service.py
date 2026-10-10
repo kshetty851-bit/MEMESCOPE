@@ -16,6 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.labs.graduation import moneyblock
 from app.labs.graduation.models import (
     SOURCE_HELD_WS,
     GradPaperPosition,
@@ -102,6 +103,7 @@ class Reason:
     ROUND_TRIP_LOSS_TOO_HIGH = "ROUND_TRIP_LOSS_TOO_HIGH"
     SYMBOL_RUGGED_BEFORE = "SYMBOL_RUGGED_BEFORE"
     CREATOR_LAUNCHED_BEFORE = "CREATOR_LAUNCHED_BEFORE"
+    CREW_OF_BAD_COIN = "CREW_OF_BAD_COIN"
     HOLDER_TOO_LARGE = "HOLDER_TOO_LARGE"
     HOLDERS_UNREADABLE = "HOLDERS_UNREADABLE"
     LINKED_TO_RECENT_RUG = "LINKED_TO_RECENT_RUG"
@@ -203,6 +205,8 @@ class RealWalletSafetyGate:
             reasons.append(Reason.SYMBOL_RUGGED_BEFORE)
         if await self._creator_launched_before(token):
             reasons.append(Reason.CREATOR_LAUNCHED_BEFORE)
+        if await self._crew_of_bad_coin(mint_address, evaluated_at):
+            reasons.append(Reason.CREW_OF_BAD_COIN)
 
         market_age, price, liquidity = self._market_reasons(snapshot, evaluated_at, reasons)
         pool_price = await self._pool_price(mint_address, snapshot, evaluated_at)
@@ -435,6 +439,16 @@ class RealWalletSafetyGate:
         if ids & sources.ALWAYS_BLOCKED:
             reasons.append(Reason.KNOWN_RUG_MONEY)
         return {"recent_rug_ids": len(recent), **mine.as_json(), "matched": matched}
+
+    async def _crew_of_bad_coin(self, mint: str, at: datetime) -> bool:
+        """Is this coin's creator or a rare insider on the crew list: behind a
+        coin that closed 30% or more down (`moneyblock.CREW`, Karthik,
+        2026-10-10)? A coin with nothing recorded is let through."""
+        if not settings.REAL_WALLET_CREW_BLOCK_ENABLED:
+            return False
+        crew = await moneyblock.crew_list(self._session, at)
+        wallets = (await moneyblock.coin_wallets(self._session, [mint])).get(mint, set())
+        return moneyblock.crew_hit(wallets, at, crew)
 
     async def _creator_launched_before(self, token: DiscoveredToken | None) -> bool:
         """Has this coin's creator launched another coin before this one?
