@@ -240,7 +240,9 @@ export function FamilySection() {
         {row?.ticket_usd ? (
           <span className="text-xs text-ink-2">
             {usd(row.ticket_usd).replace(".00", "")} trades ·{" "}
-            {row.band && row.band !== "any" ? `${bands.get(row.band) ?? row.band} coins` : "any coin"}
+            {!row.band || row.band === "any" ? "any coin"
+              : row.band.startsWith("pool-") ? (bands.get(row.band) ?? row.band).toLowerCase()
+              : `${bands.get(row.band) ?? row.band} coins`}
           </span>
         ) : null}
         {row ? (

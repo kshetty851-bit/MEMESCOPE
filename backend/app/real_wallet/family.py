@@ -44,11 +44,36 @@ BANDS: dict[str, tuple[Decimal | None, Decimal | None]] = {
     "1m-20m": (Decimal(1_000_000), Decimal(20_000_000)),
     "5m-100m": (Decimal(5_000_000), Decimal(100_000_000)),
 }
+#: SMART STACKING (Karthik, 2026-10-10: "build smart stacking for 3 wallets
+#: before nov 1"): bands by POOL size (liquidity) at the moment of buying, so
+#: more wallets stack on the small pools that earn the most and fewer on the
+#: big ones that earn about nothing. key -> pool under this many dollars.
+#: 3 wallets = one "any" + two "pool-under-150k" (3/3/1 on small/mid/big
+#: pools); 6 wallets = two "any" + one "pool-under-150k" + three
+#: "pool-under-75k" (5/3/2 with the $250 coin cap). Replayed 1-10 Oct: 3x$50
+#: +$1,159 against +$1,112 for all three on every coin. Chosen on those days.
+POOL_BANDS: dict[str, Decimal] = {
+    "pool-under-75k": Decimal(75_000),
+    "pool-under-150k": Decimal(150_000),
+}
 BAND_LABELS: dict[str, str] = {"any": "Any size", "1m-20m": "$1M – $20M",
-                               "5m-100m": "$5M – $100M"}
+                               "5m-100m": "$5M – $100M",
+                               "pool-under-75k": "Pools under $75k",
+                               "pool-under-150k": "Pools under $150k"}
+ALL_BANDS: frozenset[str] = frozenset(BANDS) | frozenset(POOL_BANDS)
 #: At most this many wallets on the same band may buy one coin (in an hour),
 #: so one bad coin cannot catch a whole group.
 MAX_SAME_BAND_PER_COIN = 2
+
+
+def is_pool_band(band: str) -> bool:
+    return band in POOL_BANDS
+
+
+def in_pool_band(band: str, pool_usd: Decimal | None) -> bool:
+    """Whether a coin whose pool holds `pool_usd` may be bought on a pool
+    band. An unknown pool size is a no, as an unknown market cap is."""
+    return band in POOL_BANDS and pool_usd is not None and pool_usd < POOL_BANDS[band]
 
 
 def in_band(band: str, fdv: Decimal | None) -> bool:

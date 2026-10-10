@@ -93,6 +93,21 @@ def test_bands_include_the_lower_bound_and_exclude_the_upper():
     assert not in_band("nonsense", D("5000000"))
 
 
+def test_pool_bands_for_smart_stacking():
+    from decimal import Decimal as D
+
+    from app.real_wallet.family import ALL_BANDS, in_pool_band, is_pool_band
+
+    assert is_pool_band("pool-under-75k")
+    assert not is_pool_band("1m-20m") and not is_pool_band("any")
+    assert in_pool_band("pool-under-75k", D("74999"))
+    assert not in_pool_band("pool-under-75k", D("75000"))
+    assert in_pool_band("pool-under-150k", D("120000"))
+    assert not in_pool_band("pool-under-150k", D("150000"))
+    assert not in_pool_band("pool-under-150k", None)      # unknown pool: no
+    assert {"any", "1m-20m", "pool-under-75k", "pool-under-150k"} <= ALL_BANDS
+
+
 def test_only_a_known_device_key_opens_jupiter():
     import hashlib
 

@@ -359,9 +359,9 @@ async def member_own_settings(name: str, payload: OwnSettingsIn, session: DbSess
     if payload.ticket_usd not in family.TICKETS_USD:
         raise HTTPException(status_code=422, detail="trade size must be one of "
                             + ", ".join(str(t) for t in family.TICKETS_USD))
-    if payload.band is not None and payload.band not in family.BANDS:
+    if payload.band is not None and payload.band not in family.ALL_BANDS:
         raise HTTPException(status_code=422, detail="coin size must be one of "
-                            + ", ".join(family.BANDS))
+                            + ", ".join(sorted(family.ALL_BANDS)))
     row = await session.get(RealWalletFamilyMember, member)
     if row is None:
         raise HTTPException(status_code=404, detail="no such user wallet")

@@ -164,7 +164,14 @@ class RealWalletDriver:
         # Family investment (Karthik, 2026-09-28): a wallet with a coin-size
         # band buys only coins whose market cap is inside it, and at most
         # `MAX_SAME_BAND_PER_COIN` wallets of one band share a coin.
-        if account.band != "any":
+        # Smart stacking (2026-10-10): a pool band buys only coins whose pool
+        # is under its size, and is NOT held to the two-per-band rule: several
+        # wallets on one small-pool coin is the point. The coin cap still is.
+        if family.is_pool_band(account.band):
+            pool_usd = await self._pool_usd(candidate, now)
+            if not family.in_pool_band(account.band, pool_usd):
+                return "pool_outside_band"
+        elif account.band != "any":
             if not family.in_band(account.band, await self._fdv(candidate, now)):
                 return "market_cap_outside_band"
             if await self._buys_by(candidate, peers or [wallet], now) >= family.MAX_SAME_BAND_PER_COIN:
@@ -537,6 +544,19 @@ class RealWalletDriver:
             select(GradPostgradSample.fdv).where(
                 GradPostgradSample.mint == mint,
                 GradPostgradSample.fdv.is_not(None),
+                GradPostgradSample.ts <= now,
+                GradPostgradSample.ts >= now - timedelta(minutes=3),
+            ).order_by(GradPostgradSample.ts.desc()).limit(1))
+
+    async def _pool_usd(self, mint: str, now: datetime) -> Decimal | None:
+        """The coin's pool size (liquidity) as last read in the three minutes
+        before `now`, or None: the same reading the books' pool bands use."""
+        from app.labs.graduation.models import GradPostgradSample
+
+        return await self._session.scalar(
+            select(GradPostgradSample.liquidity_usd).where(
+                GradPostgradSample.mint == mint,
+                GradPostgradSample.liquidity_usd.is_not(None),
                 GradPostgradSample.ts <= now,
                 GradPostgradSample.ts >= now - timedelta(minutes=3),
             ).order_by(GradPostgradSample.ts.desc()).limit(1))
