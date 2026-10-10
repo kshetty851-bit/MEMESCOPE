@@ -86,6 +86,17 @@ async def test_maps_every_required_field() -> None:
     assert data.has_market
 
 
+async def test_reads_active_boosts_and_tolerates_their_absence() -> None:
+    """The Boost Lab's boost count (2026-10-10): read when present, None when not."""
+    boosted = {**_pair(), "boosts": {"active": 3}}
+    other = {**_pair(OTHER), "boosts": "junk"}
+    result = await _provider(_respond({"pairs": [boosted, other]})).fetch_many([MINT, OTHER])
+    assert result[MINT].boosts_active == 3
+    assert result[OTHER].boosts_active is None
+    plain = await _provider(_respond({"pairs": [_pair()]})).fetch_many([MINT])
+    assert plain[MINT].boosts_active is None
+
+
 async def test_prices_are_decimal_not_float() -> None:
     """Money must never round-trip through binary floating point."""
     result = await _provider(_respond({"pairs": [_pair()]})).fetch_many([MINT])

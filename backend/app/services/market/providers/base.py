@@ -75,6 +75,8 @@ class MarketData:
 
     trading_status: TradingStatus = TradingStatus.UNKNOWN
     is_verified: bool = False
+    #: DexScreener's active paid boosts on the coin (2026-10-10); None if unread.
+    boosts_active: int | None = None
 
     provider: str = "unknown"
     provider_latency_ms: int | None = None

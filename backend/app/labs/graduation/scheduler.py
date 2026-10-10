@@ -411,5 +411,24 @@ async def pool_lab_tick() -> dict[str, Any]:
         await redis.set(POOL_LAB_KEY, json.dumps(payload, default=str), ex=3600)
     finally:
         await redis.aclose()
+    # The Boost Lab rides on the same tick (2026-10-10), in its own session so
+    # a failure there never touches the Pool Lab's write.
+    from app.labs.graduation import boost_lab
+
+    boost: dict[str, Any] | None = None
+    if datetime.now(UTC).minute % 5:       # every fifth minute: ~2s a build
+        return {"ten_k_coins": payload["ten_k"]["live_coins"],
+                "fifty_k_coins": payload["fifty_k"]["backtest"]["coins"]}
+    try:
+        async with SessionFactory() as session:
+            boost = await boost_lab.build(session)
+        redis = Redis.from_url(settings.REDIS_URI, decode_responses=True)
+        try:
+            await redis.set(boost_lab.KEY, json.dumps(boost, default=str), ex=3600)
+        finally:
+            await redis.aclose()
+    except Exception as exc:
+        logger.warning("boost_lab_build_failed", error=str(exc)[:300])
     return {"ten_k_coins": payload["ten_k"]["live_coins"],
-            "fifty_k_coins": payload["fifty_k"]["backtest"]["coins"]}
+            "fifty_k_coins": payload["fifty_k"]["backtest"]["coins"],
+            "boost_coins": boost["coins_picked"] if boost else None}
