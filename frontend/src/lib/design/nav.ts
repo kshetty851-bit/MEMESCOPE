@@ -102,6 +102,14 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Paper only. BTC/USDT support and resistance; the strategy's calls and a paper book.",
       },
+      // Forex Strategy Lab (2026-10-10). Research only: no broker, no orders.
+      {
+        href: "/forex-lab",
+        label: "Forex Lab",
+        icon: IconSpark,
+        status: "ready",
+        note: "Research only. EUR/USD strategy backtests, out-of-sample validation and cost stress tests.",
+      },
     ],
   },
   {
