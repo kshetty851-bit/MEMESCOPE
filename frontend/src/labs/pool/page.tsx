@@ -185,7 +185,7 @@ export function TenKBookPanel({ book, now, startedAt }: { book: TenKBook; now: n
       </PanelHeader>
       <div className="space-y-4 p-3" data-testid="pool-ten-k-book">
         {book.days.length ? (
-          <Days days={book.days}
+          <Days days={book.days} trades={book.closed} real={false}
                 judgeAt={startedAt ? new Date(Date.parse(startedAt) + DAY_30_MS).toISOString() : undefined} />
         ) : null}
         <div className="overflow-x-auto">
