@@ -458,6 +458,42 @@ async def test_a_coin_outside_the_band_or_unmeasured_is_not_bought(
     assert set(await _intents(db_session)) == {OWNER}
 
 
+# --- smart stacking: pool-size bands (2026-10-10) ------------------------------
+
+async def _five_on_pool_band(session, monkeypatch, *, band: str, pool: str | None,
+                             now: datetime) -> None:
+    from app.labs.graduation.models import GradPostgradSample
+
+    await _five_on_band(session, monkeypatch, band=band, fdv=None, now=now)
+    if pool is not None:
+        session.add(GradPostgradSample(ts=now - timedelta(minutes=10), mint=MINT,
+                                       source="dexscreener", liquidity_usd=Decimal("900000")))
+        session.add(GradPostgradSample(ts=now - timedelta(seconds=4), mint=MINT,
+                                       source="dexscreener", liquidity_usd=Decimal(pool)))
+        await session.flush()
+
+
+async def test_a_pool_band_stacks_past_two_wallets_on_a_small_pool(db_session, monkeypatch):
+    """Smart stacking is several wallets on one small-pool coin: the two-per-band
+    rule does not apply, only the coin cap ($250 = five $50 wallets)."""
+    now = datetime.now(UTC)
+    await _five_on_pool_band(db_session, monkeypatch, band="pool-under-150k", pool="62000",
+                             now=now)
+    out = await RealWalletDriver(db_session).tick(now=now)
+    assert sum(r.startswith("created:") for r in out.family.values()) == 5
+
+
+@pytest.mark.parametrize("band, pool", [("pool-under-150k", "180000"),
+                                        ("pool-under-75k", "90000"), ("pool-under-75k", None)])
+async def test_a_big_or_unmeasured_pool_is_not_bought_on_a_pool_band(
+        db_session, monkeypatch, band, pool):
+    now = datetime.now(UTC)
+    await _five_on_pool_band(db_session, monkeypatch, band=band, pool=pool, now=now)
+    out = await RealWalletDriver(db_session).tick(now=now)
+    assert set(out.family.values()) == {"pool_outside_band"}
+    assert set(await _intents(db_session)) == {OWNER}
+
+
 async def test_karthik_sets_a_wallets_band_and_a_bad_band_is_refused(db_session):
     from fastapi import HTTPException
 
