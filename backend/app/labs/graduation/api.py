@@ -2617,7 +2617,7 @@ async def _pool_ten_k_book(db: AsyncSession, rows: Sequence[Any], sol: Decimal |
     rows = sorted(rows, key=_opened_order)
     walk = _funded_walk([(r.opened_at, r.closed_at, float(r.net_return),
                           float(r.impact_open or 0), float(r.impact_close or 0)) for r in rows],
-                        sol, ticket=pl.WALLET_TICKET, start=pl.WALLET_START)
+                        sol, ticket=pl.WALLET_TICKET, start=pl.TEN_K_START)
     took = [(r, m) for r, m in zip(rows, walk.pnl, strict=True) if m is not None]
     held = (await db.scalars(
         select(GradPaperPosition)
@@ -2634,7 +2634,7 @@ async def _pool_ten_k_book(db: AsyncSession, rows: Sequence[Any], sol: Decimal |
     from app.labs.graduation.tournament import BY_NAME
 
     return {
-        "ticket_usd": pl.WALLET_TICKET, "capital_usd": pl.WALLET_START,
+        "ticket_usd": pl.WALLET_TICKET, "capital_usd": pl.TEN_K_START,
         # The rule book's numbers (Karthik, 2026-10-06: "write rule book in 10k
         # lab"), from the book itself so the words cannot drift from it.
         "rules": {"floor_usd": 10_000, "skip_pool_usd": list(pl.SKIP_POOL_USD),
@@ -2646,7 +2646,7 @@ async def _pool_ten_k_book(db: AsyncSession, rows: Sequence[Any], sol: Decimal |
                   "reaction_s": config.EXIT_REACTION_S,
                   "max_sells_before": pl.MAX_SELLS_BEFORE},
         "balance_usd": Decimal(str(walk.cash)).quantize(cents),
-        "days": _karthik_days(took, pl.START, pl.WALLET_START, cents),
+        "days": _karthik_days(took, pl.START, pl.TEN_K_START, cents),
         "closed": [{"symbol": r.symbol, "mint": r.mint, "opened_at": r.opened_at,
                     "closed_at": r.closed_at, "pool_usd": r.liq_open_usd,
                     "pct": Decimal(str(100 * float(r.net_return))).quantize(cents),
@@ -2671,8 +2671,8 @@ async def _pool_lab_build(db: AsyncSession) -> dict[str, Any]:
 
     def sizes(rows: Sequence[Any]) -> list[dict[str, Any]]:
         rows = sorted(rows, key=_opened_order)
-        return [{"ticket_usd": t, "capital_usd": 10 * t,
-                 **_karthik_line(rows, sol, size=float(t), capital=10.0 * t, cents=cents)}
+        return [{"ticket_usd": t, "capital_usd": pl.TEN_K_RATIO * t,
+                 **_karthik_line(rows, sol, size=float(t), capital=float(pl.TEN_K_RATIO * t), cents=cents)}
                 for t in pl.SIZES]
 
     lo, hi = pl.SKIP_POOL_USD
