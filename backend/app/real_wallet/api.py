@@ -87,7 +87,7 @@ from app.real_wallet.network import (
 from app.real_wallet.policy import configured_entry_size_usd
 from app.real_wallet.rehearsal import as_dict as rehearsal_as_dict
 from app.real_wallet.rehearsal import rehearse
-from app.real_wallet.sol_price import JupiterSolUsdPriceSource
+from app.real_wallet.sol_price import current as sol_price_now
 from app.real_wallet.sol_price import current_usd as sol_usd_now
 from app.real_wallet.transport_policy import readiness as transport_readiness
 from app.real_wallet.tx_inspect import lamports_from_sol
@@ -750,7 +750,7 @@ async def status(viewer: OptionalUser, session: DbSession) -> dict[str, object]:
     # Read-only price probe. It cannot trigger an order, a signature or a
     # submission; it prices the balance in the unit every limit is written in.
     try:
-        sol_price = await JupiterSolUsdPriceSource().current(now=now)
+        sol_price = await sol_price_now(now)   # Jupiter, then DexScreener
     except Exception:  # pragma: no cover - the source already fails closed
         sol_price = None
     public_key = settings.REAL_WALLET_PUBLIC_KEY.strip()

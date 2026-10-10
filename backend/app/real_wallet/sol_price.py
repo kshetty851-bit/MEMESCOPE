@@ -38,6 +38,8 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Protocol
 
+import httpx
+
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.paper.execution import ExecutionQuoteUnavailableError
@@ -185,6 +187,44 @@ class JupiterSolUsdPriceSource:
         return SolUsdPrice(usd=usd, observed_at=now, source=self.source_name)
 
 
+class DexScreenerSolUsdPriceSource:
+    """SOL/USD from DexScreener's deepest SOL/USDC (or USDT) pool: the backup
+    when Jupiter refuses (2026-10-10: Jupiter's free quote API answered 503,
+    then 429, for every request, and a missing price stops every entry).
+    DexScreener is already this app's market data source, so no new vendor."""
+
+    source_name = "dexscreener_pair"
+    _MIN_POOL_USD = 1_000_000
+
+    def __init__(self, *, client: httpx.AsyncClient | None = None) -> None:
+        self._client = client
+
+    async def current(self, *, now: datetime) -> SolUsdPrice | None:
+        url = (f"{settings.MARKET_PROVIDER_BASE_URL}/tokens/v1/solana/"
+               f"{settings.EXECUTION_SOL_MINT}")
+        try:
+            if self._client is not None:
+                pairs = (await self._client.get(url, timeout=10)).json()
+            else:
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(url, timeout=10)
+                    response.raise_for_status()
+                    pairs = response.json()
+            best = max(
+                (p for p in pairs if isinstance(p, dict)
+                 and (p.get("baseToken") or {}).get("address") == settings.EXECUTION_SOL_MINT
+                 and (p.get("quoteToken") or {}).get("symbol") in ("USDC", "USDT")
+                 and float((p.get("liquidity") or {}).get("usd") or 0) >= self._MIN_POOL_USD),
+                key=lambda p: float(p["liquidity"]["usd"]))
+            usd = Decimal(str(best["priceUsd"]))
+        except Exception as exc:
+            logger.warning("sol_usd_dexscreener_unavailable", error=str(exc)[:200])
+            return None
+        if usd <= 0:
+            return None
+        return SolUsdPrice(usd=usd, observed_at=now, source=self.source_name)
+
+
 class UnavailableSolUsdPriceSource:
     """Explicit empty source, for wiring that must fail closed rather than guess."""
 
@@ -217,17 +257,16 @@ async def current(now: datetime) -> SolUsdPrice | None:
     equity, and settlement — because two copies would be two rules the moment
     somebody edited one.
     """
-    try:
-        price = await JupiterSolUsdPriceSource().current(now=now)
-    except Exception:  # noqa: BLE001 - an unpriced reading is None
-        return None
-    if price is None or price.usd <= 0:
-        return None
-    if not price.is_fresh(
-        now, max_age_seconds=settings.EXECUTION_SOL_PRICE_MAX_AGE_SECONDS
-    ):
-        return None
-    return price
+    # Jupiter first, DexScreener when Jupiter has no fresh answer (2026-10-10).
+    for source in (JupiterSolUsdPriceSource(), DexScreenerSolUsdPriceSource()):
+        try:
+            price = await source.current(now=now)
+        except Exception:  # an unpriced reading is None
+            price = None
+        if price is not None and price.usd > 0 and price.is_fresh(
+                now, max_age_seconds=settings.EXECUTION_SOL_PRICE_MAX_AGE_SECONDS):
+            return price
+    return None
 
 
 async def current_usd(now: datetime) -> Decimal | None:

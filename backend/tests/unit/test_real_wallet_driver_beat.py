@@ -155,6 +155,7 @@ async def test_a_stale_or_absent_sol_price_refuses(monkeypatch, age_seconds,
             )
 
     monkeypatch.setattr(sp, "JupiterSolUsdPriceSource", _Source)
+    monkeypatch.setattr(sp, "DexScreenerSolUsdPriceSource", _Source)  # both sources alike
     got = await sp.current_usd(now)
     assert got == (Decimal(expected) if expected is not None else None)
 
@@ -170,6 +171,7 @@ async def test_an_unreachable_price_source_refuses(monkeypatch):
             raise RuntimeError("jupiter down")
 
     monkeypatch.setattr(sp, "JupiterSolUsdPriceSource", _Broken)
+    monkeypatch.setattr(sp, "DexScreenerSolUsdPriceSource", _Broken)  # both down
     assert await sp.current_usd(datetime(2026, 8, 27, tzinfo=UTC)) is None
 
 
