@@ -70,6 +70,7 @@ interface TenKRules {
   max_entry_age_s: number;
   hold_minutes: number;
   stop_pct?: number | null;
+  max_sells_before?: number | null;
   reaction_s?: number;
 }
 interface TenKBook {
@@ -252,6 +253,7 @@ export function TenKRuleBook({ book }: { book: TenKBook }) {
     ["Small pools too", `The pool must hold ${k(r.floor_usd)} or more.`],
     ["Skips the middle", `No pools between ${k(lo)} and ${k(hi)}: they lost money in both halves of this book's first day, and Karthik's Lab's ${k(lo)}–${k(hi)} book lost almost all its money.`],
     ["Only quiet pools", `Fewer than ${r.quiet_max_txs} trades in the pool so far when it buys. A busy start is skipped.`],
+    ...(r.max_sells_before != null ? [["Few sellers", `It skips a coin whose pool already had more than ${r.max_sells_before} sells when it buys: early sellers in a tiny pool are cashing out, and those coins lost money on every day of this book.`] as [string, string]] : []),
     ["Only fresh coins", `It buys within ${r.max_entry_age_s / 60} minutes of the coin graduating, or not at all.`],
     ["No repeat creators", "Coins whose creator has launched a coin before are left out: on this book they lost money. (The $50k books buy them again.)"],
     ["Several at once", `${usd(book.ticket_usd)} per trade from a ${usd(book.capital_usd)} balance. It buys every coin that passes while a whole ${usd(book.ticket_usd)} is free.`],
@@ -279,7 +281,8 @@ export function TenKRuleBook({ book }: { book: TenKBook }) {
       </ul>
       <p className="px-3 pb-3 text-[11px] text-ink-dim">
         The timer starts at the book&apos;s first trade. The {r.hold_minutes}-minute sell, the{" "}
-        {k(lo)}–{k(hi)} skip{r.stop_pct ? " and the stop-loss" : ""} came later (5–7 Oct) and are
+        {k(lo)}–{k(hi)} skip{r.stop_pct ? ", the stop-loss" : ""}
+        {r.max_sells_before != null ? " and the few-sellers rule" : ""} came later (5–10 Oct) and are
         applied from the first trade, like every rule here.
       </p>
     </Panel>

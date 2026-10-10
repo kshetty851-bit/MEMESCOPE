@@ -2584,6 +2584,29 @@ async def _pool_rows(db: AsyncSession, books: Sequence[str], since: datetime,
             if not (r.mint in seen or seen.add(r.mint))]
 
 
+#: Each position's pool sells at its buy: the last 5-minute count read before.
+_SELLS_BEFORE_SQL = text("""
+    select x.id, (select g.txns_m5_sells from grad_postgrad_samples g
+                  where g.mint = x.mint and g.ts <= x.at and g.txns_m5_buys is not null
+                  order by g.ts desc limit 1)
+    from unnest(cast(:ids as uuid[]), cast(:mints as varchar[]),
+                cast(:ats as timestamptz[])) as x(id, mint, at)
+""")
+
+
+async def _busy_sellers(db: AsyncSession, rows: Sequence[Any]) -> set[Any]:
+    """Ids of the positions whose pool had more than `MAX_SELLS_BEFORE` sells
+    when bought. An unknown count is kept."""
+    from app.labs.graduation import pool_lab as pl
+
+    if not rows:
+        return set()
+    found = await db.execute(_SELLS_BEFORE_SQL, {
+        "ids": [r.id for r in rows], "mints": [r.mint for r in rows],
+        "ats": [r.opened_at for r in rows]})
+    return {i for i, sells in found.all() if sells is not None and sells > pl.MAX_SELLS_BEFORE}
+
+
 async def _pool_ten_k_book(db: AsyncSession, rows: Sequence[Any], sol: Decimal | None,
                            cents: Decimal) -> dict[str, Any]:
     """The $10k book at $50 on $500, laid out like Karthik's Lab (2026-10-05:
@@ -2601,6 +2624,8 @@ async def _pool_ten_k_book(db: AsyncSession, rows: Sequence[Any], sol: Decimal |
         .where(GradPaperPosition.book == pl.TEN_K_BOOK, GradPaperPosition.closed_at.is_(None),
                GradPaperPosition.excluded.is_(None), GradPaperPosition.opened_at >= pl.START)
         .order_by(GradPaperPosition.opened_at.desc()))).all()
+    busy = await _busy_sellers(db, held)
+    held = [p for p in held if p.id not in busy]
 
     def move(p: Any) -> Decimal | None:
         live = net_return(p, p.last_quote)  # after costs, as the trade list's open rows
@@ -2618,7 +2643,8 @@ async def _pool_ten_k_book(db: AsyncSession, rows: Sequence[Any], sol: Decimal |
                   "hold_minutes": BY_NAME[pl.TEN_K_BOOK].hold,
                   "stop_pct": (float(BY_NAME[pl.TEN_K_BOOK].stop * 100)
                                if BY_NAME[pl.TEN_K_BOOK].stop else None),
-                  "reaction_s": config.EXIT_REACTION_S},
+                  "reaction_s": config.EXIT_REACTION_S,
+                  "max_sells_before": pl.MAX_SELLS_BEFORE},
         "balance_usd": Decimal(str(walk.cash)).quantize(cents),
         "days": _karthik_days(took, pl.START, pl.WALLET_START, cents),
         "closed": [{"symbol": r.symbol, "mint": r.mint, "opened_at": r.opened_at,
@@ -2652,6 +2678,8 @@ async def _pool_lab_build(db: AsyncSession) -> dict[str, Any]:
     lo, hi = pl.SKIP_POOL_USD
     ten_live = [r for r in await _pool_rows(db, (pl.TEN_K_BOOK,), pl.START, 10_000)
                 if not lo <= float(r.liq_open_usd or 0) < hi]
+    busy = await _busy_sellers(db, ten_live)
+    ten_live = [r for r in ten_live if r.id not in busy]
     ten_book = await _pool_ten_k_book(db, ten_live, sol, cents)
 
     # $50k: ten user wallets on Karthik's book's real-time trades.
