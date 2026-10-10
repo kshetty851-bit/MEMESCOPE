@@ -86,6 +86,14 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Paper only. $10k pools at 10x sizes; $50k pools on ten wallets.",
       },
+      // Karthik, 2026-10-10: does paying DexScreener (profile, boosts) pay?
+      {
+        href: "/boost-lab",
+        label: "Boost Lab",
+        icon: IconSpark,
+        status: "ready",
+        note: "Paper only. Coins with a paid DexScreener profile or boosts, sold at 4 minutes.",
+      },
       // BTC/USDT range strategy (2026-10-08). Paper only: no wallet, no orders.
       {
         href: "/btc-range-lab",

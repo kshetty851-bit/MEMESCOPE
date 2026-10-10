@@ -298,6 +298,8 @@ class DexScreenerProvider(MarketDataProvider):
             volume_5m=_decimal(volume.get("m5")),
             buy_count_24h=_int(txns_24h.get("buys")),
             sell_count_24h=_int(txns_24h.get("sells")),
+            boosts_active=(_int(b.get("active"))
+                           if isinstance(b := pair.get("boosts"), dict) else None),
             dex_name=pair.get("dexId") if isinstance(pair.get("dexId"), str) else None,
             trading_pair=trading_pair[:96] if trading_pair else None,
             pool_address=pool_address if isinstance(pool_address, str) else None,

@@ -136,6 +136,8 @@ class TokenMarketSnapshot(Base, UUIDPrimaryKeyMixin):
     is_verified: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="false", nullable=False
     )
+    #: DexScreener's active paid boosts (Boost Lab, 2026-10-10); None = unread.
+    boosts_active: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # --- ingest data-quality firewall (V4 Phase 2) ------------------------
     # The provider's print is preserved untouched in `price_usd`; these
     # columns only ANNOTATE it. A flagged row is excluded from peaks,

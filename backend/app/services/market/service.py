@@ -586,6 +586,7 @@ class MarketEnrichmentService:
             "pool_address": data.pool_address,
             "trading_status": data.trading_status,
             "is_verified": data.is_verified,
+            "boosts_active": data.boosts_active,
             "provider": data.provider,
             "provider_latency_ms": data.provider_latency_ms or latency_ms,
         }
