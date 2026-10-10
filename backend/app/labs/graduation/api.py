@@ -1744,6 +1744,8 @@ async def _pumpfun_day(db: AsyncSession, day: date, sol_now: Decimal | None) -> 
 PREVENTED_FLOOR_USD = 75_000
 #: What one wallet stakes a trade, for the "saved" figure.
 PREVENTED_TICKET_USD = Decimal(50)
+#: Above this (100x in five minutes) an exit print is a broken price.
+PREVENTED_MAX_MOVE = 100
 
 
 @router.get("/rugs-prevented", summary="Rugs the real wallet's checks refused")
@@ -1763,10 +1765,14 @@ async def rugs_prevented(db: AsyncSession = Depends(get_db),
     if start is not None:
         deep = deep & (GradOperator.entry_at >= start)
     move = GradOperator.exit_price_native / GradOperator.price_native - 1
+    # A print over PREVENTED_MAX_MOVE in five minutes is a broken price, not a
+    # trade (2026-10-10: one coin's exit read 56 million times its entry and
+    # put "-$2,812,222,273" on the page). It still counts as refused.
+    priced = GradOperator.exit_price_native.is_not(None) & (move <= PREVENTED_MAX_MOVE)
     refused, rugs, moved, since = (await db.execute(
         select(func.count().filter(blocked),
                func.count().filter(blocked, GradOperator.rugged.is_(True)),
-               func.sum(move).filter(blocked, GradOperator.exit_price_native.is_not(None)),
+               func.sum(move).filter(blocked, priced),
                func.min(GradOperator.entry_at).filter(blocked))
         .where(deep))).one()
     last = (await db.execute(
