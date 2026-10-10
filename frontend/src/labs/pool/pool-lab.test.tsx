@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { FiftyKTables, TenKBookPanel, TenKRuleBook, TenKTable } from "./page";
@@ -45,6 +45,25 @@ describe("Pool Lab", () => {
     expect(screen.getByText(/Closed · 1 · 1 rugs/)).toBeInTheDocument();
     expect(screen.getByTestId("pool-closed")).toHaveTextContent("-$45.00");
     expect(screen.queryByTestId("trade-real")).toBeNull();
+  });
+
+  it("opens a day's trades when its box is clicked, and closes them again", () => {
+    render(<TenKBookPanel now={Date.parse("2026-10-07T18:00:00Z")} book={{
+      ticket_usd: 50, capital_usd: 250, balance_usd: "260",
+      days: [{ n: 1, from: "2026-10-05T16:00:00Z", to: "2026-10-06T16:00:00Z", running: false, trades: 1, rugs: 0, pnl_usd: "5", pct: "2", balance_usd: "255" },
+             { n: 2, from: "2026-10-06T16:00:00Z", to: "2026-10-07T16:00:00Z", running: false, trades: 1, rugs: 1, pnl_usd: "-30", pct: "-12", balance_usd: "225" }],
+      open: [],
+      closed: [{ symbol: "DAYONE", mint: "M1", opened_at: "2026-10-05T17:00:00Z", closed_at: "2026-10-05T17:03:00Z", pct: "10", pnl_usd: "5", pool_usd: "15000", rugged: false },
+               { symbol: "DAYTWO", mint: "M2", opened_at: "2026-10-06T17:00:00Z", closed_at: "2026-10-06T17:03:00Z", pct: "-75", pnl_usd: "-37.5", pool_usd: "18000", rugged: true }],
+    }} />);
+    expect(screen.queryByTestId("day-trades")).toBeNull();
+    fireEvent.click(screen.getByTestId("day-2"));
+    const list = screen.getByTestId("day-trades");
+    expect(list).toHaveTextContent("Day 2 · 1 trades · 1 rugs");
+    expect(list).toHaveTextContent("DAYTWO");
+    expect(list).not.toHaveTextContent("DAYONE");
+    fireEvent.click(screen.getByTestId("day-2"));
+    expect(screen.queryByTestId("day-trades")).toBeNull();
   });
 
   it("writes the $10k book's rules from its own numbers", () => {

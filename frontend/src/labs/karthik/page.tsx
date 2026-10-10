@@ -161,11 +161,25 @@ export function day30(days: KarthikDay[], judgeAt: string, now = Date.now()) {
 }
 
 /** Also the Pool Lab's $10k book's days (2026-10-05), which has no judge date. */
-export function Days({ days, judgeAt }: { days: KarthikDay[]; judgeAt?: string }) {
+/** Days, and with `trades` each box opens that day's trades (Karthik,
+ *  2026-10-10: "if i click on daily profit box it show me all the trades it
+ *  took that day"). A day holds the trades that CLOSED in it, as its profit does. */
+export function Days({ days, judgeAt, trades, real = true }: {
+  days: KarthikDay[]; judgeAt?: string; trades?: KarthikTrade[]; real?: boolean;
+}) {
+  const [open, setOpen] = useState<number | null>(null);
   if (days.length === 0) return null;
   const guess = judgeAt ? day30(days, judgeAt) : null;
+  const shown = open == null ? null : days.find((d) => d.n === open) ?? null;
+  const inDay = shown && trades
+    ? trades.filter((t) => {
+        const at = Date.parse(t.closed_at ?? t.opened_at);
+        return at >= Date.parse(shown.from) && at < Date.parse(shown.to);
+      })
+    : [];
   return (
-    // Wrapped, not scrolled (Karthik, 2026-10-03: "so i dont need to slide").
+    <div className="space-y-2">
+    {/* Wrapped, not scrolled (Karthik, 2026-10-03: "so i dont need to slide"). */}
     <div className="grid grid-cols-[repeat(auto-fill,minmax(112px,1fr))] gap-2">
       {guess ? (
         <div
@@ -190,9 +204,17 @@ export function Days({ days, judgeAt }: { days: KarthikDay[]; judgeAt?: string }
           <div
             key={d.n}
             data-testid={`day-${d.n}`}
+            {...(trades ? {
+              role: "button", tabIndex: 0, "aria-pressed": open === d.n,
+              title: "Show this day's trades",
+              onClick: () => setOpen(open === d.n ? null : d.n),
+              onKeyDown: (e: React.KeyboardEvent) => {
+                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen(open === d.n ? null : d.n); }
+              },
+            } : {})}
             className={`rounded-lg border p-2 ${
-              d.running ? "border-dashed border-line" : "border-line"
-            } bg-ink/[0.02]`}
+              open === d.n ? "border-accent ring-1 ring-accent" : d.running ? "border-dashed border-line" : "border-line"
+            } bg-ink/[0.02]${trades ? " cursor-pointer hover:border-accent/60" : ""}`}
           >
             <div className="text-[10px] uppercase tracking-wider text-ink-dim">
               {d.running ? `Day ${d.n} · so far` : `Day ${d.n}`}
@@ -214,6 +236,34 @@ export function Days({ days, judgeAt }: { days: KarthikDay[]; judgeAt?: string }
           </div>
         );
       })}
+    </div>
+    {shown ? (
+      <div className="overflow-x-auto rounded-lg border border-line p-2" data-testid="day-trades">
+        <div className="mb-1 flex items-center justify-between text-[11px] uppercase tracking-wider text-ink-2">
+          <span>Day {shown.n} · {inDay.length} trades · {inDay.filter((t) => (t as KarthikTrade & { rugged?: boolean }).rugged ?? Number(t.pct) <= -50).length} rugs</span>
+          <button type="button" className="text-accent hover:underline" onClick={() => setOpen(null)}>close</button>
+        </div>
+        {inDay.length === 0 ? (
+          <p className="text-[12px] text-ink-dim">No trades closed this day.</p>
+        ) : (
+          <table className="w-full text-[13px]">
+            <thead className="text-[11px] uppercase tracking-wider text-ink-dim">
+              <tr>
+                <th className="py-1 pr-3 text-left font-normal">bought</th>
+                <th className="py-1 pr-3 text-left font-normal">coin</th>
+                <th className="py-1 pr-3 text-right font-normal">pool</th>
+                <th className="py-1 pr-3 text-right font-normal">result</th>
+                <th className="py-1 text-right font-normal">money</th>
+                {real ? <th className="py-1 pl-3 text-right font-normal">real wallet</th> : null}
+              </tr>
+            </thead>
+            <tbody>
+              {inDay.map((t) => <Row key={`${t.mint ?? t.symbol}-${t.opened_at}`} trade={t} real={real} />)}
+            </tbody>
+          </table>
+        )}
+      </div>
+    ) : null}
     </div>
   );
 }
@@ -889,7 +939,7 @@ export function KarthikLabPage() {
         <div className="mb-1 text-[11px] uppercase tracking-wider text-ink-dim">
           Every 24 hours · profit that day
         </div>
-        <Days days={data.days} judgeAt={data.judge_at} />
+        <Days days={data.days} judgeAt={data.judge_at} trades={data.trades_list} />
       </div>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
