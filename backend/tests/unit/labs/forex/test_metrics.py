@@ -6,6 +6,7 @@ with a reason code rather than an estimate."""
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -77,7 +78,8 @@ def result(
     start: datetime = T0,
     end: datetime = T0 + timedelta(days=30),
     final: str | None = None,
-    **kw: int,
+    exits_ambiguous: int = 0,
+    margin_closeouts: int = 0,
 ) -> BacktestResult:
     cfg = BacktestConfig(strategy=StrategyId.RSI_PULLBACK)
     bal = cfg.risk.initial_capital + sum((t.net_pnl for t in trades), D(0))
@@ -90,7 +92,8 @@ def result(
         equity_curve=tuple(curve or []),
         skipped=(),
         final_balance=D(final) if final is not None else bal,
-        **kw,
+        exits_ambiguous=exits_ambiguous,
+        margin_closeouts=margin_closeouts,
     )
 
 
@@ -98,7 +101,7 @@ def pt(t: datetime, eq: str, margin: float = 0.0) -> EquityPoint:
     return EquityPoint(time=t, balance=D(eq), equity=D(eq), margin_utilization_pct=margin)
 
 
-def daily_curve(equities: list[float]) -> list[EquityPoint]:
+def daily_curve(equities: Sequence[float]) -> list[EquityPoint]:
     return [pt(T0 + timedelta(days=i, hours=23), f"{e:.2f}") for i, e in enumerate(equities)]
 
 

@@ -67,7 +67,7 @@ class TestBuildUrl:
 
 class TestDecode:
     async def test_fields_are_read_in_open_close_low_high_order(self) -> None:
-        """The wire order is (open, close, low, high), not OHLC; mixing it up swaps real prices."""
+        """Wire order is (open, close, low, high), not OHLC; mixing it up swaps real prices."""
         body = bi5(
             [
                 (0, 110429, 110428, 110425, 110430, 12.5),
@@ -218,7 +218,7 @@ class TestWeekendHandling:
     async def test_flat_zero_volume_minutes_in_the_closed_window_are_dropped_and_counted(
         self,
     ) -> None:
-        """Sunday before 22:00 UTC is closed in the lab's model; padding there is not trading."""
+        """Sunday before 22:00 UTC is closed in the lab model; padding there is not trading."""
         body = bi5(
             [
                 (21 * 3600, 110000, 110000, 110000, 110000, 0.0),  # closed, flat: drop

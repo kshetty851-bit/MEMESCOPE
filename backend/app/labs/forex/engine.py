@@ -253,7 +253,9 @@ class _Engine:
     def _accrue(self, p: _Pos, upto: datetime) -> None:
         if p.next_roll is None or upto < p.next_roll:
             return
-        swap = self.cfg.costs.swap_long_per_lot if p.d > 0 else self.cfg.costs.swap_short_per_lot
+        swap = (
+            self.cfg.costs.swap_long_per_lot if p.d > 0 else self.cfg.costs.swap_short_per_lot
+        )
         lots = Decimal(p.units) / self.contract
         for r in rollovers_between(p.accrued_to, upto):
             mult = swap_multiplier(r)
@@ -288,7 +290,9 @@ class _Engine:
             gross = gross / _dec(price)
             conv = 1.0 / price
         gross = _q(gross)
-        exit_comm = _q(Decimal(p.units) / self.contract * self.cfg.costs.commission_per_lot_side)
+        exit_comm = _q(
+            Decimal(p.units) / self.contract * self.cfg.costs.commission_per_lot_side
+        )
         commission = p.entry_comm + exit_comm
         financing = _q(p.fin)
         net = gross - commission + financing

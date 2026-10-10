@@ -210,9 +210,7 @@ def test_gap_through_stop_fills_at_the_open_not_the_stop() -> None:
 BOTH_BAR = (1.1, 1.105, 1.097, 1.1)  # touches stop 1.098 and target 1.104
 
 
-def _minutes(
-    specs: list[tuple[float, float, float, float]], start: datetime
-) -> list[Candle]:
+def _minutes(specs: list[tuple[float, float, float, float]], start: datetime) -> list[Candle]:
     return bars(specs, start=start, minutes=1)
 
 
@@ -291,7 +289,9 @@ def test_lower_tf_with_missing_minutes_falls_back_to_ambiguous() -> None:
     """A partial walk could miss an earlier touch, so incomplete coverage is
     treated as no coverage."""
     candles = bars([FLAT, FLAT, BOTH_BAR, FLAT])
-    ltf = _minutes([(1.1, 1.105, 1.1, 1.104), (1.104, 1.104, 1.097, 1.098)], candles[2].open_time)
+    ltf = _minutes(
+        [(1.1, 1.105, 1.1, 1.104), (1.104, 1.104, 1.097, 1.098)], candles[2].open_time
+    )
     res = run(make_cfg(), candles, [sig(0)], lower_tf=ltf)
     assert res.trades[0].ambiguous_exit
     assert res.exits_ambiguous == 1
@@ -526,22 +526,21 @@ def test_session_end_is_inert_without_a_window() -> None:
 
 def test_session_end_exit_precedes_entries_on_that_bar() -> None:
     """The window-closing exit realises its loss before the same bar's entry is
-    judged, so a daily-loss block it causes applies to that entry."""
-    risk = replace(BASE_RISK, risk_per_trade_pct=D(5), max_daily_loss_pct=D(3), max_open_positions=1)
+    judged: the entry sees DAILY_LOSS_LIMIT, not MAX_OPEN_POSITIONS."""
+    risk = replace(BASE_RISK, risk_per_trade_pct=D(8), max_daily_loss_pct=D(3))
     specs = [FLAT, FLAT, FLAT, (1.09, 1.09, 1.09, 1.09), FLAT, FLAT]
     candles = bars(specs, start=datetime(2024, 1, 2, 7, 0, tzinfo=UTC), minutes=60)
     cfg = make_cfg(
         tf=Timeframe.H1,
         risk=risk,
-        params=StrategyParams(close_at_session_end=True),
-        session_filter=Session(8, 10),
+        strategy=StrategyId.LONDON_BREAKOUT,
+        params=StrategyParams(close_at_session_end=True, trading_session=Session(8, 10)),
     )
-    # Signal at idx 2 enters at 10:00 (outside the filter too) - use a wider
-    # filter-free probe: the second signal's entry bar is the exit bar.
-    res = run(cfg, candles, [sig(0, sd=0.05, tpd=None), sig(2, sd=0.05, tpd=None)])
+    # Entry 08:00 with 4,000 units; the 10:00 open is 100 pips lower: -$40 > 3%.
+    res = run(cfg, candles, [sig(0, sd=0.02, tpd=None), sig(2, sd=0.02, tpd=None)])
     assert res.trades[0].exit_reason is ExitReason.SESSION_END
-    assert res.trades[0].net_pnl < 0
-    assert [s.reason for s in res.skipped] == [SkipReason.OUTSIDE_SESSION]
+    assert res.trades[0].net_pnl == D("-40.00")
+    assert [s.reason for s in res.skipped] == [SkipReason.DAILY_LOSS_LIMIT]
 
 
 def _financing_run(
@@ -561,11 +560,11 @@ def test_financing_charges_rollovers_with_wednesday_triple() -> None:
     5 nights; 5,000 units is 0.05 lot, so long pays 7.00 x 0.05 x 5 = 1.75 and
     short earns 2.00 x 0.05 x 5 = 0.50."""
     start = datetime(2024, 1, 2, 19, 0, tzinfo=UTC)
-    long_res = _financing_run(start, 33, LONG, True)
+    long_res = _financing_run(start, 56, LONG, True)
     assert long_res.trades[0].financing == D("-1.75")
     assert long_res.trades[0].net_pnl == D("-1.75")
     assert long_res.final_balance == D("998.25")
-    short_res = _financing_run(start, 33, SHORT, True)
+    short_res = _financing_run(start, 56, SHORT, True)
     assert short_res.trades[0].financing == D("0.50")
 
 
@@ -575,7 +574,7 @@ def test_financing_single_wednesday_night_is_triple() -> None:
 
 
 def test_financing_disabled_charges_nothing() -> None:
-    res = _financing_run(datetime(2024, 1, 2, 19, 0, tzinfo=UTC), 33, LONG, False)
+    res = _financing_run(datetime(2024, 1, 2, 19, 0, tzinfo=UTC), 56, LONG, False)
     assert res.trades[0].financing == D("0.00")
     assert res.final_balance == D(1000)
 
@@ -640,9 +639,7 @@ def test_equity_curve_marks_open_positions_and_margin_utilisation() -> None:
 def test_trade_from_ignores_earlier_signals_entirely() -> None:
     """Warm-up signals are not counted, not traded and not listed as skipped."""
     candles = bars([FLAT] * 10)
-    res = run(
-        make_cfg(), candles, [sig(0), sig(1), sig(5)], trade_from=candles[4].open_time
-    )
+    res = run(make_cfg(), candles, [sig(0), sig(1), sig(5)], trade_from=candles[4].open_time)
     assert res.signals == 1
     assert [t.signal_time for t in res.trades] == [candles[5].open_time]
     assert res.skipped == ()
@@ -670,5 +667,7 @@ def test_no_lookahead_future_candles_do_not_change_a_closed_trade() -> None:
     cut = run(cfg, candles[: k + 1], [s for s in signals if s.index <= k])
     assert cut.trades[0] == first
 
-    wild = candles[: k + 1] + [Candle(c.open_time, 9.0, 9.0, 0.5, 5.0) for c in candles[k + 1 :]]
+    wild = candles[: k + 1] + [
+        Candle(c.open_time, 9.0, 9.0, 0.5, 5.0) for c in candles[k + 1 :]
+    ]
     assert run(cfg, wild, signals).trades[0] == first

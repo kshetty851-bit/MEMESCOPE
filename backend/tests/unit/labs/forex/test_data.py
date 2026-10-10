@@ -90,7 +90,8 @@ class TestGaps:
 
     def test_two_missing_in_hundred_is_fair_and_none_is_good(self) -> None:
         r = validate(series(MON, 100, Timeframe.H1, skip={20, 50}), "EURUSD", Timeframe.H1)
-        assert (r.coverage_pct, r.grade) == (pytest.approx(98.0), "fair")
+        assert r.coverage_pct == pytest.approx(98.0)
+        assert r.grade == "fair"
         assert validate(series(MON, 100, Timeframe.H1), "EURUSD", Timeframe.H1).grade == "good"
 
     def test_heavy_loss_is_poor(self) -> None:

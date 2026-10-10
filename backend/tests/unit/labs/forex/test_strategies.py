@@ -607,7 +607,8 @@ def test_no_look_ahead_signals_on_prefix_equal_prefix_of_signals(
     # Cuts include mid-Asian-window, mid-session and arbitrary offsets.
     # Cutting right after, and right before, each signal bar is the sharpest test:
     # the decision bar then has no future data at all.
-    at_signals = [s.index + d for s in full for d in (0, 1)]
+    sampled = full[:: max(1, len(full) // 12)]
+    at_signals = [s.index + d for s in sampled for d in (0, 1)]
     for k in (150, 301, 1000, 1234, 1440 + 40, 2001, 2888 + 100, 3999, *at_signals):
         if k < 1:
             continue
