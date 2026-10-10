@@ -32,6 +32,7 @@ from app.karthik import api as karthik
 from app.karthik_ops import api as karthik_ops
 from app.lab import api as lab
 from app.labs.btc_range import api as btc_range_lab
+from app.labs.forex import api as forex_lab
 from app.labs.graduation import api as graduation_lab
 from app.momentum import api as momentum
 from app.news import api as news
@@ -129,6 +130,10 @@ api_router.include_router(graduation_lab.router)
 # BTC Range Lab. Paper only: two GETs and one POST that computes a backtest
 # and writes nothing; /status answers `running: false` without a query when off.
 api_router.include_router(btc_range_lab.router)
+# Forex Strategy Lab. Research and paper only: reads are public, POSTs need a
+# signed-in user and either store candles, save a config or queue a background
+# replay of stored candles. No broker, no order route, no credential.
+api_router.include_router(forex_lab.router)
 # The homepage journey section (public, counts only; see the module).
 api_router.include_router(journey.router)
 # Solana news headlines for the sidebar broadcast. Third-party RSS, read-only.

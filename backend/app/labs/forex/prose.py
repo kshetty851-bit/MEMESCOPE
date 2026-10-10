@@ -15,7 +15,7 @@ should show up as a visible raw code on the page, not as a 500 on the result.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 TEXT: dict[str, str] = {
     # --- engine assumptions -------------------------------------------------
@@ -59,8 +59,12 @@ TEXT: dict[str, str] = {
         "The position size, from the risk per trade and the stop distance, rounded to "
         "less than the minimum tradable size."
     ),
-    "margin_insufficient": "The leverage cap cut the position size below the minimum tradable size.",
-    "no_next_bar": "The signal came on the final candle, so there was no next bar to enter on.",
+    "margin_insufficient": (
+        "The leverage cap cut the position size below the minimum tradable size."
+    ),
+    "no_next_bar": (
+        "The signal came on the final candle, so there was no next bar to enter on."
+    ),
     "gap_before_entry": (
         "The next bar did not follow the signal bar directly (a data gap or the weekend), "
         "so no entry was made."
@@ -69,22 +73,34 @@ TEXT: dict[str, str] = {
     "stop_loss": "The stop price was reached.",
     "take_profit": "The take-profit price was reached.",
     "session_end": "Closed at the end of the strategy's trading window.",
-    "margin_closeout": "Equity fell to the margin close-out level and every position was closed.",
-    "end_of_data": "Still open when the candles ran out; closed at the last close and counted.",
-    "asian_high_breakout": "A bar closed above the Asian-session high during the London window.",
+    "margin_closeout": (
+        "Equity fell to the margin close-out level and every position was closed."
+    ),
+    "end_of_data": (
+        "Still open when the candles ran out; closed at the last close and counted."
+    ),
+    "asian_high_breakout": (
+        "A bar closed above the Asian-session high during the London window."
+    ),
     "asian_low_breakout": "A bar closed below the Asian-session low during the London window.",
-    "rsi_pullback_long": "RSI rose back through the long level while price was above the trend average.",
+    "rsi_pullback_long": (
+        "RSI rose back through the long level while price was above the trend average."
+    ),
     "rsi_pullback_short": (
         "RSI fell back through the short level while price was below the trend average."
     ),
     "bb_reentry_long": (
-        "Price closed back above the lower Bollinger band after closing below it with RSI oversold."
+        "Price closed back above the lower Bollinger band after closing below it with "
+        "RSI oversold."
     ),
     "bb_reentry_short": (
-        "Price closed back below the upper Bollinger band after closing above it with RSI overbought."
+        "Price closed back below the upper Bollinger band after closing above it with "
+        "RSI overbought."
     ),
     # --- scorecard flags ----------------------------------------------------
-    "negative_expectancy": "The average result per trade, in R, was zero or negative over the full period.",
+    "negative_expectancy": (
+        "The average result per trade, in R, was zero or negative over the full period."
+    ),
     "insufficient_trades": (
         "Too few trades for the figures to be reliable: under 30 over the full period "
         "or under 15 out of sample."
@@ -113,10 +129,12 @@ TEXT: dict[str, str] = {
         "not a forecast."
     ),
     "no_edge_detected": (
-        "Expectancy was negative or the out-of-sample results did not hold up; no edge "
+        "Expectancy was negative or the out-of-sample results did not carry over; no edge "
         "was detected in this sample."
     ),
-    "inconclusive": "The evidence is incomplete or flagged; the sample shows no clear result either way.",
+    "inconclusive": (
+        "The evidence is incomplete or flagged; the sample shows no clear result either way."
+    ),
     # --- data quality notes -------------------------------------------------
     "weekend_closure_model_fri21_sun22_utc": (
         "Bars between Friday 21:00 and Sunday 22:00 UTC are treated as market closure "
@@ -135,7 +153,8 @@ TEXT: dict[str, str] = {
         "year) and were converted to UTC on that basis."
     ),
     "metatrader_server_time_assumed_utc": (
-        "MetaTrader exports use the broker's server time; with no offset given it was taken as UTC."
+        "MetaTrader exports use the broker's server time; with no offset given it was "
+        "taken as UTC."
     ),
     "naive_timestamps_assumed_utc": "The timestamps carried no offset and were taken as UTC.",
     # --- metric notes -------------------------------------------------------
@@ -144,22 +163,29 @@ TEXT: dict[str, str] = {
     "insufficient_days": "Fewer than 60 days of data, so the ratio is not reported.",
     "zero_variance": "The values did not vary, so the ratio is not defined.",
     "zero_downside": "There were no down days, so the ratio is not defined.",
-    "insufficient_observations": "Fewer than 20 observations, so no confidence interval is given.",
+    "insufficient_observations": (
+        "Fewer than 20 observations, so no confidence interval is given."
+    ),
     # --- simulations and targets --------------------------------------------
     "iid_trade_order_shuffle": (
         "Trades are re-ordered at random. The final return is the same on every path, so "
         "only the spread of drawdowns varies."
     ),
-    "iid_trade_resampling": "Trades are resampled independently, as if each were unrelated to the last.",
+    "iid_trade_resampling": (
+        "Trades are resampled independently, as if each were unrelated to the last."
+    ),
     "fixed_fractional_compounding": (
         "Each trade changes equity by its R-multiple times the risk percent, compounded."
     ),
-    "r_multiples_from_history": "Outcomes are drawn from the R-multiples of the historical trades.",
+    "r_multiples_from_history": (
+        "Outcomes are drawn from the R-multiples of the historical trades."
+    ),
     "historical_average_monthly_trade_count": (
         "Each simulated month contains the historical average number of trades."
     ),
     "historical_observation_not_forecast": (
-        "Historical observation, not a forecast. Position size is never increased to reach a target."
+        "Historical observation, not a forecast. Position size is never increased to "
+        "reach a target."
     ),
     "no_position_size_increase_to_force_target": (
         "Position size is never increased to reach a target; every simulation uses the "
@@ -183,13 +209,16 @@ TEXT: dict[str, str] = {
         "No parameter set reached the minimum trade count in the training window."
     ),
     "no_neighbouring_cells": (
-        "The best cell has no neighbouring cells in the grid, so stability could not be assessed."
+        "The best cell has no neighbouring cells in the grid, so stability could not be"
+        " assessed."
     ),
     "efficiency_not_meaningful": (
-        "Efficiency is not reported: there was no positive in-sample average to compare against."
+        "Efficiency is not reported: there was no positive in-sample average to compare"
+        " against."
     ),
     "no_fold_fits_range": (
-        "The window is too short for a single walk-forward fold with these train and test lengths."
+        "The window is too short for a single walk-forward fold with these train and "
+        "test lengths."
     ),
     # --- run errors ---------------------------------------------------------
     "no_data_for_range": "No stored candles cover the requested range.",
@@ -197,10 +226,14 @@ TEXT: dict[str, str] = {
     "window_too_short_for_split": (
         "The window is too short to split into development, validation and test periods."
     ),
-    "invalid_split_fractions": "The development and validation percentages leave no room for a test period.",
+    "invalid_split_fractions": (
+        "The development and validation percentages leave no room for a test period."
+    ),
     "end_not_after_start": "The end of the window must be after its start.",
     "interrupted": "The server stopped before this run finished.",
-    "market_lacks_trend_timeframe": "The trend timeframe could not be built from the stored candles.",
+    "market_lacks_trend_timeframe": (
+        "The trend timeframe could not be built from the stored candles."
+    ),
 }
 
 #: The sentence a gap-kind or grade label carries when the page wants one.
@@ -241,3 +274,8 @@ def render(value: Any) -> Any:
     if isinstance(value, list):
         return [render(v) for v in value]
     return value
+
+
+def render_dict(value: dict[str, Any]) -> dict[str, Any]:
+    """`render` for a value known to be a dict, so callers keep their types."""
+    return cast(dict[str, Any], render(value))

@@ -64,12 +64,6 @@ def upgrade() -> None:
         sa.Column("created_by", postgresql.UUID(as_uuid=True), nullable=True),
         *_stamps(),
         sa.PrimaryKeyConstraint("id", name="pk_forex_import_batches"),
-        sa.ForeignKeyConstraint(
-            ["created_by"],
-            ["users.id"],
-            name="fk_forex_import_batches_created_by_users",
-            ondelete="SET NULL",
-        ),
     )
     op.create_index(
         "ix_forex_import_batches_created_at", "forex_import_batches", ["created_at"]
@@ -125,12 +119,6 @@ def upgrade() -> None:
         *_stamps(),
         sa.PrimaryKeyConstraint("id", name="pk_forex_strategy_versions"),
         sa.UniqueConstraint("name", "version", name="uq_forex_strategy_versions_name_version"),
-        sa.ForeignKeyConstraint(
-            ["created_by"],
-            ["users.id"],
-            name="fk_forex_strategy_versions_created_by_users",
-            ondelete="SET NULL",
-        ),
     )
     op.create_index(
         "ix_forex_strategy_versions_created_at", "forex_strategy_versions", ["created_at"]
@@ -164,12 +152,6 @@ def upgrade() -> None:
             name="fk_forex_runs_strategy_version_id_forex_strategy_versions",
             ondelete="SET NULL",
         ),
-        sa.ForeignKeyConstraint(
-            ["created_by"],
-            ["users.id"],
-            name="fk_forex_runs_created_by_users",
-            ondelete="SET NULL",
-        ),
     )
     op.create_index("ix_forex_runs_created_at", "forex_runs", ["created_at"])
     # Listing is `WHERE kind = ? ORDER BY created_at DESC, id DESC LIMIT n`.
@@ -184,7 +166,9 @@ def downgrade() -> None:
     op.drop_index("ix_forex_runs_kind_created", table_name="forex_runs")
     op.drop_index("ix_forex_runs_created_at", table_name="forex_runs")
     op.drop_table("forex_runs")
-    op.drop_index("ix_forex_strategy_versions_created_at", table_name="forex_strategy_versions")
+    op.drop_index(
+        "ix_forex_strategy_versions_created_at", table_name="forex_strategy_versions"
+    )
     op.drop_table("forex_strategy_versions")
     op.drop_index("ix_forex_fetch_days_created_at", table_name="forex_fetch_days")
     op.drop_table("forex_fetch_days")

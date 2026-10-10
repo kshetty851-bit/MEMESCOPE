@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from decimal import Decimal, InvalidOperation
 from enum import Enum
 from typing import Any
@@ -287,14 +287,18 @@ def config_from_json(data: object) -> BacktestConfig:
     if not isinstance(symbol, str):
         raise ConfigError("symbol: expected a string")
     timeframe = _enum(data.get("timeframe", Timeframe.M5.value), Timeframe, "timeframe")
-    direction = _enum(data.get("direction", DirectionMode.BOTH.value), DirectionMode, "direction")
+    direction = _enum(
+        data.get("direction", DirectionMode.BOTH.value), DirectionMode, "direction"
+    )
     sf = data.get("session_filter")
     cfg = BacktestConfig(
         strategy=strategy,
         symbol=symbol,
         timeframe=timeframe,
         direction=direction,
-        params=_group_from_json(StrategyParams, data.get("params"), "params", StrategyParams()),
+        params=_group_from_json(
+            StrategyParams, data.get("params"), "params", StrategyParams()
+        ),
         costs=_group_from_json(CostConfig, data.get("costs"), "costs", CostConfig()),
         risk=_group_from_json(RiskConfig, data.get("risk"), "risk", RiskConfig()),
         session_filter=None if sf is None else session_from_json(sf, "session_filter"),
@@ -365,7 +369,7 @@ def validate_config(cfg: BacktestConfig) -> None:
 
 def validate_grid(
     base: BacktestConfig, space: Mapping[str, object], *, max_cells: int = MAX_GRID_CELLS
-) -> dict[str, list[object]]:
+) -> dict[str, Sequence[object]]:
     """Check an optimisation grid and return it normalised to lists.
 
     Every path must name a scalar field in params / costs / risk, every value
@@ -376,7 +380,7 @@ def validate_grid(
     if not isinstance(space, Mapping) or not space:
         raise ConfigError("grid: expected a non-empty object of path -> values")
     cells = 1
-    out: dict[str, list[object]] = {}
+    out: dict[str, Sequence[object]] = {}
     for path, values in space.items():
         if not isinstance(path, str) or not path.startswith(SEARCHABLE_PREFIXES):
             raise ConfigError(f"grid: {path!r} is not a searchable parameter path")

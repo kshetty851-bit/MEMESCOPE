@@ -289,7 +289,9 @@ def targets_json(report: TargetReport, months: Sequence[MonthReturn]) -> dict[st
         ],
         "risk_of_ruin": {
             # Percent, like every other `_pct` figure on the page.
-            "pct": None if ruin.prob_50pct_drawdown is None else ruin.prob_50pct_drawdown * 100.0,
+            "pct": None
+            if ruin.prob_50pct_drawdown is None
+            else ruin.prob_50pct_drawdown * 100.0,
             "prob_50pct_drawdown_pct": (
                 None if ruin.prob_50pct_drawdown is None else ruin.prob_50pct_drawdown * 100.0
             ),
@@ -409,7 +411,9 @@ def walk_forward_json(wf: WalkForwardResult) -> dict[str, Any]:
         "folds": [fold_json(f) for f in wf.folds],
         "oos_summary": trade_summary_json(wf.oos_summary),
         "efficiency": num(wf.efficiency),
-        "efficiency_note": None if wf.efficiency is not None else {"code": "efficiency_not_meaningful"},
+        "efficiency_note": None
+        if wf.efficiency is not None
+        else {"code": "efficiency_not_meaningful"},
     }
 
 

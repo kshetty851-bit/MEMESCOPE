@@ -16,6 +16,10 @@ up in a query or a migration.
   and the result. Result JSON stores stable CODES only; prose is rendered when a
   run is read (CLAUDE.md: rewording is a deploy, not a migration).
 
+`created_by` is a bare UUID, not a foreign key: in local development the
+auth bypass signs requests as a synthetic principal that is never persisted, and
+a constraint would refuse every write it makes.
+
 Prices are NUMERIC(12,6), never float, at rest.
 """
 
@@ -70,9 +74,7 @@ class ForexImportBatch(TimestampMixin, Base):
     quality: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     #: Stable note codes, e.g. `histdata_est_fixed_utc_minus_5`.
     notes: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
-    created_by: Mapped[uuid.UUID | None] = mapped_column(
-        PgUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
-    )
+    created_by: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True))
 
 
 class ForexCandle(TimestampMixin, Base):
@@ -110,7 +112,9 @@ class ForexFetchDay(TimestampMixin, Base):
 
 class ForexStrategyVersion(TimestampMixin, Base):
     __tablename__ = "forex_strategy_versions"
-    __table_args__ = (UniqueConstraint("name", "version", name="uq_forex_strategy_versions_name_version"),)
+    __table_args__ = (
+        UniqueConstraint("name", "version", name="uq_forex_strategy_versions_name_version"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
@@ -118,9 +122,7 @@ class ForexStrategyVersion(TimestampMixin, Base):
     strategy: Mapped[str] = mapped_column(String(32), nullable=False)
     config: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text)
-    created_by: Mapped[uuid.UUID | None] = mapped_column(
-        PgUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
-    )
+    created_by: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True))
 
 
 class ForexRun(TimestampMixin, Base):
@@ -148,8 +150,6 @@ class ForexRun(TimestampMixin, Base):
     summary: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     result: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     error: Mapped[str | None] = mapped_column(Text)
-    created_by: Mapped[uuid.UUID | None] = mapped_column(
-        PgUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
-    )
+    created_by: Mapped[uuid.UUID | None] = mapped_column(PgUUID(as_uuid=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

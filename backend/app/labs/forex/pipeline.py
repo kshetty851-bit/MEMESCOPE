@@ -96,6 +96,15 @@ def fingerprint(candles: Sequence[Candle], symbol: str, timeframe: Timeframe) ->
     return hashlib.sha256(text.encode()).hexdigest()
 
 
+def combined_fingerprint(prints: Sequence[str]) -> str:
+    """One fingerprint for several markets (a comparison). A single market's own
+    fingerprint is returned unchanged, so a one-config comparison matches its
+    backtest."""
+    if len(prints) == 1:
+        return prints[0]
+    return hashlib.sha256("|".join(prints).encode()).hexdigest()
+
+
 def run(
     cfg: BacktestConfig, market: Market, trade_from: datetime, trade_to: datetime
 ) -> BacktestResult:

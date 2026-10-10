@@ -135,7 +135,7 @@ def parse_options(raw: Mapping[str, object] | None) -> Options:
     return Options(
         dev_pct=dev,
         val_pct=val,
-        grid=None if grid is None else {str(k): v for k, v in grid.items()},  # type: ignore[misc]
+        grid=None if grid is None else {str(k): v for k, v in grid.items()},
         train_days=train,
         test_days=test,
         mc_iterations=mc,
@@ -143,9 +143,13 @@ def parse_options(raw: Mapping[str, object] | None) -> Options:
     )
 
 
-def resolve_grid(cfg: BacktestConfig, opts: Options) -> dict[str, list[object]]:
+def resolve_grid(cfg: BacktestConfig, opts: Options) -> dict[str, Sequence[object]]:
     space = opts.grid if opts.grid is not None else meta.default_grid(cfg.strategy)
     return codec.validate_grid(cfg, space)
+
+
+def resolve_default_grid(cfg: BacktestConfig) -> dict[str, Sequence[object]]:
+    return codec.validate_grid(cfg, meta.default_grid(cfg.strategy))
 
 
 # --------------------------------------------------------------------------
@@ -229,7 +233,9 @@ def _monte_carlo(result: BacktestResult, opts: Options) -> dict[str, Any]:
 
 def _bootstrap(result: BacktestResult, months: Sequence[Any], opts: Options) -> dict[str, Any]:
     r_ci = bootstrap_ci(
-        [t.r_multiple for t in result.trades], iterations=opts.mc_iterations, seed=BOOTSTRAP_SEED
+        [t.r_multiple for t in result.trades],
+        iterations=opts.mc_iterations,
+        seed=BOOTSTRAP_SEED,
     )
     m_ci = bootstrap_ci(
         [m.return_pct for m in months], iterations=opts.mc_iterations, seed=BOOTSTRAP_SEED
@@ -240,9 +246,7 @@ def _bootstrap(result: BacktestResult, months: Sequence[Any], opts: Options) -> 
     }
 
 
-def _targets(
-    result: BacktestResult, m: Metrics, label: str, opts: Options
-) -> dict[str, Any]:
+def _targets(result: BacktestResult, m: Metrics, label: str, opts: Options) -> dict[str, Any]:
     cfg = result.config
     report = target_analysis(
         m.months,
@@ -303,8 +307,9 @@ def run_backtest_job(
 # --------------------------------------------------------------------------
 
 
-def _expected_runs(cfg: BacktestConfig, space: dict[str, list[object]], opts: Options,
-                   start: datetime, end: datetime) -> int:  # fmt: skip
+def _expected_runs(
+    space: dict[str, Sequence[object]], opts: Options, start: datetime, end: datetime
+) -> int:
     cells = 1
     for values in space.values():
         cells *= len(values)
@@ -326,7 +331,7 @@ def run_research_job(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     split = chronological_split(start, end, opts.dev_pct, opts.val_pct)
     space = resolve_grid(cfg, opts)
-    runner = _Runner(market, progress, _expected_runs(cfg, space, opts, start, end))
+    runner = _Runner(market, progress, _expected_runs(space, opts, start, end))
     dev, val, test = split.development, split.validation, split.test
 
     progress(2, "searching development window")
@@ -444,7 +449,7 @@ def run_compare_job(
     split: Split = chronological_split(start, end, opts.dev_pct, opts.val_pct)
     names = _unique_names(configs)
 
-    spaces = [codec.validate_grid(c, meta.default_grid(c.strategy)) for c in configs]
+    spaces = [resolve_default_grid(c) for c in configs]
     total = 0
     for sp in spaces:
         cells = 1
