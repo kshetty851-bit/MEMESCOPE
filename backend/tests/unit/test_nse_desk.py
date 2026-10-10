@@ -1,7 +1,7 @@
 """The NSE Lab card parser, on a small made-up page shaped like screener.in's."""
 # ruff: noqa: E501  (an HTML fixture reads better unwrapped)
 
-from app.labs.nse_desk.screener import match, parse
+from app.labs.nse_desk.screener import has_numbers, match, parse
 
 PAGE = """
 <h1 class="h2"><span class="square"><img alt=""></span><span class="min-width-0">Acme Industries Ltd</span></h1>
@@ -46,3 +46,8 @@ def test_names_are_matched_to_nse_symbols():
     assert match("Reliance Industries", listed) == "RELIANCE"
     assert match("reliance", listed) == "RELIANCE"          # shortest name wins
     assert match("nothing like this", listed) is None
+
+
+def test_an_empty_consolidated_page_is_spotted():
+    empty = PAGE.replace("1,234", "").replace("21.2", "")
+    assert has_numbers(parse(PAGE)) and not has_numbers(parse(empty))

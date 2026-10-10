@@ -123,6 +123,11 @@ def parse(html: str) -> dict[str, Any]:
     }
 
 
+def has_numbers(card: dict[str, Any]) -> bool:
+    """Whether the top ratios carry any figures at all."""
+    return any(re.search(r"\d", r["value"]) for r in card["ratios"])
+
+
 _NSE: tuple[float, list[tuple[str, str]]] | None = None
 
 
@@ -167,6 +172,10 @@ async def company(query: str) -> dict[str, Any] | None:
             r = await client.get(BASE + path, headers=HEADERS, timeout=20)
             if r.status_code == 200 and 'id="top-ratios"' in r.text:
                 card = parse(r.text)
+                # A company with no subsidiaries has an empty consolidated
+                # page (labels, no numbers): fall through to standalone.
+                if not has_numbers(card):
+                    continue
                 return {**card, "symbol": symbol, "url": BASE + path,
                         "consolidated": consolidated}
     return None
