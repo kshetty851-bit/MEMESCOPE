@@ -3,7 +3,10 @@
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { Character, RigDefs, portraitViewBox } from "@/components/hq/character-rig";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Panel, PanelHeader, PanelTitle } from "@/components/ui/panel";
+import { useAuth } from "@/hooks/use-auth";
 import type { CharacterDefinition, CharacterLook } from "@/lib/hq/characters";
 import { api } from "@/lib/api-client";
 
@@ -138,6 +141,42 @@ function Arjun({ line, talking }: { line: string; talking: boolean }) {
   );
 }
 
+/** Sign in without leaving the lab (Karthik, 2026-10-10: "it's asking me to
+ *  sign in, but I need a sign in box"). The site's own sign-in, nothing new. */
+export function SignInBox({ onDone }: { onDone: () => void }) {
+  const { login, error, clearError } = useAuth();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  return (
+    <form
+      className="grid max-w-md gap-3"
+      data-testid="nse-signin"
+      noValidate
+      onSubmit={async (e) => {
+        e.preventDefault();
+        clearError();
+        setBusy(true);
+        try {
+          await login({ email, password });
+          onDone();
+        } catch {
+          // the store holds the message; shown below
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <Input label="Email" type="email" name="email" autoComplete="email" required
+             value={email} onChange={(e) => setEmail(e.target.value)} />
+      <Input label="Password" type="password" name="password" autoComplete="current-password" required
+             value={password} onChange={(e) => setPassword(e.target.value)} />
+      {error ? <p role="alert" className="text-[13px] text-down">{error}</p> : null}
+      <Button type="submit" disabled={busy || !email || !password}>{busy ? "Signing in…" : "Sign in"}</Button>
+    </form>
+  );
+}
+
 function errorLine(e: unknown): string {
   const status = (e as { status?: number })?.status;
   if (status === 401 || status === 403) return "Sorry, I only work for Karthik. Sign in as admin to ask me.";
@@ -147,11 +186,19 @@ function errorLine(e: unknown): string {
 
 export function NseLabPage() {
   const [q, setQ] = useState("");
+  const { isAuthenticated, isLoading, user } = useAuth();
   const ask = useMutation({
     mutationFn: (query: string) =>
       api.get<CompanyCard>(`/labs/nse-desk/company?q=${encodeURIComponent(query)}`),
   });
-  const line = ask.isPending
+  const status = (ask.error as { status?: number } | null)?.status;
+  const signedOut = !isLoading && (!isAuthenticated || status === 401);
+  const notAdmin = isAuthenticated && (user?.role !== "admin" || status === 403);
+  const line = signedOut
+    ? "Hi! I only work for Karthik. Sign in below and then ask me about any company."
+    : notAdmin
+      ? "Sorry, I only work for Karthik. This account can't use me."
+      : ask.isPending
     ? `Reading ${q.trim()} on screener.in…`
     : ask.isError
       ? errorLine(ask.error)
@@ -167,6 +214,7 @@ export function NseLabPage() {
       <Panel>
         <div className="space-y-3 p-3">
           <Arjun line={line} talking={ask.isPending || !!ask.data} />
+          {signedOut ? <SignInBox onDone={() => ask.reset()} /> : notAdmin ? null : (
           <form
             className="flex flex-wrap gap-2"
             onSubmit={(e) => { e.preventDefault(); if (q.trim()) ask.mutate(q.trim()); }}
@@ -182,6 +230,7 @@ export function NseLabPage() {
               Ask Arjun
             </button>
           </form>
+          )}
         </div>
       </Panel>
       {ask.data ? <Card c={ask.data} /> : null}
