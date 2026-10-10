@@ -12,9 +12,12 @@ book is the test, not the proof.
 
 The trades are the books' own entries re-priced at `HOLD_MINUTES` with the
 lab's exit maths (`exit_mark`, `valued`, `settle`), so no new arm buys
-anything. Profiles are read from `token_market_snapshots.is_verified`;
-boosts from `boosts_active`, recorded only from `BOOSTS_SINCE`. The minute
-table beside it re-prices the same coins at other holds. Paper only.
+anything. A coin counts if either source showed it paid BEFORE the buy: the
+market snapshots (`is_verified`, `boosts_active` from `BOOSTS_SINCE`), or the
+lab's own DexScreener reads (`grad_postgrad_samples.has_profile` and
+`boosts_active`, from `SAMPLES_SINCE`), which see every graduation within
+seconds where the snapshots saw about one coin in five. The minute table
+beside it re-prices the same coins at other holds. Paper only.
 """
 
 from __future__ import annotations
@@ -35,6 +38,7 @@ KEY = "graduation:boost_lab"
 FROM = pl.FROM                                   # backtest from 1 Oct, 00:00 Dubai
 START = datetime(2026, 10, 10, 12, 0, tzinfo=UTC)  # live from 16:00 Dubai
 BOOSTS_SINCE = START
+SAMPLES_SINCE = datetime(2026, 10, 10, 10, 0, tzinfo=UTC)
 HOLD_MINUTES = 4
 MINUTES = (2, 3, 4, 5, 6, 8, 10)
 TICKET = 50.0
@@ -44,15 +48,36 @@ _CARRIED = ("mint", "symbol", "opened_at", "open_quote", "open_fill", "notional_
             "sol_usd_at_open", "notional_quote", "tokens", "liq_open_usd", "impact_open",
             "pool_fee_bps", "graduated_at", "excluded")
 
-#: Each entry's last snapshot before the buy: paid profile, active boosts.
+#: Paid profile / active boosts seen BEFORE each buy: the last market
+#: snapshot, or any of the lab's own reads in the hour before.
 _PAID_SQL = text("""
-    select x.mint, s.is_verified, s.boosts_active
+    select x.mint, bool_or(p.profile), max(p.boosts)
     from unnest(cast(:m as varchar[]), cast(:t as timestamptz[])) as x(mint, at)
     cross join lateral (
-        select is_verified, boosts_active from token_market_snapshots
-        where mint_address = x.mint and captured_at <= x.at
-        order by captured_at desc limit 1) s
-    where s.is_verified or coalesce(s.boosts_active, 0) > 0
+        (select is_verified as profile, boosts_active as boosts
+         from token_market_snapshots
+         where mint_address = x.mint and captured_at <= x.at
+         order by captured_at desc limit 1)
+        union all
+        (select coalesce(has_profile, false), boosts_active
+         from grad_postgrad_samples
+         where mint = x.mint and ts <= x.at and ts >= x.at - interval '1 hour'
+           and (has_profile or boosts_active > 0)
+         order by ts desc limit 1)) p
+    group by x.mint
+    having bool_or(p.profile) or coalesce(max(p.boosts), 0) > 0
+""")
+
+
+#: Picks found before, kept: a snapshot's proof is pruned after a day.
+_KEPT_SQL = text("""
+    select mint, has_profile, boosts_active from grad_boost_picks where mint = any(:m)
+""")
+_KEEP_SQL = text("""
+    insert into grad_boost_picks (mint, opened_at, has_profile, boosts_active)
+    select * from unnest(cast(:m as varchar[]), cast(:t as timestamptz[]),
+                         cast(:p as boolean[]), cast(:b as integer[]))
+    on conflict (mint) do nothing
 """)
 
 
@@ -89,8 +114,20 @@ async def build(db: AsyncSession) -> dict[str, Any]:
         "select distinct book from grad_paper_positions where opened_at >= :f"),
         {"f": FROM})).scalars())
     rows = await api._pool_rows(db, books, FROM, 0, skip_repeat=False)
-    paid = {m: (bool(v), b) for m, v, b in (await db.execute(_PAID_SQL, {
-        "m": [r.mint for r in rows], "t": [r.opened_at for r in rows]})).all()} if rows else {}
+    paid: dict[str, tuple[bool, int | None]] = {}
+    if rows:
+        mints = [r.mint for r in rows]
+        paid = {m: (bool(v), b) for m, v, b in (await db.execute(
+            _KEPT_SQL, {"m": mints})).all()}
+        found = {m: (bool(v), b) for m, v, b in (await db.execute(_PAID_SQL, {
+            "m": mints, "t": [r.opened_at for r in rows]})).all() if m not in paid}
+        if found:
+            at = {r.mint: r.opened_at for r in rows}
+            await db.execute(_KEEP_SQL, {"m": list(found), "t": [at[m] for m in found],
+                                         "p": [v for v, _ in found.values()],
+                                         "b": [b for _, b in found.values()]})
+            await db.commit()
+        paid |= found
     picked = [r for r in rows if r.mint in paid]
     sold: dict[int, list[GradPaperPosition]] = {m: [] for m in MINUTES}
     for row in picked:
@@ -107,6 +144,7 @@ async def build(db: AsyncSession) -> dict[str, Any]:
     first = took[0][0].opened_at if took else None
     return {
         "started_at": START, "backtest_from": FROM, "boosts_since": BOOSTS_SINCE,
+        "samples_since": SAMPLES_SINCE,
         "computed_at": datetime.now(UTC), "hold_minutes": HOLD_MINUTES,
         "ticket_usd": TICKET, "capital_usd": CAPITAL,
         "balance_usd": Decimal(str(walk.cash)).quantize(cents),
