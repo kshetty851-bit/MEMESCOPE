@@ -860,6 +860,10 @@ class Settings(BaseSettings):
     #: (Karthik, 2026-10-03). Off in code like the name rule; production turns
     #: it on in docker-compose.yml.
     REAL_WALLET_BLOCK_REPEAT_CREATORS: bool = False
+    #: Refuse a coin whose creator or a rare insider was behind a coin that
+    #: closed 30% or more down (`moneyblock.CREW`, Karthik, 2026-10-10, after
+    #: SI and TM). Off in code; production sets it.
+    REAL_WALLET_CREW_BLOCK_ENABLED: bool = False
     #: What counts as a rug for that rule: a closed trade at or below this
     #: fraction of its stake. -50% is the line the lab's own rug counts use.
     REAL_WALLET_RUG_RETURN: Decimal = Field(

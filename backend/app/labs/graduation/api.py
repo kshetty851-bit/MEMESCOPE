@@ -1891,7 +1891,9 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     # wallets (Karthik: "remove repeat creator block from 50k pool ... assume we
     # had rule since day 1"): the block refused 57 coins, 54 winners, 1 rug.
     # As many at once as the balance allows (2026-10-03), not one at a time.
-    rows = every
+    # The crew of any coin that closed 30% or more down is refused from then
+    # on (Karthik, 2026-10-10, `moneyblock.CREW`), replayed from day 1.
+    rows = await moneyblock.without_crew(db, every, datetime.now(UTC))
     walk = _funded_walk(
         [(p.opened_at, p.closed_at, float(p.net_return),
           float(p.impact_open or 0), float(p.impact_close or 0)) for p in rows],
@@ -2656,6 +2658,7 @@ async def _pool_lab_build(db: AsyncSession) -> dict[str, Any]:
     penalty = _size_penalty(pl.WALLET_TICKET, float(config.PAPER_NOTIONAL_USD), sol)
     fifty = await _pool_rows(db, ("KARTHIK_QUIET_5M", "KARTHIK_Q50_5M"), pl.FROM, 50_000,
                              skip_repeat=False)
+    fifty = await moneyblock.without_crew(db, fifty, now)
 
     def trades(rows: Sequence[Any]) -> list[tuple[Any, ...]]:
         return [(r.opened_at, r.closed_at, float(r.net_return),

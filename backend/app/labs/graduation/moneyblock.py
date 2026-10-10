@@ -33,7 +33,7 @@ Chosen after seeing the rug it prevents.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -229,3 +229,89 @@ async def restate(session: AsyncSession, *, since: datetime, apply: bool) -> dic
     return {"trades_checked": len(positions), "marked": dict(marked),
             "pnl_usd_left_out": {b: round(v, 2) for b, v in pnl.items()},
             "applied": apply}
+
+
+# --- The crew of a bad coin (Karthik, 2026-10-10) ----------------------------
+#
+# "block such creators", then "anything more than 30% loss, flag as rug so we
+# don't buy those again": after SI and TM, two -46% coins one morning from one
+# crew. SI's creator sold 80 SOL 76s after the buy; a partner wallet sold
+# 100 SOL from TM 76s after, with SI's creator sitting inside TM.
+#
+# A coin that closed at CREW_RETURN or worse on any book puts its creator and
+# its RARE insider wallets (on CREW_MAX_COINS coins or fewer) on a standing
+# list, from the moment that close happened. A later coin with any of them is
+# refused. Rare only: some insiders are trading bots on hundreds of coins,
+# mostly winners, and listing every insider cost $81 on the $50k book.
+# Replayed on that book 1-10 Oct: refused 2 of 807 (TM, -46%, and one +9%
+# winner), +$18. It does NOT stop a new crew: 24 of the 25 bad trades in those
+# days came from wallets nobody had seen. Chosen after seeing the loss it
+# prevents. The rug brake keeps its own -50% line.
+
+CREW = "crew_of_a_bad_coin"
+CREW_RETURN = -0.30
+CREW_MAX_COINS = 3
+CREW_TTL_S = 60
+
+#: Wallet -> when it went on the list. Coin counts are as of the read, so a
+#: wallet that later turns out to be common drops off the list.
+_CREW_SQL = text("""
+    with bad as (
+        select mint, min(closed_at) as known_at from grad_paper_positions
+        where closed_at is not null and net_return <= :ret
+        group by mint),
+    seen as (
+        select w, count(*) as n from grad_operators, unnest(ids) as w group by w)
+    select w, min(known_at) from (
+        select u.w, b.known_at
+        from bad b join grad_operators o on o.mint = b.mint
+        cross join lateral unnest(o.ids) as u(w)
+        join seen s on s.w = u.w
+        where s.n <= :max
+        union all
+        select d.creator_address, b.known_at
+        from bad b join discovered_tokens d on d.mint_address = b.mint
+        where d.creator_address is not null) x
+    group by w
+""")
+
+_COIN_WALLETS_SQL = text("""
+    select m.mint, o.ids, d.creator_address
+    from unnest(cast(:m as varchar[])) as m(mint)
+    left join grad_operators o on o.mint = m.mint
+    left join discovered_tokens d on d.mint_address = m.mint
+""")
+
+_CREW: tuple[datetime, dict[str, datetime]] | None = None
+
+
+async def crew_list(session: AsyncSession, now: datetime) -> dict[str, datetime]:
+    """Every listed wallet and the moment it was listed. Cached CREW_TTL_S."""
+    global _CREW
+    if _CREW is not None and (now - _CREW[0]).total_seconds() < CREW_TTL_S:
+        return _CREW[1]
+    rows = await session.execute(_CREW_SQL, {"ret": CREW_RETURN, "max": CREW_MAX_COINS})
+    _CREW = (now, dict(rows.all()))
+    return _CREW[1]
+
+
+async def coin_wallets(session: AsyncSession, mints: Iterable[str]) -> dict[str, set[str]]:
+    """Mint -> its creator and recorded insider wallets."""
+    mints = list(mints)
+    if not mints:
+        return {}
+    rows = await session.execute(_COIN_WALLETS_SQL, {"m": mints})
+    return {m: {*(ids or ()), *([c] if c else [])} for m, ids, c in rows.all()}
+
+
+def crew_hit(wallets: Iterable[str], at: datetime, crew: dict[str, datetime]) -> bool:
+    """Was any of these wallets already listed before `at`?"""
+    return any((t := crew.get(w)) is not None and t < at for w in wallets)
+
+
+async def without_crew(session: AsyncSession, rows: Sequence[Any],
+                       now: datetime) -> list[Any]:
+    """`rows` less the trades the crew rule would have refused when each opened."""
+    crew = await crew_list(session, now)
+    wallets = await coin_wallets(session, {r.mint for r in rows})
+    return [r for r in rows if not crew_hit(wallets.get(r.mint, ()), r.opened_at, crew)]
