@@ -82,7 +82,9 @@ function flatten(row: Loose): Loose {
 export function Scalar({ name, value }: { name: string; value: unknown }) {
   if (isCoded(value)) return <span>{value.text}</span>;
   if (Array.isArray(value)) {
-    return <span>{value.map((v) => (isCoded(v) ? v.text : fmtScalar(name, v))).join(", ")}</span>;
+    return (
+      <span>{value.map((v) => (isCoded(v) ? v.text : fmtScalar(name, v))).join(", ")}</span>
+    );
   }
   if (isPlainObject(value)) return <span>{JSON.stringify(value)}</span>;
   if (value === null || value === undefined || value === "") {
@@ -132,7 +134,9 @@ export function RecordTable({
       density="compact"
       minWidth={columns.length > 6 ? `${columns.length * 96}px` : undefined}
       empty={
-        <p className="px-3 py-6 text-center text-sm text-ink-3">{empty ?? "Nothing to show."}</p>
+        <p className="px-3 py-6 text-center text-sm text-ink-3">
+          {empty ?? "Nothing to show."}
+        </p>
       }
     />
   );
@@ -175,7 +179,10 @@ export function KeyValues({ data, depth = 0 }: { data: Loose; depth?: number }) 
         return (
           <div
             key={key}
-            className={cn("flex min-w-0 flex-col gap-0.5", block && "sm:col-span-2 xl:col-span-3")}
+            className={cn(
+              "flex min-w-0 flex-col gap-0.5",
+              block && "sm:col-span-2 xl:col-span-3",
+            )}
           >
             <dt className="text-label font-medium uppercase text-ink-3">{humanize(key)}</dt>
             <dd className="min-w-0 break-words text-ink">

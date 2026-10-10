@@ -146,7 +146,9 @@ export function EquityChart({
             {usd(at.balance)}
           </span>
         </span>
-        {hover === null ? <span className="text-ink-4">Hover the curve to read a point</span> : null}
+        {hover === null ? (
+          <span className="text-ink-4">Hover the curve to read a point</span>
+        ) : null}
       </div>
       <svg
         viewBox={`0 0 ${W} ${H}`}
@@ -232,7 +234,10 @@ export function DrawdownChart({
 }) {
   const parsed = points
     .map((p) => ({ t: new Date(p.t).getTime(), iso: p.t, dd: toNumber(p.dd_pct) }))
-    .filter((p): p is { t: number; iso: string; dd: number } => p.dd !== null && Number.isFinite(p.t));
+    .filter(
+      (p): p is { t: number; iso: string; dd: number } =>
+        p.dd !== null && Number.isFinite(p.t),
+    );
   const t0 = parsed[0]?.t ?? 0;
   const span = (parsed[parsed.length - 1]?.t ?? 0) - t0 || 1;
   const xs = parsed.map((p) => ((p.t - t0) / span) * W);
@@ -253,7 +258,11 @@ export function DrawdownChart({
 
   return (
     <figure className="flex flex-col gap-2" data-testid="drawdown-chart">
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-3" data-testid="drawdown-readout" aria-live="polite">
+      <div
+        className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-3"
+        data-testid="drawdown-readout"
+        aria-live="polite"
+      >
         {at ? (
           <>
             <span>{utc(at.iso)}</span>
@@ -322,7 +331,8 @@ export function MonthlyBars({ months }: { months: MonthReturn[] }) {
   const xs = rows.map((_, i) => i * step + step / 2);
   const { hover, props } = useScrub(xs);
 
-  if (n === 0) return <Empty testId="monthly-empty">No completed months in this window.</Empty>;
+  if (n === 0)
+    return <Empty testId="monthly-empty">No completed months in this window.</Empty>;
 
   const hi = Math.max(0, ...rows.map((m) => m.v));
   const lo = Math.min(0, ...rows.map((m) => m.v));
@@ -334,14 +344,23 @@ export function MonthlyBars({ months }: { months: MonthReturn[] }) {
 
   return (
     <figure className="flex flex-col gap-2" data-testid="monthly-bars">
-      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-3" aria-live="polite" data-testid="monthly-readout">
+      <div
+        className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-3"
+        aria-live="polite"
+        data-testid="monthly-readout"
+      >
         {at ? (
           <>
             <span>{monthLabel(at.month)}</span>
-            <span data-numeric className={at.v < 0 ? "text-down" : at.v > 0 ? "text-up" : "text-ink-2"}>
+            <span
+              data-numeric
+              className={at.v < 0 ? "text-down" : at.v > 0 ? "text-up" : "text-ink-2"}
+            >
               {pct(at.v, { signed: true })}
             </span>
-            {at.pnl !== undefined && at.pnl !== null ? <span>{usd(at.pnl, { signed: true })}</span> : null}
+            {at.pnl !== undefined && at.pnl !== null ? (
+              <span>{usd(at.pnl, { signed: true })}</span>
+            ) : null}
             {typeof at.trades === "number" ? <span>{at.trades} trades</span> : null}
           </>
         ) : (
@@ -383,7 +402,8 @@ export function MonthlyBars({ months }: { months: MonthReturn[] }) {
               m.v < 0 ? "text-down" : m.v > 0 ? "text-up" : "text-ink-2",
             )}
           >
-            <span className="text-ink-3">{monthLabel(m.month)}</span> {pct(m.v, { signed: true })}
+            <span className="text-ink-3">{monthLabel(m.month)}</span>{" "}
+            {pct(m.v, { signed: true })}
           </li>
         ))}
       </ul>

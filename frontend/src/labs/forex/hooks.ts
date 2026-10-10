@@ -94,8 +94,7 @@ export function useRun(id: number | null) {
       return detail;
     },
     enabled: id !== null,
-    refetchInterval: (query) =>
-      isActive(query.state.data?.run.status) ? POLL_MS : false,
+    refetchInterval: (query) => (isActive(query.state.data?.run.status) ? POLL_MS : false),
     refetchOnWindowFocus: false,
   });
 }

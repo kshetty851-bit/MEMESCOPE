@@ -75,7 +75,10 @@ export function RunStatus({ run }: { run: RunOut }) {
         aria-valuenow={Math.round(value)}
         className="h-1.5 overflow-hidden rounded-full bg-sunken"
       >
-        <div className="h-full bg-accent transition-[width] duration-300" style={{ width: `${value}%` }} />
+        <div
+          className="h-full bg-accent transition-[width] duration-300"
+          style={{ width: `${value}%` }}
+        />
       </div>
     </div>
   );

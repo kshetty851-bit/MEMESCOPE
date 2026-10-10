@@ -43,20 +43,28 @@ function readRows(report: Loose): TargetRow[] {
   if (Array.isArray(raw)) list = raw.filter(isPlainObject);
   else if (isPlainObject(raw)) {
     list = Object.entries(raw).map(([key, value]) =>
-      isPlainObject(value) ? { target_pct: Number(key), ...value } : { target_pct: Number(key) },
+      isPlainObject(value)
+        ? { target_pct: Number(key), ...value }
+        : { target_pct: Number(key) },
     );
   }
   return list.map((row) => ({
     target: toNumber(pick(row, "target_pct", "target", "pct") as number | string | null),
-    hit: toNumber(pick(row, "months_hit", "hit_months", "hits", "months") as number | string | null),
+    hit: toNumber(
+      pick(row, "months_hit", "hit_months", "hits", "months") as number | string | null,
+    ),
     hitRate: toNumber(
-      pick(row, "hit_rate_pct", "hit_rate", "observed_rate_pct", "observed_rate") as number | string | null,
+      pick(row, "hit_rate_pct", "hit_rate", "observed_rate_pct", "observed_rate") as
+        number | string | null,
     ),
     simulated: toNumber(
-      pick(row, "simulated_rate_pct", "simulated_rate", "sim_rate_pct", "simulated_hit_rate_pct") as
-        | number
-        | string
-        | null,
+      pick(
+        row,
+        "simulated_rate_pct",
+        "simulated_rate",
+        "sim_rate_pct",
+        "simulated_hit_rate_pct",
+      ) as number | string | null,
     ),
   }));
 }
@@ -80,9 +88,7 @@ function ruinParts(report: Loose): { value: unknown; assumptions: Coded[] } {
     return {
       value: pick(raw, "pct", "probability_pct", "risk_pct", "value", "probability"),
       assumptions: Array.isArray(assumptions)
-        ? assumptions.map((a, i) =>
-            isCoded(a) ? a : { code: `a${i}`, text: String(a) },
-          )
+        ? assumptions.map((a, i) => (isCoded(a) ? a : { code: `a${i}`, text: String(a) }))
         : [],
     };
   }
@@ -117,7 +123,9 @@ export function TargetPanel({
     {
       key: "target",
       header: "Monthly target",
-      cell: (row) => <span data-numeric>{row.target === null ? DASH : `${row.target}%`}</span>,
+      cell: (row) => (
+        <span data-numeric>{row.target === null ? DASH : `${row.target}%`}</span>
+      ),
     },
     {
       key: "hit",
@@ -166,12 +174,59 @@ export function TargetPanel({
           />
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
-            <Stat boxed size="sm" label="Months" display={count(toNumber(pick(report, "months", "months_total", "total_months") as number | string | null))} />
-            <Stat boxed size="sm" label="Profitable months" display={count(toNumber(pick(report, "profitable_months", "months_positive") as number | string | null))} />
-            <Stat boxed size="sm" label="Losing months" display={count(toNumber(pick(report, "losing_months", "months_negative") as number | string | null))} />
-            <Stat boxed size="sm" label="Best month" display={monthCell(pick(report, "best_month", "best"))} />
-            <Stat boxed size="sm" label="Worst month" display={monthCell(pick(report, "worst_month", "worst"))} />
-            <Stat boxed size="sm" label="Max drawdown" display={pct(pick(report, "max_drawdown_pct", "max_dd_pct") as number | string | null)} />
+            <Stat
+              boxed
+              size="sm"
+              label="Months"
+              display={count(
+                toNumber(
+                  pick(report, "months", "months_total", "total_months") as
+                    number | string | null,
+                ),
+              )}
+            />
+            <Stat
+              boxed
+              size="sm"
+              label="Profitable months"
+              display={count(
+                toNumber(
+                  pick(report, "profitable_months", "months_positive") as
+                    number | string | null,
+                ),
+              )}
+            />
+            <Stat
+              boxed
+              size="sm"
+              label="Losing months"
+              display={count(
+                toNumber(
+                  pick(report, "losing_months", "months_negative") as
+                    number | string | null,
+                ),
+              )}
+            />
+            <Stat
+              boxed
+              size="sm"
+              label="Best month"
+              display={monthCell(pick(report, "best_month", "best"))}
+            />
+            <Stat
+              boxed
+              size="sm"
+              label="Worst month"
+              display={monthCell(pick(report, "worst_month", "worst"))}
+            />
+            <Stat
+              boxed
+              size="sm"
+              label="Max drawdown"
+              display={pct(
+                pick(report, "max_drawdown_pct", "max_dd_pct") as number | string | null,
+              )}
+            />
           </div>
 
           <div data-testid="risk-of-ruin" className="flex flex-col gap-2">

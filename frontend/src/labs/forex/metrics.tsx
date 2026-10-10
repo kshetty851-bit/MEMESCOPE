@@ -42,7 +42,15 @@ function Tile({
 }) {
   return (
     <div data-testid={`metric-${id}`}>
-      <Stat boxed size="md" label={label} display={display} tone={tone} hint={hint ?? undefined} className="h-full">
+      <Stat
+        boxed
+        size="md"
+        label={label}
+        display={display}
+        tone={tone}
+        hint={hint ?? undefined}
+        className="h-full"
+      >
         {children}
       </Stat>
     </div>
@@ -64,7 +72,11 @@ export function MetricTiles({ metrics: m }: { metrics: MetricsOut }) {
       data-testid="metric-tiles"
       className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6"
     >
-      <Tile id="starting-balance" label="Starting balance" display={usd(m.starting_balance)} />
+      <Tile
+        id="starting-balance"
+        label="Starting balance"
+        display={usd(m.starting_balance)}
+      />
       <Tile id="ending-balance" label="Ending balance" display={usd(m.ending_balance)} />
       <Tile
         id="net-pnl"
@@ -124,7 +136,11 @@ export function MetricTiles({ metrics: m }: { metrics: MetricsOut }) {
               : `Sortino ${dec(m.sortino)}`
         }
       />
-      <Tile id="loss-streak" label="Longest losing streak" display={count(m.longest_loss_streak)} />
+      <Tile
+        id="loss-streak"
+        label="Longest losing streak"
+        display={count(m.longest_loss_streak)}
+      />
       <Tile
         id="long-short"
         label="Long / short"
@@ -146,7 +162,9 @@ export function MetricTiles({ metrics: m }: { metrics: MetricsOut }) {
       <Tile
         id="frequency"
         label="Trades per month"
-        display={m.monthly_trade_frequency === null ? null : dec(m.monthly_trade_frequency, 1)}
+        display={
+          m.monthly_trade_frequency === null ? null : dec(m.monthly_trade_frequency, 1)
+        }
         hint={`Average hold ${minutes(m.avg_trade_duration_minutes)}`}
       />
     </div>
@@ -182,10 +200,20 @@ export function TradeLog({
     {
       key: "dir",
       header: "Side",
-      cell: (t) => <Badge tone={t.direction === "long" ? "safe" : "danger"}>{t.direction}</Badge>,
+      cell: (t) => (
+        <Badge tone={t.direction === "long" ? "safe" : "danger"}>{t.direction}</Badge>
+      ),
     },
-    { key: "entry_time", header: "Entry", cell: (t) => <span data-numeric>{utc(t.entry_time)}</span> },
-    { key: "exit_time", header: "Exit", cell: (t) => <span data-numeric>{utc(t.exit_time)}</span> },
+    {
+      key: "entry_time",
+      header: "Entry",
+      cell: (t) => <span data-numeric>{utc(t.entry_time)}</span>,
+    },
+    {
+      key: "exit_time",
+      header: "Exit",
+      cell: (t) => <span data-numeric>{utc(t.exit_time)}</span>,
+    },
     { key: "entry", header: "Entry price", align: "right", cell: (t) => px(t.entry_price) },
     { key: "exit", header: "Exit price", align: "right", cell: (t) => px(t.exit_price) },
     { key: "sl", header: "SL", align: "right", cell: (t) => px(t.stop_price) },
@@ -203,7 +231,10 @@ export function TradeLog({
         <span>
           {EXIT_LABEL[t.exit_reason] ?? humanize(t.exit_reason)}
           {t.ambiguous_exit ? (
-            <span className="ml-1 text-ink-3" title="Stop and target were both inside one bar; resolved as the stop.">
+            <span
+              className="ml-1 text-ink-3"
+              title="Stop and target were both inside one bar; resolved as the stop."
+            >
               (ambiguous)
             </span>
           ) : null}
@@ -251,7 +282,11 @@ export function TradeLog({
         getRowId={(t) => String(t.id)}
         stickyHeader={false}
         minWidth="1100px"
-        empty={<p className="px-3 py-8 text-center text-sm text-ink-3">This run took no trades.</p>}
+        empty={
+          <p className="px-3 py-8 text-center text-sm text-ink-3">
+            This run took no trades.
+          </p>
+        }
       />
       <div className="flex items-center justify-between gap-3 text-xs text-ink-3">
         <span data-testid="trade-range">
@@ -260,13 +295,23 @@ export function TradeLog({
             : `Trades ${safe * PAGE + 1}–${safe * PAGE + slice.length} of ${trades.length}`}
         </span>
         <span className="flex items-center gap-2">
-          <Button size="sm" variant="ghost" disabled={safe === 0} onClick={() => setPage(safe - 1)}>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={safe === 0}
+            onClick={() => setPage(safe - 1)}
+          >
             Previous
           </Button>
           <span data-numeric>
             Page {safe + 1} of {pages}
           </span>
-          <Button size="sm" variant="ghost" disabled={safe >= pages - 1} onClick={() => setPage(safe + 1)}>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={safe >= pages - 1}
+            onClick={() => setPage(safe + 1)}
+          >
             Next
           </Button>
         </span>
