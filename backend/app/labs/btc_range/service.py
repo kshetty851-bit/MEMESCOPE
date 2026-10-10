@@ -23,7 +23,7 @@ from typing import TypeVar
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.labs.btc_range import repository
+from app.labs.btc_range import monthly, repository
 from app.labs.btc_range.bounds import BOUNDS, config_field_names
 from app.labs.btc_range.engine import PRICE_STEP, evaluate, quantize
 from app.labs.btc_range.execution import run_backtest
@@ -37,6 +37,9 @@ from app.labs.btc_range.schemas import (
     EquityPointOut,
     FieldBoundsOut,
     MetricsOut,
+    MonthlyMonthOut,
+    MonthlyOut,
+    MonthlySummaryOut,
     OpenPositionOut,
     PriceOut,
     RangeOut,
@@ -547,3 +550,51 @@ async def replay(session: AsyncSession, *, now: datetime, hours: int) -> dict[st
         "trades": [trade_out(t).model_dump(mode="json") for t in result.trades],
         "metrics": metrics_out(result.metrics).model_dump(),
     }
+
+
+# --- Monthly long/short book ------------------------------------------------
+
+#: The backtest shown beside the live record starts here (it needs December
+#: 2023 to read January 2024's direction).
+MONTHLY_HISTORY_FROM = datetime(2023, 12, 1, tzinfo=UTC)
+
+
+def _summary(rows: list[monthly.BookMonth]) -> MonthlySummaryOut:
+    done = [r for r in rows if not r.running]
+    pnl = [r.pnl_usd for r in done]
+    return MonthlySummaryOut(
+        months=len(done), up=sum(1 for p in pnl if p > 0),
+        total_pnl_usd=dec(sum(pnl, Decimal(0))),
+        best_usd=dec(max(pnl)) if pnl else None, worst_usd=dec(min(pnl)) if pnl else None,
+        liquidated=sum(1 for r in done if r.liquidated))
+
+
+async def build_monthly(session: AsyncSession, *, now: datetime, enabled: bool,
+                        live_start: datetime) -> MonthlyOut:
+    raw = await repository.monthly_bars(session, start=MONTHLY_HISTORY_FROM)
+    this_month = datetime(now.year, now.month, 1, tzinfo=UTC)
+    bars = [monthly.MonthBar(as_utc(m), Decimal(o), Decimal(c), Decimal(h), Decimal(lo),
+                             complete=as_utc(m) < this_month) for m, o, c, h, lo in raw]
+    latest = await repository.latest_candle(session)
+    price = latest[0].close if latest else None
+    rows = monthly.book(bars, current_price=price)
+    start = datetime(live_start.year, live_start.month, 1, tzinfo=UTC)
+
+    def out(r: monthly.BookMonth) -> MonthlyMonthOut:
+        return MonthlyMonthOut(
+            month=r.month.strftime("%Y-%m"), side="long" if r.side > 0 else "short",
+            entry=price_str(r.entry), exit=price_str(r.exit),
+            liquidation_price=price_str(r.liquidation_price), liquidated=r.liquidated,
+            pnl_usd=dec(r.pnl_usd),
+            pct=dec((r.pnl_usd / monthly.CAPITAL * 100).quantize(Decimal("0.1"))),
+            running=r.running, live=r.month >= start)
+
+    current = next((r for r in rows if r.running), None)
+    return MonthlyOut(
+        enabled=enabled, leverage=int(monthly.LEVERAGE), capital_usd=dec(monthly.CAPITAL),
+        fee_pct_per_side=dec(monthly.FEE * 100), live_start=start.strftime("%Y-%m"),
+        current_price=price_str(price) if price is not None else None,
+        current=out(current) if current else None,
+        live=_summary([r for r in rows if r.month >= start]),
+        backtest=_summary([r for r in rows if r.month < start]),
+        months=[out(r) for r in reversed(rows)])

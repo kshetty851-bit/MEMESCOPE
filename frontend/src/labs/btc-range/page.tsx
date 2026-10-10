@@ -6,11 +6,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/states";
 import { TabPanel, Tabs } from "@/components/ui/tabs";
 
-import { useBtcRangeConfig, useBtcRangeStatus } from "./hooks";
+import { useBtcMonthly, useBtcRangeConfig, useBtcRangeStatus } from "./hooks";
 import { LiveTab } from "./live";
+import { MonthlyTab } from "./monthly";
 import { StrategyLab } from "./strategy-lab";
 
-type TabId = "live" | "lab";
+type TabId = "monthly" | "live" | "lab";
 
 export const PAPER_BANNER = "Paper trading only — no wallet, no live orders.";
 
@@ -21,19 +22,19 @@ export const PAPER_BANNER = "Paper trading only — no wallet, no live orders.";
  * and every sentence is the API's; the page only lays them out.
  */
 export function BtcRangeLabPage() {
-  const [tab, setTab] = useState<TabId>("live");
+  const [tab, setTab] = useState<TabId>("monthly");
   const [labOpened, setLabOpened] = useState(false);
   const status = useBtcRangeStatus();
   const config = useBtcRangeConfig();
+  const monthly = useBtcMonthly();
 
   return (
     <div className="flex flex-col gap-4 p-6">
       <header className="flex flex-col gap-1">
-        <h1 className="text-xl font-semibold">BTC Range Lab</h1>
+        <h1 className="text-xl font-semibold">BTC Lab</h1>
         <p className="max-w-[65ch] text-sm text-ink-dim">
-          A range strategy on BTC/USDT. It marks support and resistance from recent candles
-          and records the call it makes; the paper book below logs what each call would have
-          returned.
+          Paper books on BTC/USDT. The monthly book goes long or short for a whole month at
+          3×, following last month&apos;s direction. The range strategy is stopped.
         </p>
       </header>
 
@@ -54,12 +55,26 @@ export function BtcRangeLabPage() {
         }}
         panelId="btc-range-panel"
         items={[
-          { value: "live", label: "Live (paper)" },
+          { value: "monthly", label: "Monthly 3× (paper)" },
+          { value: "live", label: "Range (stopped)" },
           { value: "lab", label: "Strategy Lab" },
         ]}
       />
 
       <TabPanel id="btc-range-panel" value={tab}>
+        {tab === "monthly" ? (
+          monthly.isLoading ? (
+            <Skeleton className="h-72 w-full" />
+          ) : monthly.isError || !monthly.data ? (
+            <ErrorState
+              title="Could not load the monthly book"
+              body="The monthly endpoint did not answer."
+              onRetry={() => void monthly.refetch()}
+            />
+          ) : (
+            <MonthlyTab data={monthly.data} />
+          )
+        ) : null}
         {tab === "live" ? (
           status.isLoading ? (
             <div className="flex flex-col gap-4" data-testid="live-loading">

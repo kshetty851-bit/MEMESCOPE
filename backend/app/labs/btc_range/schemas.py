@@ -285,3 +285,40 @@ class BacktestIn(BaseModel):
     config: ConfigIn = ConfigIn()
     start: datetime | None = None
     end: datetime | None = None
+
+
+# --- Monthly long/short book (monthly.py) -----------------------------------
+
+class MonthlyMonthOut(BaseModel):
+    month: str  # YYYY-MM
+    side: Literal["long", "short"]
+    entry: str
+    exit: str
+    liquidation_price: str
+    liquidated: bool
+    pnl_usd: str
+    pct: str
+    running: bool
+    live: bool
+
+
+class MonthlySummaryOut(BaseModel):
+    months: int
+    up: int
+    total_pnl_usd: str
+    best_usd: str | None
+    worst_usd: str | None
+    liquidated: int
+
+
+class MonthlyOut(BaseModel):
+    enabled: bool
+    leverage: int
+    capital_usd: str
+    fee_pct_per_side: str
+    live_start: str  # YYYY-MM
+    current_price: str | None
+    current: MonthlyMonthOut | None
+    live: MonthlySummaryOut
+    backtest: MonthlySummaryOut
+    months: list[MonthlyMonthOut]  # newest first

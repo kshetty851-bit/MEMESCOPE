@@ -22,7 +22,13 @@ from fastapi import APIRouter, HTTPException
 from app.api.deps import DbSession
 from app.core.config import settings
 from app.labs.btc_range import service
-from app.labs.btc_range.schemas import BacktestIn, BacktestOut, ConfigOut, StatusOut
+from app.labs.btc_range.schemas import (
+    BacktestIn,
+    BacktestOut,
+    ConfigOut,
+    MonthlyOut,
+    StatusOut,
+)
 
 router = APIRouter(prefix="/labs/btc-range", tags=["btc-range-lab"])
 
@@ -50,3 +56,12 @@ async def backtest(body: BacktestIn, db: DbSession) -> BacktestOut:
         )
     except (service.InvalidConfigError, service.InvalidWindowError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/monthly", response_model=MonthlyOut)
+async def monthly_book(db: DbSession) -> MonthlyOut:
+    """The monthly long/short book (3x, a fresh $1,000 each month): its running
+    month, every month since January 2024, and the live record since its start."""
+    return await service.build_monthly(
+        db, now=datetime.now(UTC), enabled=settings.LAB_BTC_MONTHLY_ENABLED,
+        live_start=service.as_utc(settings.LAB_BTC_MONTHLY_LIVE_START))

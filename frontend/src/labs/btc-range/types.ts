@@ -233,3 +233,39 @@ export interface BacktestOut {
   /** Oldest first, downsampled to at most 500 points. */
   equity_curve: EquityPointOut[];
 }
+
+/** The monthly long/short book (`/labs/btc-range/monthly`). */
+export interface MonthlyMonthOut {
+  month: string; // YYYY-MM
+  side: "long" | "short";
+  entry: string;
+  exit: string;
+  liquidation_price: string;
+  liquidated: boolean;
+  pnl_usd: string;
+  pct: string;
+  running: boolean;
+  live: boolean;
+}
+
+export interface MonthlySummaryOut {
+  months: number;
+  up: number;
+  total_pnl_usd: string;
+  best_usd: string | null;
+  worst_usd: string | null;
+  liquidated: number;
+}
+
+export interface MonthlyOut {
+  enabled: boolean;
+  leverage: number;
+  capital_usd: string;
+  fee_pct_per_side: string;
+  live_start: string;
+  current_price: string | null;
+  current: MonthlyMonthOut | null;
+  live: MonthlySummaryOut;
+  backtest: MonthlySummaryOut;
+  months: MonthlyMonthOut[];
+}
