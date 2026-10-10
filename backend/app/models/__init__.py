@@ -86,6 +86,13 @@ from app.models.password_reset import PasswordResetToken  # noqa: F401
 from app.models.compound import CompoundCycle  # noqa: F401
 from app.models.pumpfun import PumpfunSignal  # noqa: F401
 from app.models.btc_range import BtcCandle  # noqa: F401
+from app.models.forex import (  # noqa: F401
+    ForexCandle,
+    ForexFetchDay,
+    ForexImportBatch,
+    ForexRun,
+    ForexStrategyVersion,
+)
 from app.models.graduation import (  # noqa: F401
     PumpfunGraduation,
     PumpfunGraduationMark,
