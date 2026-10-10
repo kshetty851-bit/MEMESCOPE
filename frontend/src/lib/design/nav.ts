@@ -86,6 +86,14 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Paper only. $10k pools at 10x sizes; $50k pools on ten wallets.",
       },
+      // Karthik, 2026-10-10: Arjun reads a company's screener.in page on request.
+      {
+        href: "/nse-lab",
+        label: "NSE Lab",
+        icon: IconSpark,
+        status: "ready",
+        note: "Private. Arjun reads a company's screener.in page when you ask.",
+      },
       // Karthik, 2026-10-10: does paying DexScreener (profile, boosts) pay?
       {
         href: "/boost-lab",
