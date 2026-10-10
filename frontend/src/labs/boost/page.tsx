@@ -31,6 +31,7 @@ export interface BoostLab {
   started_at: string;
   backtest_from: string;
   boosts_since?: string;
+  samples_since?: string;
   first_trade_at?: string | null;
   hold_minutes?: number;
   ticket_usd?: number;
@@ -69,7 +70,7 @@ export function BoostRuleBook({ d }: { d: BoostLab }) {
     ["Always sells", `${d.hold_minutes ?? 4} minutes after buying. No stop-loss, no price targets.`],
     ["Why 4 minutes", "On the first 28 such coins (8–10 Oct), 4 minutes made the most; past 5 minutes they fell apart, with a quarter rugged by 8–10 minutes. The table below re-prices the same coins at other sell times."],
     ["Money", `${usd(d.ticket_usd)} per trade from ${usd(d.capital_usd)}, several at once while the cash allows.`],
-    ["Boosts", `Boost counts are recorded from ${d.boosts_since ? dubai(d.boosts_since) : "the lab's start"} Dubai. Before that only the paid profile is known.`],
+    ["How it knows", `It checks DexScreener for a paid profile or boosts before each buy. From ${d.samples_since ? dubai(d.samples_since) : "10 Oct"} Dubai it reads every coin as it graduates; before that it only saw about one coin in five, and boost counts only from ${d.boosts_since ? dubai(d.boosts_since) : "10 Oct"}.`],
     ["The catch", "It was chosen after looking at those 28 coins, and three of them carried the profit. This book is the test, not the proof."],
     ["Paper money", "The books' own buys, re-priced with the same fees and price impact. No real wallet follows it."],
   ];

@@ -152,6 +152,11 @@ def parse_pair(pair: dict[str, Any], *, ts: datetime) -> dict[str, Any] | None:
         "txns_m5_sells": _int(m5.get("sells")),
         "txns_h1_buys": _int(h1.get("buys")),
         "txns_h1_sells": _int(h1.get("sells")),
+        # Paid DexScreener promotion (Boost Lab, 2026-10-10). NULL, not False,
+        # where absent: most coins have neither, and NULL costs no space.
+        "has_profile": True if pair.get("info") else None,
+        "boosts_active": (_int(b.get("active")) or None
+                          if isinstance(b := pair.get("boosts"), dict) else None),
     }
 
 

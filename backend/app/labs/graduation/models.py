@@ -324,6 +324,10 @@ class GradPostgradSample(Base):
     txns_m5_sells: Mapped[int | None] = mapped_column(Integer)
     txns_h1_buys: Mapped[int | None] = mapped_column(Integer)
     txns_h1_sells: Mapped[int | None] = mapped_column(Integer)
+    #: Paid DexScreener promotion on this read (Boost Lab, 2026-10-10): a paid
+    #: profile (`info`) and active boosts. NULL where DexScreener showed none.
+    has_profile: Mapped[bool | None] = mapped_column(Boolean)
+    boosts_active: Mapped[int | None] = mapped_column(Integer)
 
 
 class GradEarlyOpen(Base):
