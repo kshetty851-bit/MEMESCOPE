@@ -53,6 +53,13 @@ SIZES = (10, 20, 25, 50, 100, 200)
 WALLETS = 10
 WALLET_TICKET = 50.0
 WALLET_START = 500.0
+#: The $10k book's balance as a multiple of its ticket (Karthik, 2026-10-10:
+#: "yes change to 5x in 10k pool"; 10x before). Its 3-minute trades never had
+#: more than two open at once, so $250 bought every trade $500 did: same
+#: dollars, double the return. 5x, not 2-3x: a -$200 day (7 Oct, before the
+#: few-sellers rule) would have emptied $100-$150. Applied from day 1.
+TEN_K_RATIO = 5
+TEN_K_START = WALLET_TICKET * TEN_K_RATIO
 #: The real wallets' per-coin cap across user wallets (REAL_WALLET_MAX_COIN_USD).
 COIN_CAP = 250.0
 RUG = -0.5

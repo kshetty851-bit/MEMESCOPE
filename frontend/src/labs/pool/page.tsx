@@ -62,7 +62,7 @@ interface OpenTrade {
   /** After costs, at the last mark; null before the first one. */
   pct_now: string | null;
 }
-/** The $10k book at $50 on $500, laid out like Karthik's Lab. */
+/** The $10k book at $50 on $250 (5×), laid out like Karthik's Lab. */
 interface TenKRules {
   floor_usd: number;
   skip_pool_usd: [number, number];
@@ -116,12 +116,14 @@ function useNow(): number {
   return now;
 }
 
-/** $10k+ pools: each size on ten times its balance, live since the timer. */
+/** $10k+ pools: each size on its balance (5× since 2026-10-10), live since the timer. */
 export function TenKTable({ data }: { data: NonNullable<PoolLab["ten_k"]> }) {
+  const first = data.live[0];
+  const ratio = first ? Math.round(Number(first.capital_usd) / Number(first.ticket_usd)) : null;
   return (
     <Panel>
       <PanelHeader>
-        <PanelTitle>$10k+ pools · quiet rule · each size on 10× its balance · live</PanelTitle>
+        <PanelTitle>$10k+ pools · quiet rule · each size on {ratio ? `${ratio}×` : "its"} balance · live</PanelTitle>
       </PanelHeader>
       <div className="overflow-x-auto p-3" data-testid="pool-ten-k">
         <table className="w-full min-w-[34rem] text-[12px] tabular-nums">
@@ -364,7 +366,7 @@ export function FiftyKTables({ data }: { data: NonNullable<PoolLab["fifty_k"]> }
   );
 }
 
-/** What Layla reads out in the Pool Lab: the $10k book at $50 on $500. */
+/** What Layla reads out in the Pool Lab: the $10k book at $50 on $250. */
 function layla(d: PoolLab) {
   const line = d.ten_k?.live.find((l) => l.ticket_usd === 50);
   if (!line) return {};
