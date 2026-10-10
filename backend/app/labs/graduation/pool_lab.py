@@ -42,6 +42,13 @@ TEN_K_BOOK = "POOL_10K_QUIET_3M"
 #: to 10k book and assume we had this rule since start"). The arm stops buying
 #: them (`floor10k_no25_50`); the page leaves out the ones it bought before.
 SKIP_POOL_USD = (25_000, 50_000)
+#: Skip a coin whose pool had more than this many sells (DexScreener's 5-minute
+#: count, last read before the buy) when it was bought (Karthik, 2026-10-10:
+#: "yes apply it and revise profit since day 1"). On the book's 615 trades
+#: 5-10 Oct, the 152 with more than 5 lost money on every day (-$741 at $50),
+#: book -$188 -> +$473; chosen on the first half, held on the second. The page
+#: leaves them out from the first trade; the arm still buys them.
+MAX_SELLS_BEFORE = 5
 SIZES = (10, 20, 25, 50, 100, 200)
 WALLETS = 10
 WALLET_TICKET = 50.0
