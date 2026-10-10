@@ -33,6 +33,7 @@ from app.karthik_ops import api as karthik_ops
 from app.lab import api as lab
 from app.labs.btc_range import api as btc_range_lab
 from app.labs.graduation import api as graduation_lab
+from app.labs.nse_desk import api as nse_desk_api
 from app.momentum import api as momentum
 from app.news import api as news
 from app.paper import api as paper
@@ -129,6 +130,7 @@ api_router.include_router(graduation_lab.router)
 # BTC Range Lab. Paper only: two GETs and one POST that computes a backtest
 # and writes nothing; /status answers `running: false` without a query when off.
 api_router.include_router(btc_range_lab.router)
+api_router.include_router(nse_desk_api.router)
 # The homepage journey section (public, counts only; see the module).
 api_router.include_router(journey.router)
 # Solana news headlines for the sidebar broadcast. Third-party RSS, read-only.
