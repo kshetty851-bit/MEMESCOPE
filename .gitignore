@@ -39,6 +39,9 @@ dist/
 
 # Virtual environments
 .venv/
+# Without a slash too: a .venv SYMLINK is a file, and `.venv/` let one be
+# committed (416bbdd), which broke CI's `uv venv` for weeks.
+.venv
 venv/
 ENV/
 env/
