@@ -7,15 +7,18 @@ sign a transaction, or access wallet credentials.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
+from app.core.logging import get_logger
 from app.labs.graduation import moneyblock
 from app.labs.graduation.models import (
     SOURCE_HELD_WS,
@@ -76,6 +79,13 @@ VERIFIED_DISCOVERY_PROGRAMS = frozenset({PUMP_FUN_PROGRAM, PUMPSWAP_PROGRAM})
 #: How recent the graduation lab's own read of a pool's vaults must be to stand
 #: as the price a quote is judged against (the lab's own `HELD_TRUST_S`).
 POOL_PRICE_TRUST_S = 30
+
+
+logger = get_logger(__name__)
+
+#: Buy-quote attempts before BUY_QUOTE_UNAVAILABLE, and the wait between them.
+QUOTE_TRIES = 3
+QUOTE_RETRY_S = 1.0
 
 
 class Reason:
@@ -258,7 +268,7 @@ class RealWalletSafetyGate:
         # data is usable. The final result remains REJECT either way.
         if inspection is not None and price is not None and liquidity is not None:
             try:
-                quote = await self._jupiter.buy_quote(
+                quote = await self._buy_quote(
                     output_mint=mint_address,
                     input_usd=trade_size_usd,
                     output_decimals=inspection.decimals or 0,
@@ -644,6 +654,22 @@ class RealWalletSafetyGate:
             reasons.append(Reason.MINT_AUTHORITY_ACTIVE)
         if inspection.freeze_authority_active:
             reasons.append(Reason.FREEZE_AUTHORITY_ACTIVE)
+
+    async def _buy_quote(self, **kwargs: Any) -> Any:
+        """Jupiter's free quote API refuses bursts with 429s (2026-10-11: it
+        blocked 16 real buys in a day, every request refused for minutes at a
+        time). Try `QUOTE_TRIES` times, `QUOTE_RETRY_S` apart, before giving up;
+        the quote's age is judged from `now`, so a retry cannot make it stale."""
+        for attempt in range(QUOTE_TRIES):
+            try:
+                return await self._jupiter.buy_quote(**kwargs)
+            except Exception as exc:
+                if attempt == QUOTE_TRIES - 1:
+                    logger.warning("real_wallet_buy_quote_failed",
+                                   tries=QUOTE_TRIES, error=str(exc)[:200])
+                    raise
+                await asyncio.sleep(QUOTE_RETRY_S)
+        raise AssertionError("unreachable")
 
     @staticmethod
     def _quote_checks(
