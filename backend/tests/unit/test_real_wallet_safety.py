@@ -29,6 +29,20 @@ NOW = datetime(2026, 8, 9, tzinfo=UTC)
 UNSET = object()
 
 
+@pytest.fixture(autouse=True)
+def _db_checks_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The checks that read Postgres stay off here whatever the environment
+    says: run inside the prod container (where the crew and source blocks are
+    on) these tests otherwise hit the fake session and 38 of them fail. Each
+    has its own integration test."""
+    from app.core.config import settings
+
+    for flag in ("REAL_WALLET_CREW_BLOCK_ENABLED", "REAL_WALLET_SOURCE_BLOCK_ENABLED",
+                 "REAL_WALLET_HOLDER_GATE_ENABLED", "REAL_WALLET_BLOCK_RUGGED_SYMBOLS",
+                 "REAL_WALLET_BLOCK_REPEAT_CREATORS"):
+        monkeypatch.setattr(settings, flag, False)
+
+
 def _quote(*, side: str, output: str, impact: str = "1") -> ExecutionQuote:
     is_buy = side == "entry"
     return ExecutionQuote(
