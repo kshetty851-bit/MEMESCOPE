@@ -26,6 +26,8 @@ function position(overrides: Partial<PaperPosition> = {}): PaperPosition {
     name: "Probe",
     symbol: "PRB",
     status: "open",
+    pricing_status: "priced",
+    current_market_cap: null,
     opened_at: "2026-08-01T12:00:00Z",
     entry_rank: 3,
     entry_price: "10",
