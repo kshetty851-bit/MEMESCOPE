@@ -776,3 +776,35 @@ async def test_a_quote_far_from_the_pools_own_price_is_still_refused(
     decision = await _decision(monkeypatch, snapshot=_snapshot(**_STALE_FEED),
                                quotes=_buy_at("0.0012"))
     assert Reason.EXECUTION_PRICE_DEVIATION_TOO_HIGH in decision.reason_codes
+
+
+class _Flaky(_Quotes):
+    """Jupiter refusing the first `fails` buy quotes (429), then answering."""
+
+    def __init__(self, fails: int) -> None:
+        super().__init__(_quote(side="entry", output="100000000"),
+                         _quote(side="exit", output="98000000"))
+        self.fails = fails
+        self.calls = 0
+
+    async def buy_quote(self, **kw: object) -> ExecutionQuote:
+        self.calls += 1
+        if self.calls <= self.fails:
+            raise ExecutionQuoteUnavailableError("429 Too Many Requests")
+        return await super().buy_quote(**kw)
+
+
+async def test_a_refused_buy_quote_is_retried(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(service, "QUOTE_RETRY_S", 0)
+    flaky = _Flaky(fails=service.QUOTE_TRIES - 1)
+    quote = await _Gate(_inspection(), flaky)._buy_quote(output_mint=MINT)
+    assert quote.output_amount > 0
+    assert flaky.calls == service.QUOTE_TRIES
+
+
+async def test_a_quote_refused_every_try_still_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(service, "QUOTE_RETRY_S", 0)
+    flaky = _Flaky(fails=service.QUOTE_TRIES)
+    with pytest.raises(ExecutionQuoteUnavailableError):
+        await _Gate(_inspection(), flaky)._buy_quote(output_mint=MINT)
+    assert flaky.calls == service.QUOTE_TRIES
