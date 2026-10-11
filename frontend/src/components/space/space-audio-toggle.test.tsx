@@ -63,7 +63,7 @@ describe("SpaceAudioToggle", () => {
       });
     };
 
-    const [launch, topbar] = buttons();
+    const [launch, topbar] = buttons() as [HTMLElement, HTMLElement];
     await click(launch);
 
     // Both report on, and only ONE player was ever built.

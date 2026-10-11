@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { deriveHqState } from "@/lib/hq/adapter";
 import { isWalkable } from "@/lib/hq/ambient";
 import { actorClass } from "@/lib/hq/ambient-scheduler";
-import { EMPLOYEES } from "@/lib/hq/employees";
+import { EMPLOYEES, type EmployeeId } from "@/lib/hq/employees";
 import { isInsideRoom } from "@/lib/hq/geometry";
 import { MAX_VISITORS, VISITORS, VISITOR_ROUTINES } from "@/lib/hq/visitors";
 
@@ -81,7 +81,8 @@ describe("every visit is a real walk", () => {
         if (!frame.tile) continue;
         if (!Number.isInteger(frame.tile.col) || !Number.isInteger(frame.tile.row)) continue;
         expect(
-          isWalkable(frame.tile, routine.actor),
+          // A visitor has no desk, so it walks by the blocked-tile rule alone.
+          isWalkable(frame.tile, routine.actor as unknown as EmployeeId),
           `${routine.id} stands on blocked ${key(frame.tile)}`,
         ).toBe(true);
         expect(isInsideRoom(frame.tile), `${routine.id} leaves the building`).toBe(true);

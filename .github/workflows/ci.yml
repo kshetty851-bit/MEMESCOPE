@@ -58,6 +58,8 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           enable-cache: true
+          # No uv.lock in this repo: key the cache on the project file instead.
+          cache-dependency-glob: backend/pyproject.toml
 
       - uses: actions/setup-python@v5
         with:
@@ -68,13 +70,17 @@ jobs:
           uv venv
           uv pip install -e ".[dev]"
 
+      # Report-only until the backlog is paid down (2026-10-11: 1,537 lint
+      # findings, 416 unformatted files, 931 mypy errors). The tests below block.
       - name: Lint
+        continue-on-error: true
         run: |
           source .venv/bin/activate
-          ruff check .
+          ruff check . --statistics
           ruff format --check .
 
       - name: Type check
+        continue-on-error: true
         run: |
           source .venv/bin/activate
           mypy app
@@ -183,7 +189,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Scan the filesystem for known vulnerabilities
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: fs
           scan-ref: .

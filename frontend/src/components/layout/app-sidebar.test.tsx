@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -146,7 +147,9 @@ describe("SidebarContent", () => {
 
 describe("AppSidebar", () => {
   it("exposes a labelled collapse control", () => {
-    render(<AppSidebar />);
+    // The sidebar now carries the login crew, which reads the news with react-query.
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><AppSidebar /></QueryClientProvider>);
     const toggle = screen.getByRole("button", { name: "Collapse navigation" });
     expect(toggle).toHaveAttribute("aria-pressed", "false");
   });
