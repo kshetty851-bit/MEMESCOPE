@@ -787,6 +787,10 @@ class GradPaperPosition(Base):
     #: it fired on plus the reaction time), and which stop it was.
     exit_signal_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     exit_signal: Mapped[str | None] = mapped_column(String(24))
+    #: The coin's sells (curve and pool) before the buy, read from chain once,
+    #: capped at 22 ($10k book's sells rule, 2026-10-12). NULL until read; -1
+    #: when its history could not be read.
+    chain_sells_before: Mapped[int | None] = mapped_column(Integer)
 
 
 class GradPaperRestatement(Base):
