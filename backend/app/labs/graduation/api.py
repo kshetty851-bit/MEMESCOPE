@@ -1838,6 +1838,33 @@ async def pumpfun_days(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     return {"graduation_sol": GRADUATION_SOL, "days": list(reversed(days))}
 
 
+
+#: FLOOR TEST (Karthik, 2026-10-11: "yes start the comparison", after three
+#: weak days of small-pool rugs). The book's own trades from this moment on,
+#: re-weighted per variant at $50 a trade: forward only, so nothing here is
+#: chosen with hindsight. Since 1 Oct (hindsight) the plain $50k+ rule led:
+#: +$435 vs +$329 ($55k), +$250 ($60k), +$343 (half size on $50-60k).
+FLOOR_TEST_FROM = datetime(2026, 10, 11, 20, 0, tzinfo=UTC)   # 00:00 Dubai, 12 Oct
+FLOOR_TEST = (
+    ("today", "Today's rule: $50k+", lambda pool: 1.0),
+    ("floor55", "Floor $55k", lambda pool: 0.0 if pool < 55_000 else 1.0),
+    ("floor60", "Floor $60k", lambda pool: 0.0 if pool < 60_000 else 1.0),
+    ("half_small", "Half size on $50-60k", lambda pool: 0.5 if pool < 60_000 else 1.0),
+)
+
+
+def _floor_test(rows: Sequence[Any]) -> dict[str, Any]:
+    fresh = [r for r in rows if r.opened_at >= FLOOR_TEST_FROM]
+    out = []
+    for key, label, weight in FLOOR_TEST:
+        xs = [(weight(float(r.liq_open_usd or 0)), float(r.net_return)) for r in fresh]
+        out.append({"key": key, "label": label,
+                    "trades": sum(1 for k, _ in xs if k > 0),
+                    "rugs": sum(1 for k, r in xs
+                                if k > 0 and r <= float(config.OPERATOR_RUG_MOVE)),
+                    "usd": round(sum(50 * k * r for k, r in xs), 2)})
+    return {"since": FLOOR_TEST_FROM, "lines": out}
+
 @router.get("/karthik", summary="Karthik's own $500 book, and its judge date")
 async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """His book alone, with the two things a balance cannot say.
@@ -1939,6 +1966,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         "max_entry_age_since": config.MAX_ENTRY_AGE_AT,
         "quiet_max_txs": config.QUIET_MAX_POOL_TXS,
         "pools_since": config.KARTHIK_BOOK_POOLS_AT,
+        "floor_test": _floor_test(rows),
         "hold_minutes": arm.hold,
         "started_at": spec.start,
         "judge_at": config.KARTHIK_JUDGE_AT,

@@ -12,6 +12,8 @@ export interface KarthikTrade {
 }
 
 export interface KarthikBook {
+  /** The floor test (2026-10-11): the book's trades from `since`, re-weighted per variant. */
+  floor_test?: { since: string; lines: { key: string; label: string; trades: number; rugs: number; usd: number }[] };
   /** Every pump.fun graduation seen since the book opened, bought or not. */
   graduations_seen?: number;
   /** Of those whose first hour is over: how many fell 80%+ within it. */
