@@ -23,6 +23,8 @@ a different order size on each leg, and `api._size_penalty` for the flat fee.
 
 from __future__ import annotations
 
+import re
+
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -49,6 +51,34 @@ SKIP_POOL_USD = (25_000, 50_000)
 #: book -$188 -> +$473; chosen on the first half, held on the second. The page
 #: leaves them out from the first trade; the arm still buys them.
 MAX_SELLS_BEFORE = 5
+#: Famous names the $10k book skips (Karthik, 2026-10-11: "skip tokens with
+#: famous names, they just come to rug"; "yes build and deploy it for 10k
+#: pool"). On its 555 trades 5-11 Oct the 40 famous names rugged 17.5% vs 2.1%
+#: and lost -14% a trade; skipping them from day 1 took $610 -> ~$827, better on
+#: every day. NOT the $50k books: there they still made +1.7% a trade. A
+#: symbol is famous if it contains a word below, or IS a short one; the list
+#: was written after seeing these coins, so it needs new names as they come.
+FAMOUS_WORDS = (
+    "openai", "deepseek", "claude", "anthropic", "gemini", "grok", "chatgpt", "gpt", "llama",
+    "nvidia", "tesla", "musk", "elon", "trump", "barron", "melania", "putin", "biden", "obama",
+    "kanye", "drake", "taylor", "soulja", "instagram", "tiktok", "youtube", "google", "apple",
+    "microsoft", "amazon", "netflix", "facebook", "metamask", "spacex", "starlink", "twitter",
+    "telegram", "disney", "nike", "pepsi", "cocacola", "mcdonald", "samsung", "nintendo", "gta",
+    "fortnite", "minecraft", "roblox", "pokemon", "binance", "coinbase", "robinhood", "blackrock",
+    "bitcoin", "ethereum", "solana", "doge", "shiba", "pepe", "vitalik", "saylor", "zuck", "bezos",
+    "jensen", "altman", "mrbeast", "ronaldo", "messi", "lebron", "kardashian",
+)
+FAMOUS_EXACT = frozenset({
+    "x", "ai", "meta", "agi", "btc", "eth", "sol", "bnb", "xrp", "usa", "nba", "nfl", "fifa",
+    "tsla", "aapl", "nvda", "goog", "amzn", "msft", "sony", "nasa", "cia", "fbi", "pope", "cz",
+})
+
+
+def famous_name(symbol: str | None) -> bool:
+    s = re.sub(r"[^a-z0-9]", "", (symbol or "").lower())
+    return bool(s) and (s in FAMOUS_EXACT or any(w in s for w in FAMOUS_WORDS))
+
+
 SIZES = (10, 20, 25, 50, 100, 200)
 WALLETS = 10
 WALLET_TICKET = 50.0
