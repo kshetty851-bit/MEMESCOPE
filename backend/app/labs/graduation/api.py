@@ -1595,6 +1595,20 @@ def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
     }
 
 
+def _mcaps(row: Any) -> dict[str, int | None]:
+    """Market cap at the buy and at the sell (Karthik, 2026-10-11: "on closed
+    trades i want to see entry and exit MCAP value"): the position's own price
+    in SOL x SOL/USD at the buy x pump.fun's fixed supply. Matches
+    DexScreener's FDV to within ~1%; the sell uses the buy's SOL price, minutes
+    apart."""
+    sol = float(row.sol_usd_at_open or 0)
+
+    def cap(quote: Any) -> int | None:
+        return round(float(quote) * sol * config.PUMP_SUPPLY) if quote and sol else None
+
+    return {"mcap_open_usd": cap(row.open_quote), "mcap_close_usd": cap(row.close_quote)}
+
+
 def _karthik_days(took: Sequence[tuple[Any, float]], start: datetime,
                   capital: float, cents: Decimal) -> list[dict[str, Any]]:
     """One row per 24 hours since the book opened, newest first.
@@ -2020,6 +2034,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
             "pct": (Decimal(str(100 * float(row.net_return))).quantize(cents)),
             "pnl_usd": Decimal(str(money)).quantize(cents),
             "pool_usd": row.liq_open_usd,
+            **_mcaps(row),
             "real": real.get(row.mint) if row.opened_at >= real_from else None,
         } for row, money in reversed(took)],
     }
@@ -2682,7 +2697,7 @@ async def _pool_ten_k_book(db: AsyncSession, rows: Sequence[Any], sol: Decimal |
         "balance_usd": Decimal(str(walk.cash)).quantize(cents),
         "days": _karthik_days(took, pl.START, pl.TEN_K_START, cents),
         "closed": [{"symbol": r.symbol, "mint": r.mint, "opened_at": r.opened_at,
-                    "closed_at": r.closed_at, "pool_usd": r.liq_open_usd,
+                    "closed_at": r.closed_at, "pool_usd": r.liq_open_usd, **_mcaps(r),
                     "pct": Decimal(str(100 * float(r.net_return))).quantize(cents),
                     "pnl_usd": Decimal(str(m)).quantize(cents),
                     "rugged": float(r.net_return) <= float(config.OPERATOR_RUG_MOVE)}

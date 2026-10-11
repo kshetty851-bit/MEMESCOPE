@@ -155,7 +155,7 @@ async def build(db: AsyncSession) -> dict[str, Any]:
         "first_trade_at": first,
         "days": api._karthik_days(took, first or FROM, CAPITAL, cents),
         "closed": [{"symbol": c.symbol, "mint": c.mint, "opened_at": c.opened_at,
-                    "closed_at": c.closed_at, "pool_usd": c.liq_open_usd,
+                    "closed_at": c.closed_at, "pool_usd": c.liq_open_usd, **api._mcaps(c),
                     "pct": Decimal(str(100 * float(c.net_return))).quantize(cents),
                     "pnl_usd": Decimal(str(m)).quantize(cents),
                     "rugged": float(c.net_return) <= rug,
