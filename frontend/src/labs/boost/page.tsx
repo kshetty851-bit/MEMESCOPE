@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { Panel, PanelHeader, PanelTitle } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/states";
-import { Days, formatElapsed, Row } from "@/labs/karthik/page";
+import { Days, formatElapsed, Row, McapHeads } from "@/labs/karthik/page";
 import type { KarthikDay, KarthikTrade } from "@/labs/karthik/types";
 import { api } from "@/lib/api-client";
 
@@ -123,6 +123,7 @@ export function BoostBook({ d }: { d: BoostLab }) {
                 <th className="py-1 pr-3 text-left font-normal">bought</th>
                 <th className="py-1 pr-3 text-left font-normal">coin</th>
                 <th className="py-1 pr-3 text-right font-normal">pool</th>
+                <McapHeads />
                 <th className="py-1 pr-3 text-right font-normal">result</th>
                 <th className="py-1 text-right font-normal">money</th>
               </tr>

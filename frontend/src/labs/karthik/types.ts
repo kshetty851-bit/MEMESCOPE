@@ -7,6 +7,9 @@ export interface KarthikTrade {
   pct: string;
   pnl_usd: string;
   pool_usd: string | null;
+  /** Market cap at the buy and at the sell, USD. */
+  mcap_open_usd?: number | null;
+  mcap_close_usd?: number | null;
   /** Since the main wallet's current Start: did it buy this coin too? */
   real?: { status: "bought" | "skipped"; why: string | null } | null;
 }

@@ -296,6 +296,7 @@ export function Days({ days, judgeAt, trades, real = true }: {
                 <th className="py-1 pr-3 text-left font-normal">bought</th>
                 <th className="py-1 pr-3 text-left font-normal">coin</th>
                 <th className="py-1 pr-3 text-right font-normal">pool</th>
+                <McapHeads />
                 <th className="py-1 pr-3 text-right font-normal">result</th>
                 <th className="py-1 text-right font-normal">money</th>
                 {real ? <th className="py-1 pl-3 text-right font-normal">real wallet</th> : null}
@@ -313,6 +314,22 @@ export function Days({ days, judgeAt, trades, real = true }: {
 }
 
 /** One closed trade; the Pool Lab's $10k book has no real-wallet column. */
+/** Compact market cap: $46.7k, $3.2M. */
+export function mcap(n: number | null | undefined): string {
+  if (n == null) return "—";
+  return n >= 1e6 ? `$${(n / 1e6).toFixed(1)}M` : `$${(n / 1e3).toFixed(1)}k`;
+}
+
+/** The two market-cap headers every closed-trade table puts after "pool". */
+export function McapHeads() {
+  return (
+    <>
+      <th className="py-1 pr-3 text-right font-normal">entry mcap</th>
+      <th className="py-1 pr-3 text-right font-normal">exit mcap</th>
+    </>
+  );
+}
+
 export function Row({ trade, real = true }: { trade: KarthikTrade; real?: boolean }) {
   const pct = Number(trade.pct);
   return (
@@ -345,6 +362,12 @@ export function Row({ trade, real = true }: { trade: KarthikTrade; real?: boolea
       </td>
       <td className="py-1.5 pr-3 text-right tabular-nums text-ink-dim">
         {trade.pool_usd ? usd(trade.pool_usd) : "—"}
+      </td>
+      <td className="py-1.5 pr-3 text-right tabular-nums text-ink-dim" data-testid="trade-mcap-open">
+        {mcap(trade.mcap_open_usd)}
+      </td>
+      <td className="py-1.5 pr-3 text-right tabular-nums text-ink-dim" data-testid="trade-mcap-close">
+        {mcap(trade.mcap_close_usd)}
       </td>
       <td
         className={`py-1.5 pr-3 text-right tabular-nums ${
@@ -606,6 +629,7 @@ export function TradeList({ data }: { data: KarthikBook }) {
                     <th className="py-1 pr-3 text-left font-normal">bought</th>
                     <th className="py-1 pr-3 text-left font-normal">coin</th>
                     <th className="py-1 pr-3 text-right font-normal">pool</th>
+                    <McapHeads />
                     <th className="py-1 pr-3 text-right font-normal">result</th>
                     <th className="py-1 text-right font-normal">money</th>
                     <th className="py-1 pl-3 text-right font-normal">real wallet</th>
