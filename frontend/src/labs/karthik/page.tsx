@@ -164,6 +164,50 @@ export function day30(days: KarthikDay[], judgeAt: string, now = Date.now()) {
 /** Days, and with `trades` each box opens that day's trades (Karthik,
  *  2026-10-10: "if i click on daily profit box it show me all the trades it
  *  took that day"). A day holds the trades that CLOSED in it, as its profit does. */
+/** The floor test (Karthik, 2026-10-11): four ways to treat the smallest
+ *  pools, on the book's own trades from midnight Dubai 12 Oct onward. */
+export function FloorTest({ data }: { data: KarthikBook }) {
+  const t = data.floor_test;
+  if (!t) return null;
+  const best = Math.max(...t.lines.map((l) => l.usd));
+  return (
+    <Panel>
+      <PanelHeader>
+        <PanelTitle>Floor test · new coins only · $50 a trade</PanelTitle>
+      </PanelHeader>
+      <div className="overflow-x-auto p-3">
+        <table className="w-full min-w-[30rem] text-[13px] tabular-nums" data-testid="floor-test">
+          <thead className="text-[11px] uppercase tracking-wider text-ink-dim">
+            <tr>
+              <th className="py-1 pr-3 text-left font-normal">rule</th>
+              <th className="px-2 text-right font-normal">trades</th>
+              <th className="px-2 text-right font-normal">rugs</th>
+              <th className="px-2 text-right font-normal">result</th>
+            </tr>
+          </thead>
+          <tbody>
+            {t.lines.map((l) => (
+              <tr key={l.key} className={`border-t border-line/60 ${l.usd === best && l.trades ? "font-semibold" : ""}`}>
+                <td className="py-1.5 pr-3">{l.label}</td>
+                <td className="px-2 text-right">{l.trades}</td>
+                <td className={`px-2 text-right ${l.rugs ? "text-down" : ""}`}>{l.rugs}</td>
+                <td className={`px-2 text-right ${l.usd > 0 ? "text-up" : l.usd < 0 ? "text-down" : "text-ink-3"}`}>
+                  {l.usd >= 0 ? "+" : "-"}${Math.abs(l.usd).toFixed(2)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="mt-2 text-[11px] text-ink-dim">
+          Counts only coins bought from {new Date(t.since).toLocaleString("en-GB", { timeZone: "Asia/Dubai", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })} Dubai,
+          so no line was picked with hindsight. Since 1 Oct (hindsight) the plain $50k+ rule led: +$435, against +$329 ($55k),
+          +$250 ($60k) and +$343 (half size). Paper only; the real wallets are unchanged.
+        </p>
+      </div>
+    </Panel>
+  );
+}
+
 export function Days({ days, judgeAt, trades, real = true }: {
   days: KarthikDay[]; judgeAt?: string; trades?: KarthikTrade[]; real?: boolean;
 }) {
@@ -966,6 +1010,8 @@ export function KarthikLabPage() {
       <PumpfunMoney />
 
       <SizeGrid data={data} />
+
+      <FloorTest data={data} />
 
       <div className="grid items-start gap-3 md:grid-cols-2">
         <RealWalletsLive />
