@@ -88,11 +88,11 @@ jobs:
       - name: Create the test database
         run: PGPASSWORD=memescope psql -h localhost -U memescope -d memescope -c 'CREATE DATABASE memescope_test'
 
+      # Upgrade only: migrations that delete retired labs (0110 and later) are
+      # one-way by design, so a downgrade-to-base round trip can never pass.
       - name: Verify migrations apply cleanly
         run: |
           source .venv/bin/activate
-          alembic upgrade head
-          alembic downgrade base
           alembic upgrade head
 
       # Catches a model changed without a migration. Previously unusable as a
