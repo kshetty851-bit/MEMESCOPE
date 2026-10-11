@@ -2659,7 +2659,7 @@ async def _pool_ten_k_book(db: AsyncSession, rows: Sequence[Any], sol: Decimal |
                GradPaperPosition.excluded.is_(None), GradPaperPosition.opened_at >= pl.START)
         .order_by(GradPaperPosition.opened_at.desc()))).all()
     busy = await _busy_sellers(db, held)
-    held = [p for p in held if p.id not in busy]
+    held = [p for p in held if p.id not in busy and not pl.famous_name(p.symbol)]
 
     def move(p: Any) -> Decimal | None:
         live = net_return(p, p.last_quote)  # after costs, as the trade list's open rows
@@ -2678,7 +2678,7 @@ async def _pool_ten_k_book(db: AsyncSession, rows: Sequence[Any], sol: Decimal |
                   "stop_pct": (float(BY_NAME[pl.TEN_K_BOOK].stop * 100)
                                if BY_NAME[pl.TEN_K_BOOK].stop else None),
                   "reaction_s": config.EXIT_REACTION_S,
-                  "max_sells_before": pl.MAX_SELLS_BEFORE},
+                  "max_sells_before": pl.MAX_SELLS_BEFORE, "skip_famous": True},
         "balance_usd": Decimal(str(walk.cash)).quantize(cents),
         "days": _karthik_days(took, pl.START, pl.TEN_K_START, cents),
         "closed": [{"symbol": r.symbol, "mint": r.mint, "opened_at": r.opened_at,
@@ -2714,7 +2714,15 @@ async def _pool_lab_build(db: AsyncSession) -> dict[str, Any]:
                 if not lo <= float(r.liq_open_usd or 0) < hi]
     busy = await _busy_sellers(db, ten_live)
     ten_live = [r for r in ten_live if r.id not in busy]
+    famous = [r for r in ten_live if pl.famous_name(r.symbol)]
+    ten_live = [r for r in ten_live if not pl.famous_name(r.symbol)]
     ten_book = await _pool_ten_k_book(db, ten_live, sol, cents)
+    # What the famous-name skip refused, and what each would have done.
+    ten_book["skipped_famous"] = [
+        {"symbol": r.symbol, "mint": r.mint, "opened_at": r.opened_at, "pool_usd": r.liq_open_usd,
+         "pct": Decimal(str(100 * float(r.net_return))).quantize(cents),
+         "rugged": float(r.net_return) <= float(config.OPERATOR_RUG_MOVE)}
+        for r in reversed(famous)]
 
     # $50k: ten user wallets on Karthik's book's real-time trades.
     penalty = _size_penalty(pl.WALLET_TICKET, float(config.PAPER_NOTIONAL_USD), sol)

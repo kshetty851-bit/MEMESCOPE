@@ -47,3 +47,10 @@ def test_a_wallet_never_spends_money_it_does_not_have():
     wallets = pl.ten_wallets(coins, 0.0, cap=None)
     assert all(w.trades == 10 for w in wallets)
     assert all(abs(w.worth() - pl.WALLET_START) < 1e-9 for w in wallets)
+
+
+def test_famous_names_are_skipped_and_ordinary_names_are_not():
+    for sym in ("OpenAI", "DeepSeek", "GTA 6 Coin", "Elonhotdog", "BARRON", "$TRUMP", "X", "ZuckAI", "MetaMask"):
+        assert pl.famous_name(sym), sym
+    for sym in ("QE", "CRAWLMASK", "DINK", "HOTJ", "Samurai", "metal", "", None):
+        assert not pl.famous_name(sym), sym

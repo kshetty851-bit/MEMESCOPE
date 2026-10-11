@@ -71,12 +71,15 @@ interface TenKRules {
   hold_minutes: number;
   stop_pct?: number | null;
   max_sells_before?: number | null;
+  skip_famous?: boolean;
   reaction_s?: number;
 }
 interface TenKBook {
   ticket_usd: number;
   capital_usd: number;
   rules?: TenKRules;
+  /** Coins the famous-name skip refused, newest first. */
+  skipped_famous?: { symbol: string | null; mint: string; opened_at: string; pool_usd: string | null; pct: string; rugged: boolean }[];
   balance_usd: string;
   days: KarthikDay[];
   closed: (KarthikTrade & { rugged: boolean })[];
@@ -235,6 +238,35 @@ export function TenKBookPanel({ book, now, startedAt }: { book: TenKBook; now: n
             </tbody>
           </table>
         </details>
+        {book.skipped_famous?.length ? (
+          <details className="overflow-x-auto">
+            <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wider text-ink-2">
+              Skipped famous names · {book.skipped_famous.length} · {book.skipped_famous.filter((c) => c.rugged).length} would have rugged
+            </summary>
+            <table className="mt-1 w-full text-[13px]" data-testid="pool-skipped-famous">
+              <thead className="text-[11px] uppercase tracking-wider text-ink-dim">
+                <tr>
+                  <th className="py-1 pr-3 text-left font-normal">would have bought</th>
+                  <th className="py-1 pr-3 text-left font-normal">coin</th>
+                  <th className="py-1 pr-3 text-right font-normal">pool</th>
+                  <th className="py-1 text-right font-normal">would have made</th>
+                </tr>
+              </thead>
+              <tbody>
+                {book.skipped_famous.map((c) => (
+                  <tr key={`${c.mint}-${c.opened_at}`} className="border-t border-line/60">
+                    <td className="py-1.5 pr-3 tabular-nums text-ink-dim">{day(c.opened_at)}</td>
+                    <td className="py-1.5 pr-3 font-medium">{c.symbol || `${c.mint.slice(0, 6)}…`}</td>
+                    <td className="py-1.5 pr-3 text-right tabular-nums text-ink-dim">{usd(c.pool_usd)}</td>
+                    <td className={`py-1.5 text-right tabular-nums ${tone(c.pct)}`}>
+                      {Number(c.pct) >= 0 ? "+" : ""}{Number(c.pct).toFixed(2)}%{c.rugged ? " · rug" : ""}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </details>
+        ) : null}
       </div>
     </Panel>
   );
@@ -256,6 +288,7 @@ export function TenKRuleBook({ book }: { book: TenKBook }) {
     ["Skips the middle", `No pools between ${k(lo)} and ${k(hi)}: they lost money in both halves of this book's first day, and Karthik's Lab's ${k(lo)}–${k(hi)} book lost almost all its money.`],
     ["Only quiet pools", `Fewer than ${r.quiet_max_txs} trades in the pool so far when it buys. A busy start is skipped.`],
     ...(r.max_sells_before != null ? [["Few sellers", `It skips a coin whose pool already had more than ${r.max_sells_before} sells when it buys: early sellers in a tiny pool are cashing out, and those coins lost money on every day of this book.`] as [string, string]] : []),
+    ...(r.skip_famous ? [["No famous names", "It skips coins named after famous people, brands or companies (OpenAI, Tesla, Trump, GTA, Pepe…). On this book they rugged one time in six and lost money; the coins it refused are listed under the trades."] as [string, string]] : []),
     ["Only fresh coins", `It buys within ${r.max_entry_age_s / 60} minutes of the coin graduating, or not at all.`],
     ["No repeat creators", "Coins whose creator has launched a coin before are left out: on this book they lost money. (The $50k books buy them again.)"],
     ["Several at once", `${usd(book.ticket_usd)} per trade from a ${usd(book.capital_usd)} balance. It buys every coin that passes while a whole ${usd(book.ticket_usd)} is free.`],
@@ -284,7 +317,8 @@ export function TenKRuleBook({ book }: { book: TenKBook }) {
       <p className="px-3 pb-3 text-[11px] text-ink-dim">
         The timer starts at the book&apos;s first trade. The {r.hold_minutes}-minute sell, the{" "}
         {k(lo)}–{k(hi)} skip{r.stop_pct ? ", the stop-loss" : ""}
-        {r.max_sells_before != null ? " and the few-sellers rule" : ""} came later (5–10 Oct) and are
+        {r.max_sells_before != null ? ", the few-sellers rule" : ""}
+        {r.skip_famous ? " and the famous-name skip" : ""} came later (5–11 Oct) and are
         applied from the first trade, like every rule here.
       </p>
     </Panel>
