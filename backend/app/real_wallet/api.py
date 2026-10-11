@@ -625,6 +625,32 @@ LIVE_WINDOW = timedelta(minutes=10)
 LIVE_MAX = 24
 
 
+async def _page_skips(session: Any, bought: Any, coins: dict[str, Any],
+                      symbols: dict[str, str]) -> None:
+    """The $10k page's own rules on what its paper book bought, so the office
+    never shows BOUGHT for a trade the page leaves out (`api._pool_rows`,
+    `_busy_sellers`, `pool_lab.famous_name`)."""
+    from app.labs.graduation import api as grad_api
+    from app.labs.graduation import pool_lab as pl
+
+    sells = dict((await session.execute(grad_api._SELLS_BEFORE_SQL, {
+        "ids": [b.id for b in bought], "mints": [b.mint for b in bought],
+        "ats": [b.opened_at for b in bought]})).all())
+    repeat = set((await session.execute(
+        grad_api._REPEAT_CREATOR_SQL, {"m": [b.mint for b in bought]})).scalars())
+    for b in bought:
+        n = sells.get(b.id)
+        if n is not None and n > pl.MAX_SELLS_BEFORE:
+            why = f"bought by the paper book, but the page skips it: {n} sells before the buy"
+        elif pl.famous_name(symbols.get(b.mint)):
+            why = "bought by the paper book, but the page skips famous names"
+        elif b.mint in repeat:
+            why = "bought by the paper book, but the page skips repeat creators"
+        else:
+            continue
+        coins[b.mint].page_skip = why
+
+
 async def _checkpoint_live_10k(session: Any) -> dict[str, object]:
     from app.real_wallet import checkpoint_live as live
 
@@ -648,14 +674,17 @@ async def _checkpoint_live_10k(session: Any) -> dict[str, object]:
                 select(GradOperator.mint, GradOperator.blocked_reason)
                 .where(GradOperator.mint.in_(mints)))).all():
             coins[m].blocked = why
-        for m, at in (await session.execute(
-                select(GradPaperPosition.mint, GradPaperPosition.opened_at)
-                .where(GradPaperPosition.mint.in_(mints),
-                       GradPaperPosition.book == live.POOL_10K_BOOK))).all():
-            coins[m].bought_at = at
+        bought = (await session.execute(
+            select(GradPaperPosition.id, GradPaperPosition.mint, GradPaperPosition.opened_at)
+            .where(GradPaperPosition.mint.in_(mints),
+                   GradPaperPosition.book == live.POOL_10K_BOOK))).all()
+        for b in bought:
+            coins[b.mint].bought_at = b.opened_at
         symbols = {m: s for m, s in (await session.execute(
             select(GradToken.mint, GradToken.symbol).where(GradToken.mint.in_(mints)))).all()
             if s}
+        if bought:
+            await _page_skips(session, bought, coins, symbols)
     return {"now": now.isoformat(), "coins": [
         {"symbol": symbols.get(m), "graduated_at": ts.isoformat(),
          **live.where_pool(coins[m], now)}
