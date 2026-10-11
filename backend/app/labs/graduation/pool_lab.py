@@ -88,7 +88,9 @@ WALLET_START = 500.0
 #: more than two open at once, so $250 bought every trade $500 did: same
 #: dollars, double the return. 5x, not 2-3x: a -$200 day (7 Oct, before the
 #: few-sellers rule) would have emptied $100-$150. Applied from day 1.
-TEN_K_RATIO = 5
+#: Back to 10x on 2026-10-11 (Karthik: "in pool lab change the table to 10x
+#: instead of 5x"): same trades and dollars, half the percentage return.
+TEN_K_RATIO = 10
 TEN_K_START = WALLET_TICKET * TEN_K_RATIO
 #: The real wallets' per-coin cap across user wallets (REAL_WALLET_MAX_COIN_USD).
 COIN_CAP = 250.0

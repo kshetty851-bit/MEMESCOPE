@@ -62,7 +62,7 @@ interface OpenTrade {
   /** After costs, at the last mark; null before the first one. */
   pct_now: string | null;
 }
-/** The $10k book at $50 on $250 (5×), laid out like Karthik's Lab. */
+/** The $10k book at $50 on $500 (10×), laid out like Karthik's Lab. */
 interface TenKRules {
   floor_usd: number;
   skip_pool_usd: [number, number];
@@ -119,7 +119,7 @@ function useNow(): number {
   return now;
 }
 
-/** $10k+ pools: each size on its balance (5× since 2026-10-10), live since the timer. */
+/** $10k+ pools: each size on its balance (10× again since 2026-10-11), live since the timer. */
 export function TenKTable({ data }: { data: NonNullable<PoolLab["ten_k"]> }) {
   const first = data.live[0];
   const ratio = first ? Math.round(Number(first.capital_usd) / Number(first.ticket_usd)) : null;
