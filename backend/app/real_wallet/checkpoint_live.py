@@ -52,6 +52,9 @@ class Coin:
     bought_at: datetime | None = None
     #: The main wallet already held a coin when the rule took this one.
     wallet_busy: bool = False
+    #: The $10k page leaves out a coin its paper book bought (too many sells
+    #: before the buy, a famous name, a repeat creator): why, in plain words.
+    page_skip: str | None = None
 
 
 def where(coin: Coin, now: datetime) -> dict[str, Any]:
@@ -111,6 +114,9 @@ def where_pool(coin: Coin, now: datetime,
             code: str | None = None) -> dict[str, Any]:
         return {"status": status, "robot": robot, "code": code, "note": note}
 
+    if coin.bought_at is not None and coin.page_skip:
+        # Karthik, 2026-10-11: "BK bought ... i dont see this trade in 10k pool".
+        return out("stopped", coin.page_skip, robot="hush")
     if coin.bought_at is not None:
         return out("bought", "passed the checks; the $10k paper book bought it",
                    robot="wallet")
