@@ -54,6 +54,7 @@ export interface KarthikBook {
   /** The pools the book counts, [low, high) USD, and when that was chosen.
    *  Replayed from day 1, so what came before is a look back. */
   pools_usd?: [number, number | null];
+  skip_pools_usd?: [number, number];
   pools_since?: string;
   /** Never buys a coin more than this long after it graduated (seconds). */
   max_entry_age_s?: number;

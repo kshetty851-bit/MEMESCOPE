@@ -38,3 +38,13 @@ async def test_at_or_over_the_floor_or_without_one_nothing_changes():
         s = _Session(SimpleNamespace(own_enabled=True))
         assert not await rug_brake.stop_member_below_floor(s, member, worth, NOW)
         assert s.row.own_enabled is True and s.commits == 0
+
+
+def test_the_main_wallet_skips_only_measured_150_to_200k_pools():
+    from app.real_wallet.driver import OWNER_SKIP_POOL_USD as band, in_skipped_pool
+
+    assert in_skipped_pool(Decimal(150_000), band)
+    assert in_skipped_pool(Decimal("199999.99"), band)
+    assert not in_skipped_pool(Decimal(200_000), band)
+    assert not in_skipped_pool(Decimal("149999"), band)
+    assert not in_skipped_pool(None, band)  # unread pool: bought as before

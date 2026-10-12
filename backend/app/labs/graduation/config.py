@@ -1103,6 +1103,12 @@ KARTHIK_MANY_AT_ONCE_AT = datetime(2026, 10, 3, 13, 15, tzinfo=UTC)
 #: whose trades before 26 Sep were rebuilt by replay.
 KARTHIK_BOOK_POOLS: tuple[int, int | None] = (50_000, None)
 KARTHIK_BOOK_POOLS_AT = datetime(2026, 10, 3, 12, 30, tzinfo=UTC)
+#: Pools the book skips inside its range (Karthik, 2026-10-12: "apply skip
+#: 150-200k pools to karthik lab since day 1 and also put this rule in main
+#: wallet"). In the Astra backtest the band lost money in every split (its 89
+#: trades -$94.48 at $50; the real wallet's own 49 fills -$8.75); skipping it
+#: took the book from $830.86 to $921.19 on $300. Applied from day 1.
+KARTHIK_SKIP_POOL_USD: tuple[int, int] = (150_000, 200_000)
 
 #: Never buy a coin more than this long after it graduated (Karthik,
 #: 2026-09-27, after EVO). EVO was bought 186s after graduating, the slowest
