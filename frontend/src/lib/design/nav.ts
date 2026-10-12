@@ -94,6 +94,14 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Private. Arjun reads a company's screener.in page when you ask.",
       },
+      // Karthik, 2026-10-12: the busy pools the $10k book refuses, on paper.
+      {
+        href: "/busy-lab",
+        label: "Busy Pool Lab",
+        icon: IconSpark,
+        status: "ready",
+        note: "Paper only. The busy pools the $10k book refuses, $20 a trade on $200.",
+      },
       // Karthik, 2026-10-10: does paying DexScreener (profile, boosts) pay?
       {
         href: "/boost-lab",

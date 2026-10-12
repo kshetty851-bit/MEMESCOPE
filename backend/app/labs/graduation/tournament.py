@@ -196,6 +196,9 @@ class Arm:
     #: transactions since its migration when the book is about to buy. Unread
     #: is not quiet.
     quiet: bool = False
+    #: The opposite (Karthik, 2026-10-12, the Busy Pool Lab): buy only a pool
+    #: that has ALREADY had `QUIET_MAX_POOL_TXS` transactions. Unread is not busy.
+    busy: bool = False
 
     @property
     def is_control(self) -> bool:
@@ -824,6 +827,15 @@ ARMS: tuple[Arm, ...] = (
         note="every graduation over $10k, except $25k-$50k pools, whose pool "
              "is still quiet (under 100 trades) when it is bought, out at 3m "
              "or 10% below the price paid"),
+    # Karthik, 2026-10-12: the Busy Pool Lab ("set up the busy pool as a
+    # separate lab ... starting today with 200$ and 20$ per trade"). The $10k
+    # book's rule turned inside out: ONLY the pools it refuses as busy (100+
+    # trades), everything else the same. 4,788 such coins were skipped 5-12 Oct
+    # with no record of how they would have done; this is that record.
+    Arm("POOL_10K_BUSY_3M", "floor10k_no25_50", 3, busy=True, stop=Decimal("0.10"),
+        note="every graduation over $10k, except $25k-$50k pools, whose pool "
+             "is already busy (100+ trades) when it is bought, out at 3m or 10% "
+             "below the price paid"),
 )
 
 BY_NAME: dict[str, Arm] = {a.name: a for a in ARMS}
@@ -845,11 +857,12 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: BASE_50k_quiet_5m for USER 1's G-Q50.
 #: 2026-10-05: POOL_10K_QUIET_5M for the Pool Lab, the same day made
 #: POOL_10K_QUIET_3M.
-assert len(ARMS) == 16, (
+assert len(ARMS) == 17, (
     "the BASELINE, B3 at four and five minutes, the $500k+flow candidate, the "
     "fast pair E75/E75T, the quiet arms (75k at four and five, 150k, 75-300k), "
     "the $50k quiet arm, the band's pump-only arm and Karthik's three (KARTHIK_QUIET_5M, "
-    f"KARTHIK_Q50_5M, KARTHIK_Q25_5M) — not {len(ARMS)}. Retired and deleted "
+    "KARTHIK_Q50_5M, KARTHIK_Q25_5M), the $10k book and its busy twin — "
+    f"not {len(ARMS)}. Retired and deleted "
     "arms' rules stay in ENTRY_RULES, and `_manage` settles what they still "
     "held as `arm_retired`")
 assert {a.hold for a in ARMS} == {3, 4, 5}, (
@@ -875,10 +888,11 @@ assert all(a.tp is None and a.trail is None for a in ARMS), (
 assert all(a.stop is None or a.stop == Decimal("0.10") for a in ARMS), (
     "one stop level, so the twins differ in ONE thing. Sweeping levels here "
     "would be fitting a parameter on the same data that suggested it")
-#: Fifteen since KARTHIK_Q25_5M, BASE_50k_quiet_5m and POOL_10K (2026-10-05).
-assert len([a for a in ARMS if not a.is_control]) == 15, (
+#: Fifteen since KARTHIK_Q25_5M, BASE_50k_quiet_5m and POOL_10K (2026-10-05);
+#: sixteen with POOL_10K_BUSY_3M (2026-10-12).
+assert len([a for a in ARMS if not a.is_control]) == 16, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Fifteen arms are now judged against it, so the bar is if anything "
+    "draws. Sixteen arms are now judged against it, so the bar is if anything "
     "CONSERVATIVE — the luckiest of twelve reaches less than the luckiest "
     "of forty-two. Left as it is deliberately: a bar that is too hard costs a "
     "real finding some time, where one that is too easy costs a false one nothing")
@@ -1789,13 +1803,16 @@ class Tournament:
                 rug_money += 1
                 if not wanted:
                     continue
-            if any(arm.quiet for arm in wanted):
+            if any(arm.quiet or arm.busy for arm in wanted):
                 busy = await self._pool_busy(row.mint, row.pair_address)
-                if busy is None or busy >= config.QUIET_MAX_POOL_TXS:
+                is_busy = busy is not None and busy >= config.QUIET_MAX_POOL_TXS
+                if busy is None or is_busy:
                     wanted = [arm for arm in wanted if not arm.quiet]
                     too_busy += 1
-                    if not wanted:
-                        continue
+                if not is_busy:
+                    wanted = [arm for arm in wanted if not arm.busy]
+                if not wanted:
+                    continue
             if pool is None or pool.lp_supply != 0:
                 # Liquidity not proven locked on this read: the arms that ask
                 # for a lock pass; the rest buy as they always have.
