@@ -67,3 +67,13 @@ def test_user1_skips_150_to_200k_pools_too():
 
     assert in_skipped_pool(Decimal(160_000), MEMBER_SKIP_POOL_USD["USER1"])
     assert "USER2" not in MEMBER_SKIP_POOL_USD
+
+
+def test_main_wallet_skips_ai_names_only_in_small_pools():
+    from app.labs.graduation.pool_lab import ai_name
+    from app.real_wallet.driver import OWNER_SKIP_AI_POOL_USD, in_skipped_pool
+
+    band = OWNER_SKIP_AI_POOL_USD
+    assert in_skipped_pool(Decimal(52_000), band) and ai_name("DeepSeek")
+    assert not in_skipped_pool(Decimal(60_000), band)  # bigger AI pools still bought
+    assert not in_skipped_pool(Decimal(49_000), band)
