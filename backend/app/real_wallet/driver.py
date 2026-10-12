@@ -87,6 +87,10 @@ OWNER_SKIP_POOL_USD: tuple[int, int] = (150_000, 200_000)
 #: The same skip for user wallets that run the same book (Karthik, 2026-10-12:
 #: USER1 trades it alone with $300 from 1 Nov). Others are unchanged.
 MEMBER_SKIP_POOL_USD: dict[str, tuple[int, int]] = {"USER1": (150_000, 200_000)}
+#: AI-named coins (DeepSeek, OpenAI, 豆包AI...) the MAIN wallet does not buy in
+#: these pools (Karthik, 2026-10-12, "also in main wallet"): the 9 Oct rug wave,
+#: same rule as Karthik Lab's KARTHIK_SKIP_AI_POOL_USD. User wallets unchanged.
+OWNER_SKIP_AI_POOL_USD: tuple[int, int] = (50_000, 60_000)
 
 
 def in_skipped_pool(pool_usd: Decimal | float | None, band: tuple[int, int]) -> bool:
@@ -280,7 +284,7 @@ class RealWalletDriver:
         # call and the SOL price an HTTP one, neither of which a no-op needs.
         candidate = await self._next_candidate(
             strategy_id=switch.nominated_strategy, now=now, wallet=wallet,
-            skip_pools=OWNER_SKIP_POOL_USD,
+            skip_pools=OWNER_SKIP_POOL_USD, skip_ai_pools=OWNER_SKIP_AI_POOL_USD,
         )
         if candidate is None:
             return DriverOutcome(0, "no_fresh_candidate")
@@ -479,7 +483,8 @@ class RealWalletDriver:
 
     async def _next_candidate(self, *, strategy_id: str, now: datetime,
                               wallet: str,
-                              skip_pools: tuple[int, int] | None = None) -> str | None:
+                              skip_pools: tuple[int, int] | None = None,
+                              skip_ai_pools: tuple[int, int] | None = None) -> str | None:
         """The most recent mint this strategy chose and THIS wallet has not traded.
 
         Per wallet since 2026-09-25: a coin the owner bought is still a coin a
@@ -502,8 +507,13 @@ class RealWalletDriver:
         for mint, features in rows:
             if self._too_old(strategy_id, features, now):
                 continue
-            if skip_pools is not None and in_skipped_pool(
-                    await self._pool_usd(mint, now), skip_pools):
+            if skip_pools is None and skip_ai_pools is None:
+                return mint
+            pool = await self._pool_usd(mint, now)
+            if skip_pools is not None and in_skipped_pool(pool, skip_pools):
+                continue
+            if (skip_ai_pools is not None and in_skipped_pool(pool, skip_ai_pools)
+                    and await self._ai_named(mint)):
                 continue
             return mint
         return None
@@ -570,6 +580,17 @@ class RealWalletDriver:
                 GradPostgradSample.ts <= now,
                 GradPostgradSample.ts >= now - timedelta(minutes=3),
             ).order_by(GradPostgradSample.ts.desc()).limit(1))
+
+    async def _ai_named(self, mint: str) -> bool:
+        """Is the coin named after an AI product? Read from the lab's paper
+        position, the same name Karthik Lab's rule reads; unnamed is bought."""
+        from app.labs.graduation.models import GradPaperPosition
+        from app.labs.graduation.pool_lab import ai_name
+
+        return ai_name(await self._session.scalar(
+            select(GradPaperPosition.symbol).where(
+                GradPaperPosition.mint == mint,
+                GradPaperPosition.symbol.is_not(None)).limit(1)))
 
     async def _pool_usd(self, mint: str, now: datetime) -> Decimal | None:
         """The coin's pool size (liquidity) as last read in the three minutes
