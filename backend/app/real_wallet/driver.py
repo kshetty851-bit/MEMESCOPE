@@ -80,6 +80,17 @@ def member_strategy(member: str, nominated: str) -> str:
     return own if own and own.upper() in GRAD_BY_ID else nominated
 
 
+#: Pools the MAIN wallet does not buy (Karthik, 2026-10-12: "put this rule in
+#: main wallet"): its own 49 fills in $150k-$200k pools lost -$8.75 while the
+#: rest of its 486 G-Q50 trades made +$39.64. The user wallets are unchanged.
+OWNER_SKIP_POOL_USD: tuple[int, int] = (150_000, 200_000)
+
+
+def in_skipped_pool(pool_usd: Decimal | float | None, band: tuple[int, int]) -> bool:
+    """Is a coin's pool inside the skipped band? An unread pool is not skipped."""
+    return pool_usd is not None and band[0] <= float(pool_usd) < band[1]
+
+
 class RealWalletDriver:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -263,7 +274,8 @@ class RealWalletDriver:
         # decision there is nothing to size: the balance read below is an RPC
         # call and the SOL price an HTTP one, neither of which a no-op needs.
         candidate = await self._next_candidate(
-            strategy_id=switch.nominated_strategy, now=now, wallet=wallet
+            strategy_id=switch.nominated_strategy, now=now, wallet=wallet,
+            skip_pools=OWNER_SKIP_POOL_USD,
         )
         if candidate is None:
             return DriverOutcome(0, "no_fresh_candidate")
@@ -461,7 +473,8 @@ class RealWalletDriver:
                                   floor=grad.wallet_floor(configured))
 
     async def _next_candidate(self, *, strategy_id: str, now: datetime,
-                              wallet: str) -> str | None:
+                              wallet: str,
+                              skip_pools: tuple[int, int] | None = None) -> str | None:
         """The most recent mint this strategy chose and THIS wallet has not traded.
 
         Per wallet since 2026-09-25: a coin the owner bought is still a coin a
@@ -483,6 +496,9 @@ class RealWalletDriver:
         )).all()
         for mint, features in rows:
             if self._too_old(strategy_id, features, now):
+                continue
+            if skip_pools is not None and in_skipped_pool(
+                    await self._pool_usd(mint, now), skip_pools):
                 continue
             return mint
         return None

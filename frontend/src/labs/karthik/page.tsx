@@ -531,6 +531,7 @@ export function RuleBook({ data }: { data: KarthikBook }) {
   const rules: [string, string][] = [
     ["What it buys", "New pump.fun coins right after they “graduate” — finish their launch and open a real trading pool. About 1,000 do that every day."],
     ...(pool ? [["Only big pools", top ? `The pool must hold between ${usd(pool).replace(".00", "")} and ${usd(top).replace(".00", "")}.` : `The pool must hold ${usd(pool).replace(".00", "")} or more.`] as [string, string]] : []),
+    ...(data.skip_pools_usd ? [["Skips $150k–$200k pools", `No pools between ${usd(data.skip_pools_usd[0]).replace(".00", "")} and ${usd(data.skip_pools_usd[1]).replace(".00", "")}: they lost money in every period tested, and on the real wallet too. Applied from the first trade.`] as [string, string]] : []),
     ...(data.quiet_max_txs ? [["Only quiet pools", `Fewer than ${data.quiet_max_txs} trades in the pool so far when it buys. A busy start is skipped.`] as [string, string]] : []),
     ...(ageMin ? [["Only fresh coins", `It buys within ${ageMin} minutes of the coin graduating, or not at all. A late buy sits in the danger zone when creators sell.`] as [string, string]] : []),
     data.many_at_once_since
