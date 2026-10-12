@@ -84,6 +84,9 @@ def member_strategy(member: str, nominated: str) -> str:
 #: main wallet"): its own 49 fills in $150k-$200k pools lost -$8.75 while the
 #: rest of its 486 G-Q50 trades made +$39.64. The user wallets are unchanged.
 OWNER_SKIP_POOL_USD: tuple[int, int] = (150_000, 200_000)
+#: The same skip for user wallets that run the same book (Karthik, 2026-10-12:
+#: USER1 trades it alone with $300 from 1 Nov). Others are unchanged.
+MEMBER_SKIP_POOL_USD: dict[str, tuple[int, int]] = {"USER1": (150_000, 200_000)}
 
 
 def in_skipped_pool(pool_usd: Decimal | float | None, band: tuple[int, int]) -> bool:
@@ -169,7 +172,9 @@ class RealWalletDriver:
         """At most one BUY for one family wallet. Every refusal is a string."""
         wallet = account.wallet
         repo = LiveIntentRepository(self._session)
-        candidate = await self._next_candidate(strategy_id=strategy_id, now=now, wallet=wallet)
+        candidate = await self._next_candidate(
+            strategy_id=strategy_id, now=now, wallet=wallet,
+            skip_pools=MEMBER_SKIP_POOL_USD.get(account.member))
         if candidate is None:
             return "no_fresh_candidate"
         # Family investment (Karthik, 2026-09-28): a wallet with a coin-size
