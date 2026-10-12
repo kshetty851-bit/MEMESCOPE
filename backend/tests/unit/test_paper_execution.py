@@ -88,3 +88,25 @@ class TestJupiterExecution:
                 output_decimals=6,
                 now=NOW,
             )
+
+
+async def test_a_429_on_one_jupiter_host_is_answered_by_the_other() -> None:
+    from app.services import jupiter
+
+    seen: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.url.host)
+        if request.url.host == "lite-api.jup.ag":
+            return httpx.Response(429, json={"error": "rate limited"})
+        return httpx.Response(200, json={
+            "inputMint": USDC, "outputMint": MINT, "inAmount": "100000000",
+            "outAmount": "200000000", "priceImpactPct": "0.01", "contextSlot": 1,
+            "platformFee": None, "routePlan": [{"swapInfo": {"label": "Pump.fun Amm"}}]})
+
+    c = JupiterExecutionClient(base_url=jupiter.QUOTE_HOSTS[0],
+                               client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    quote = await c.buy_quote(output_mint=MINT, input_usd=Decimal(100),
+                              output_decimals=6, now=NOW)
+    assert quote.output_amount == Decimal(200)
+    assert seen == ["lite-api.jup.ag", "api.jup.ag"]
