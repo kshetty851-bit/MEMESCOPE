@@ -51,6 +51,10 @@ SKIP_POOL_USD = (25_000, 50_000)
 #: book -$188 -> +$473; chosen on the first half, held on the second. The page
 #: leaves them out from the first trade; the arm still buys them.
 MAX_SELLS_BEFORE = 5
+#: And more than this many buys in DexScreener's 5-minute count before the buy
+#: (Karthik, 2026-10-12): the early pump has mostly happened. Chosen on 5-9 Oct
+#: (+$20) and held on 10-12 Oct (+$40); one of 4 rules out of 146 that did.
+MAX_BUYS_BEFORE = 39
 #: Famous names the $10k book skips (Karthik, 2026-10-11: "skip tokens with
 #: famous names, they just come to rug"; "yes build and deploy it for 10k
 #: pool"). On its 555 trades 5-11 Oct the 40 famous names rugged 17.5% vs 2.1%
