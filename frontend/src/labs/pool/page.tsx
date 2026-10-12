@@ -71,6 +71,7 @@ interface TenKRules {
   hold_minutes: number;
   stop_pct?: number | null;
   max_sells_before?: number | null;
+  max_buys_before?: number | null;
   skip_famous?: boolean;
   min_sells?: number | null;
   min_sells_pool_cap?: number | null;
@@ -291,6 +292,7 @@ export function TenKRuleBook({ book }: { book: TenKBook }) {
     ["Skips the middle", `No pools between ${k(lo)} and ${k(hi)}: they lost money in both halves of this book's first day, and Karthik's Lab's ${k(lo)}–${k(hi)} book lost almost all its money.`],
     ["Only quiet pools", `Fewer than ${r.quiet_max_txs} trades in the pool so far when it buys. A busy start is skipped.`],
     ...(r.max_sells_before != null ? [["Few sellers", `It skips a coin whose pool already had more than ${r.max_sells_before} sells when it buys: early sellers in a tiny pool are cashing out, and those coins lost money on every day of this book.`] as [string, string]] : []),
+    ...(r.max_buys_before != null ? [["Not already pumped", `It skips a coin whose pool already had more than ${r.max_buys_before} buys in DexScreener's last 5 minutes when it buys: the early pump has mostly happened.`] as [string, string]] : []),
     ...(r.skip_famous ? [["No famous names", "It skips coins named after famous people, brands or companies (OpenAI, Tesla, Trump, GTA, Pepe…). On this book they rugged one time in six and lost money; the coins it refused are listed under the trades."] as [string, string]] : []),
     ...(r.min_sells ? [["Real sellers", `In pools under ${k(r.min_sells_pool_cap ?? 100_000)}, it skips a coin sold fewer than ${r.min_sells} times before the buy, read from the blockchain: everyone buying and nobody selling is a bundled launch, and those rugged most.`] as [string, string]] : []),
     ["Only fresh coins", `It buys within ${r.max_entry_age_s / 60} minutes of the coin graduating, or not at all.`],
@@ -323,7 +325,7 @@ export function TenKRuleBook({ book }: { book: TenKBook }) {
         {k(lo)}–{k(hi)} skip{r.stop_pct ? ", the stop-loss" : ""}
         {r.max_sells_before != null ? ", the few-sellers rule" : ""}
         {r.skip_famous ? ", the famous-name skip" : ""}
-        {r.min_sells ? " and the sellers rule" : ""} came later (5–12 Oct) and are
+        {r.min_sells ? " and the sellers rule" : ""} came later (5–12 Oct; the stop-loss came off again on 12 Oct) and are
         applied from the first trade, like every rule here.
       </p>
     </Panel>

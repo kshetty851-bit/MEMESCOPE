@@ -2646,6 +2646,29 @@ _SELLS_BEFORE_SQL = text("""
 """)
 
 
+#: Each position's pool buys at its buy: the last 5-minute count read before.
+_BUYS_BEFORE_SQL = text("""
+    select x.id, (select g.txns_m5_buys from grad_postgrad_samples g
+                  where g.mint = x.mint and g.ts <= x.at and g.txns_m5_buys is not null
+                  order by g.ts desc limit 1)
+    from unnest(cast(:ids as uuid[]), cast(:mints as varchar[]),
+                cast(:ats as timestamptz[])) as x(id, mint, at)
+""")
+
+
+async def _busy_buyers(db: AsyncSession, rows: Sequence[Any]) -> set[Any]:
+    """Ids of the positions whose pool had more than `MAX_BUYS_BEFORE` buys
+    when bought (2026-10-12). An unknown count is kept."""
+    from app.labs.graduation import pool_lab as pl
+
+    if not rows:
+        return set()
+    found = await db.execute(_BUYS_BEFORE_SQL, {
+        "ids": [r.id for r in rows], "mints": [r.mint for r in rows],
+        "ats": [r.opened_at for r in rows]})
+    return {i for i, buys in found.all() if buys is not None and buys > pl.MAX_BUYS_BEFORE}
+
+
 async def _busy_sellers(db: AsyncSession, rows: Sequence[Any]) -> set[Any]:
     """Ids of the positions whose pool had more than `MAX_SELLS_BEFORE` sells
     when bought. An unknown count is kept."""
@@ -2676,7 +2699,7 @@ async def _pool_ten_k_book(db: AsyncSession, rows: Sequence[Any], sol: Decimal |
         .where(GradPaperPosition.book == pl.TEN_K_BOOK, GradPaperPosition.closed_at.is_(None),
                GradPaperPosition.excluded.is_(None), GradPaperPosition.opened_at >= pl.START)
         .order_by(GradPaperPosition.opened_at.desc()))).all()
-    busy = await _busy_sellers(db, held)
+    busy = await _busy_sellers(db, held) | await _busy_buyers(db, held)
     held = [p for p in held if p.id not in busy and not pl.famous_name(p.symbol)
             and not pl.too_few_sells(p)]
 
@@ -2697,7 +2720,9 @@ async def _pool_ten_k_book(db: AsyncSession, rows: Sequence[Any], sol: Decimal |
                   "stop_pct": (float(BY_NAME[pl.TEN_K_BOOK].stop * 100)
                                if BY_NAME[pl.TEN_K_BOOK].stop else None),
                   "reaction_s": config.EXIT_REACTION_S,
-                  "max_sells_before": pl.MAX_SELLS_BEFORE, "skip_famous": True,
+                  "max_sells_before": pl.MAX_SELLS_BEFORE,
+                  "max_buys_before": pl.MAX_BUYS_BEFORE,
+                  "skip_famous": True,
                   "min_sells": pl.MIN_CHAIN_SELLS, "min_sells_pool_cap": pl.SELLS_RULE_POOL_CAP},
         "balance_usd": Decimal(str(walk.cash)).quantize(cents),
         "days": _karthik_days(took, pl.START, pl.TEN_K_START, cents),
@@ -2732,7 +2757,7 @@ async def _pool_lab_build(db: AsyncSession) -> dict[str, Any]:
     lo, hi = pl.SKIP_POOL_USD
     ten_live = [r for r in await _pool_rows(db, (pl.TEN_K_BOOK,), pl.START, 10_000)
                 if not lo <= float(r.liq_open_usd or 0) < hi]
-    busy = await _busy_sellers(db, ten_live)
+    busy = await _busy_sellers(db, ten_live) | await _busy_buyers(db, ten_live)
     ten_live = [r for r in ten_live if r.id not in busy]
     famous = [r for r in ten_live if pl.famous_name(r.symbol)]
     ten_live = [r for r in ten_live if not pl.famous_name(r.symbol)]

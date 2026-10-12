@@ -638,10 +638,14 @@ async def _page_skips(session: Any, bought: Any, coins: dict[str, Any],
         "ats": [b.opened_at for b in bought]})).all())
     repeat = set((await session.execute(
         grad_api._REPEAT_CREATOR_SQL, {"m": [b.mint for b in bought]})).scalars())
+    buyers = await grad_api._busy_buyers(session, bought)
     for b in bought:
         n = sells.get(b.id)
         if n is not None and n > pl.MAX_SELLS_BEFORE:
             why = f"bought by the paper book, but the page skips it: {n} sells before the buy"
+        elif b.id in buyers:
+            why = (f"bought by the paper book, but the page skips it: over "
+                   f"{pl.MAX_BUYS_BEFORE} buys before the buy")
         elif pl.famous_name(symbols.get(b.mint)):
             why = "bought by the paper book, but the page skips famous names"
         elif b.mint in repeat:

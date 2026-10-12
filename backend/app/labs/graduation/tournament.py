@@ -823,10 +823,15 @@ ARMS: tuple[Arm, ...] = (
     # over seconds, and a replay of its first 194 trades selling 0-10s after the
     # stop roughly doubled the book in both halves. `scripts/restop_pool_10k.py`
     # re-prices its trades from before the stop the same way.
-    Arm("POOL_10K_QUIET_3M", "floor10k_no25_50", 3, quiet=True, stop=Decimal("0.10"),
+    # 2026-10-12: the stop came OFF again ("apply it to 10k pool since day 1").
+    # Re-priced on 469 page trades it changed 56: helped 22 (+$449), hurt 34
+    # (-$784), most selling a dip that recovered by three minutes, and its
+    # 7 Oct replay read DexScreener's back-dated marks, which let a stop sell
+    # before a drain it could not yet have seen. `scripts/unstop_pool_10k.py`
+    # re-prices the stopped trades at three minutes.
+    Arm("POOL_10K_QUIET_3M", "floor10k_no25_50", 3, quiet=True,
         note="every graduation over $10k, except $25k-$50k pools, whose pool "
-             "is still quiet (under 100 trades) when it is bought, out at 3m "
-             "or 10% below the price paid"),
+             "is still quiet (under 100 trades) when it is bought, out at 3m"),
     # Karthik, 2026-10-12: the Busy Pool Lab ("set up the busy pool as a
     # separate lab ... starting today with 200$ and 20$ per trade"). The $10k
     # book's rule turned inside out: ONLY the pools it refuses as busy (100+
