@@ -1109,6 +1109,11 @@ KARTHIK_BOOK_POOLS_AT = datetime(2026, 10, 3, 12, 30, tzinfo=UTC)
 #: trades -$94.48 at $50; the real wallet's own 49 fills -$8.75); skipping it
 #: took the book from $830.86 to $921.19 on $300. Applied from day 1.
 KARTHIK_SKIP_POOL_USD: tuple[int, int] = (150_000, 200_000)
+#: AI-named coins the book skips in these pools (Karthik, 2026-10-12): the rug
+#: wave's home. Re-run from day 1: $879.96 -> $990.01 on $300, rugs 23 -> 19;
+#: better on 9-13 Oct (+$128) but slightly worse on 1-8 Oct (-$18), so a
+#: rule for the current wave, to review after a week, not a proven edge.
+KARTHIK_SKIP_AI_POOL_USD: tuple[int, int] = (50_000, 60_000)
 
 #: Never buy a coin more than this long after it graduated (Karthik,
 #: 2026-09-27, after EVO). EVO was bought 186s after graduating, the slowest
