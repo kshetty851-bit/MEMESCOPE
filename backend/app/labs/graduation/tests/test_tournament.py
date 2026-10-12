@@ -59,7 +59,7 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     One baseline per hold, so no hold is judged without an unselected twin on
     its own clock. Nothing on this board decides by hashing a mint.
     """
-    assert len(ARMS) == 16
+    assert len(ARMS) == 17
     # Karthik's quiet-pool arm (2026-09-20): the baseline's rule, refusing a
     # pool already past `QUIET_MAX_POOL_TXS` transactions. Not a control, so
     # the baseline below is unchanged and it has something to be judged against.
@@ -108,13 +108,13 @@ def test_arms_differ_only_in_entry_and_exit() -> None:
     # it sells. The rug-signal A/B runs on its own pre-registered clock and
     # competes with nothing here, so ranking it beside the arms invited
     # "delete the losing ones" — which would have ended it three weeks early.
-    # `locked`, `quiet` and `rug_blocked` are part of the entry: whether a
+    # `locked`, `quiet`, `busy` and `rug_blocked` are part of the entry: whether a
     # pool's liquidity is locked, how many transactions it has already had, and
     # whether its money has been behind a rug, are all read at the buy, where
     # `accepts` cannot see them.
     assert set(Arm.__dataclass_fields__) == {
         "name", "entry", "hold", "tp", "trail", "stop", "drain", "clock",
-        "note", "ab_experiment", "locked", "quiet", "rug_blocked"}
+        "note", "ab_experiment", "locked", "quiet", "busy", "rug_blocked"}
     assert all(a.ab_experiment is False for a in ARMS if a.entry.startswith("liq_")), (
         "a tournament arm flagged as an experiment would vanish from its own "
         "comparison")
