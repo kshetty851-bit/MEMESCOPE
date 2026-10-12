@@ -78,20 +78,6 @@ FAMOUS_EXACT = frozenset({
 })
 
 
-#: The sells rule (2026-10-12, see `sells_reader`): in pools under the cap,
-#: skip a coin with fewer than this many sells before the buy.
-MIN_CHAIN_SELLS = 22
-SELLS_RULE_POOL_CAP = 100_000
-
-
-def too_few_sells(p: Any) -> bool:
-    """A position the sells rule leaves out. Unread (None) or unreadable (-1)
-    is kept: the rule refuses only what it measured."""
-    n = getattr(p, "chain_sells_before", None)
-    return (float(p.liq_open_usd or 0) < SELLS_RULE_POOL_CAP
-            and n is not None and 0 <= n < MIN_CHAIN_SELLS)
-
-
 def famous_name(symbol: str | None) -> bool:
     s = re.sub(r"[^a-z0-9]", "", (symbol or "").lower())
     return bool(s) and (s in FAMOUS_EXACT or any(w in s for w in FAMOUS_WORDS))
