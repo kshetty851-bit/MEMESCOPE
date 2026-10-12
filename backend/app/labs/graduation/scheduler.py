@@ -405,15 +405,6 @@ async def pool_lab_tick() -> dict[str, Any]:
 
     if not config.enabled():
         return {"skipped": "graduation_disabled"}
-    # The sells rule's chain reads first (2026-10-12), so a coin bought this
-    # minute is judged by it in this build. Never allowed to stop the build.
-    try:
-        from app.labs.graduation import sells_reader
-
-        async with SessionFactory() as session:
-            await asyncio.wait_for(sells_reader.fill(session), 50)
-    except Exception as exc:
-        logger.warning("ten_k_sells_fill_failed", error=str(exc)[:300])
     async with SessionFactory() as session:
         payload = await _pool_lab_build(session)
     redis = Redis.from_url(settings.REDIS_URI, decode_responses=True)
