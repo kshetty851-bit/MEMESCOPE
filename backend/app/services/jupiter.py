@@ -24,6 +24,10 @@ from app.paper.execution import (
 )
 
 
+#: Both public Jupiter quote hosts, tried in turn on a 429 or a 5xx.
+QUOTE_HOSTS = ("https://lite-api.jup.ag/swap/v1", "https://api.jup.ag/swap/v1")
+
+
 class JupiterExecutionClient:
     """Small async client for Jupiter's quote endpoint."""
 
@@ -101,6 +105,25 @@ class JupiterExecutionClient:
             usdc_mint=self._usdc,
         )
 
+    async def _get_quote(self, client: httpx.AsyncClient,
+                         params: dict[str, str]) -> httpx.Response:
+        """The configured host first; on a 429 or 5xx the other Jupiter host, which
+        keeps its own allowance (2026-10-12: lite-api refused this server on
+        every call while api.jup.ag answered about 2 in 5). An API key, once
+        set, goes to api.jup.ag only."""
+        bases = [self._base_url] + [b for b in QUOTE_HOSTS if b != self._base_url]
+        response: httpx.Response | None = None
+        for base in bases:
+            headers = {}
+            key = settings.JUPITER_API_KEY.get_secret_value()
+            if key and base.startswith("https://api.jup.ag"):
+                headers["x-api-key"] = key
+            response = await client.get(f"{base}/quote", params=params, headers=headers)
+            if response.status_code != 429 and response.status_code < 500:
+                return response
+        assert response is not None
+        return response
+
     async def _quote(
         self, *, input_mint: str, output_mint: str, amount: int
     ) -> dict[str, object]:
@@ -117,9 +140,9 @@ class JupiterExecutionClient:
             client = self._client
             if client is None:
                 async with httpx.AsyncClient(timeout=self._timeout) as transient:
-                    response = await transient.get(f"{self._base_url}/quote", params=params)
+                    response = await self._get_quote(transient, params)
             else:
-                response = await client.get(f"{self._base_url}/quote", params=params)
+                response = await self._get_quote(client, params)
             response.raise_for_status()
             payload = cast(dict[str, Any], response.json())
         except (httpx.HTTPError, ValueError) as exc:
