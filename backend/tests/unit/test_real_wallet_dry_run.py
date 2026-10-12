@@ -127,3 +127,44 @@ async def test_duplicate_execution_intent_is_rejected_by_database(
         )
     )
     assert count == 1
+
+
+async def _order_with(statuses: list[int], monkeypatch) -> tuple[int, object]:
+    from app.real_wallet import jupiter_v2
+
+    async def no_wait(self) -> None:
+        return None
+
+    monkeypatch.setattr(jupiter_v2, "ORDER_RETRY_S", 0)
+    monkeypatch.setattr(jupiter_v2.RealWalletJupiterV2Client,
+                        "_respect_keyless_rate_limit", no_wait)
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        code = statuses[min(len(calls), len(statuses) - 1)]
+        calls.append(code)
+        if code != 200:
+            return httpx.Response(code, json={"error": "refused"})
+        return httpx.Response(200, json={"requestId": "r", "priceImpactPct": "0.01", "routePlan": []})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+        try:
+            out = await RealWalletJupiterV2Client(client=http_client).order(
+                side="BUY", input_mint="in", output_mint="out", amount_raw=1, taker_public_key="t")
+        except jupiter_v2.JupiterV2OrderUnavailableError as exc:
+            out = exc
+    return len(calls), out
+
+
+async def test_a_rate_limited_order_is_asked_again(monkeypatch) -> None:
+    n, out = await _order_with([429, 503, 200], monkeypatch)
+    assert n == 3 and out.request_id == "r"
+
+
+async def test_a_bad_request_is_not_retried_and_three_refusals_give_up(monkeypatch) -> None:
+    from app.real_wallet.jupiter_v2 import JupiterV2OrderUnavailableError
+
+    n, out = await _order_with([400], monkeypatch)
+    assert n == 1 and isinstance(out, JupiterV2OrderUnavailableError)
+    n, out = await _order_with([429, 429, 429, 200], monkeypatch)
+    assert n == 3 and isinstance(out, JupiterV2OrderUnavailableError)

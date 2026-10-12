@@ -17,6 +17,11 @@ import httpx
 from app.core.config import settings
 
 
+#: /order attempts on a rate limit, server error or dropped connection, and the wait.
+ORDER_TRIES = 3
+ORDER_RETRY_S = 1.0
+
+
 class JupiterV2OrderUnavailableError(RuntimeError):
     """Jupiter could not provide a usable V2 order."""
 
@@ -83,23 +88,39 @@ class RealWalletJupiterV2Client:
         api_key = settings.JUPITER_API_KEY.get_secret_value()
         if api_key:
             headers["x-api-key"] = api_key
-        else:
-            await self._respect_keyless_rate_limit()
         started = perf_counter()
-        try:
-            if self._client is None:
-                async with httpx.AsyncClient(timeout=self._timeout) as client:
-                    response = await client.get(
+        # Retried (Karthik, 2026-10-12: "fix it"): on 12 Oct Jupiter refused
+        # USER1's order five times - it asks ~3 s after the main wallet - and
+        # each refusal skipped a winner. Only a rate limit, a server error or a
+        # dropped connection is retried; /order only PREPARES a transaction,
+        # nothing is signed or sent, so asking again cannot buy twice.
+        for attempt in range(ORDER_TRIES):
+            if not api_key:
+                await self._respect_keyless_rate_limit()
+            try:
+                if self._client is None:
+                    async with httpx.AsyncClient(timeout=self._timeout) as client:
+                        response = await client.get(
+                            f"{self._base_url}/order", params=params, headers=headers
+                        )
+                else:
+                    response = await self._client.get(
                         f"{self._base_url}/order", params=params, headers=headers
                     )
-            else:
-                response = await self._client.get(
-                    f"{self._base_url}/order", params=params, headers=headers
-                )
-            response.raise_for_status()
-            body = cast(dict[str, Any], response.json())
-        except (httpx.HTTPError, ValueError) as exc:
-            raise JupiterV2OrderUnavailableError("jupiter_v2_order_unavailable") from exc
+                if (response.status_code == 429 or response.status_code >= 500) and (
+                        attempt < ORDER_TRIES - 1):
+                    await asyncio.sleep(ORDER_RETRY_S)
+                    continue
+                response.raise_for_status()
+                body = cast(dict[str, Any], response.json())
+                break
+            except httpx.TransportError as exc:
+                if attempt < ORDER_TRIES - 1:
+                    await asyncio.sleep(ORDER_RETRY_S)
+                    continue
+                raise JupiterV2OrderUnavailableError("jupiter_v2_order_unavailable") from exc
+            except (httpx.HTTPError, ValueError) as exc:
+                raise JupiterV2OrderUnavailableError("jupiter_v2_order_unavailable") from exc
         route = body.get("routePlan")
         route_plan: list[dict[str, object]] = []
         if isinstance(route, list):
