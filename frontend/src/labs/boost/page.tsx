@@ -39,6 +39,7 @@ export interface BoostLab {
   balance_usd?: string;
   coins_seen?: number;
   coins_picked?: number;
+  famous_skipped?: number;
   boosted_coins?: number;
   days?: KarthikDay[];
   closed?: BoostTrade[];
@@ -67,6 +68,7 @@ function useNow(): number {
 export function BoostRuleBook({ d }: { d: BoostLab }) {
   const rules: [string, string][] = [
     ["What it buys", "Every new pump.fun coin our graduation books bought, at any pool size, that ALREADY had a paid DexScreener profile (logo, links) or active boosts at that moment."],
+    ["No famous names", `It skips coins named after famous people, brands or companies, like the $10k book.${d.famous_skipped ? ` ${d.famous_skipped} skipped so far.` : ""}`],
     ["Always sells", `${d.hold_minutes ?? 4} minutes after buying. No stop-loss, no price targets.`],
     ["Why 4 minutes", "On the first 28 such coins (8–10 Oct), 4 minutes made the most; past 5 minutes they fell apart, with a quarter rugged by 8–10 minutes. The table below re-prices the same coins at other sell times."],
     ["Money", `${usd(d.ticket_usd)} per trade from ${usd(d.capital_usd)}, several at once while the cash allows.`],
