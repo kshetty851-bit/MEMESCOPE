@@ -263,6 +263,9 @@ x-backend-env: &backend-env
   JUPITER_QUOTE_TIMEOUT_SECONDS: ${JUPITER_QUOTE_TIMEOUT_SECONDS:-6}
   JUPITER_QUOTE_SLIPPAGE_BPS: ${JUPITER_QUOTE_SLIPPAGE_BPS:-50}
   JUPITER_USDC_MINT: ${JUPITER_USDC_MINT:-EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v}
+  # Jupiter server key (2026-10-12): secret, set only in .env.production, never
+  # here. Empty = keyless (lite-api refuses this server; see services/jupiter.py).
+  JUPITER_API_KEY: ${JUPITER_API_KEY:-}
   # The Karthik paper wallet. In the anchor, not on the worker: the Celery
   # worker makes the decisions and the API reports them, so a pause set on one
   # of them would show a paused wallet that was still buying — the exact shape
