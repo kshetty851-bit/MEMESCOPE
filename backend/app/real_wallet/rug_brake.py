@@ -75,9 +75,10 @@ async def pull_if_due(session: AsyncSession, now: datetime,
 
 
 #: The balance floor (Karthik, 2026-10-05: "real wallet - stop trade if balance
-#: falls below 107$"): `settings.REAL_WALLET_BALANCE_FLOOR_USD`, $107 in
-#: compose. Unlike the brake above it needs no rug: the main wallet worth under
-#: it before a buy stops the trading, every wallet with it.
+#: falls below 107$"; raised 2026-10-12: "main wallet shud stop trading if falls
+#: below 120$"): `settings.REAL_WALLET_BALANCE_FLOOR_USD`, $120 in compose.
+#: Unlike the brake above it needs no rug: the main wallet worth under it
+#: before a buy stops the trading, every wallet with it.
 FLOOR_ACTOR = "balance_floor"
 
 
@@ -93,4 +94,31 @@ async def stop_below_floor(session: AsyncSession, now: datetime, worth: Decimal)
     await AutotradeSwitchService(session).stop(
         actor=FLOOR_ACTOR, at=now,
         reason=f"main wallet worth ${worth:.2f}, under the ${floor:.0f} floor")
+    return True
+
+
+#: Each user wallet's own floor (Karthik, 2026-10-12: "user 1 shud stop if
+#: falls below 110$"). Worth under it before a buy switches that wallet's OWN
+#: switch off, as its Stop button would; the others trade on. Starting it again
+#: while still under it stops it again at its next buy.
+MEMBER_FLOOR_USD: dict[str, Decimal] = {"USER1": Decimal(110)}
+
+
+async def stop_member_below_floor(session: AsyncSession, member: str, worth: Decimal,
+                                  now: datetime) -> bool:
+    """Switch `member`'s own wallet off if worth under its floor. True when it did."""
+    from app.models.real_wallet_family import RealWalletFamilyMember
+
+    floor = MEMBER_FLOOR_USD.get(member)
+    if floor is None or worth >= floor:
+        return False
+    row = await session.get(RealWalletFamilyMember, member)
+    if row is None or not row.own_enabled:
+        return False
+    row.own_enabled = False
+    row.own_updated_at = now
+    row.own_updated_by = FLOOR_ACTOR
+    await session.commit()
+    logger.warning("real_wallet_member_floor_stop", member=member, worth=str(worth),
+                   floor=str(floor))
     return True

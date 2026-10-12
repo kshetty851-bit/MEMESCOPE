@@ -199,6 +199,8 @@ class RealWalletDriver:
             return "entry_size_rounds_to_zero_lamports"
         equity_usd = (Decimal(balance_lamports) / _LAMPORTS_PER_SOL * price
                       + await repo.open_exposure_usd(wallet))
+        if await rug_brake.stop_member_below_floor(self._session, account.member, equity_usd, now):
+            return "balance_floor"
         decision = AutonomousExecutionPolicy().evaluate_canary_entry(
             requested_usd=entry_usd,
             state=PolicyState(
