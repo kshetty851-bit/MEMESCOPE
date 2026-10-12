@@ -54,3 +54,37 @@ def test_famous_names_are_skipped_and_ordinary_names_are_not():
         assert pl.famous_name(sym), sym
     for sym in ("QE", "CRAWLMASK", "DINK", "HOTJ", "Samurai", "metal", "", None):
         assert not pl.famous_name(sym), sym
+
+
+def test_the_sells_rule_skips_only_measured_small_pool_bundles():
+    from types import SimpleNamespace as P
+
+    assert pl.too_few_sells(P(liq_open_usd=18_000, chain_sells_before=9))
+    assert not pl.too_few_sells(P(liq_open_usd=18_000, chain_sells_before=22))
+    assert not pl.too_few_sells(P(liq_open_usd=150_000, chain_sells_before=3))  # big pools: no rule
+    assert not pl.too_few_sells(P(liq_open_usd=18_000, chain_sells_before=None))  # unread: kept
+    assert not pl.too_few_sells(P(liq_open_usd=18_000, chain_sells_before=-1))  # unreadable: kept
+
+
+async def test_count_sells_stops_at_the_cap_and_reads_the_signer_only():
+    from app.labs.graduation import sells_reader as sr
+
+    mint = "M"
+
+    def bal(owner, amount):
+        return [{"mint": mint, "owner": owner, "uiTokenAmount": {"amount": str(amount)}}]
+
+    def tx(signer, pre, post, other=None):
+        meta = {"preTokenBalances": bal(signer, pre), "postTokenBalances": bal(signer, post)}
+        if other:  # someone else's balance falling is not the signer selling
+            meta["postTokenBalances"] += bal(other, 0)
+        return {"transaction": {"message": {"accountKeys": [signer]}}, "meta": meta}
+
+    txs = [tx("a", 0, 10), tx("b", 10, 4), tx("c", 5, 5, other="z")] + [tx("d", 9, 1)] * 30
+
+    async def history(m, **_):
+        for t in txs:
+            yield t
+
+    assert await sr.count_sells(history, mint, at=0, cap=22) == 22
+    assert await sr.count_sells(history, mint, at=0, cap=100) == 31
