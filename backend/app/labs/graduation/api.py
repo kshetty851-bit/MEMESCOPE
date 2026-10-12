@@ -1888,6 +1888,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     control made +$1,060 of which two coins were +429% and +527%: a reader
     seeing only the balance would be reading a lottery as a business.
     """
+    from app.labs.graduation import pool_lab as pl
     spec = next((s for s in config.FRESH_BOOKS if s.book == "KARTHIK_QUIET_5M"), None)
     if spec is None:                                  # pragma: no cover
         raise HTTPException(status_code=404, detail="no such book")
@@ -1935,7 +1936,9 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     every = [r for r in sorted([*small, *signals], key=_opened_order)
              if lo <= float(r.liq_open_usd or 0)
              and (hi is None or float(r.liq_open_usd or 0) < hi)
-             and not skip_lo <= float(r.liq_open_usd or 0) < skip_hi]
+             and not skip_lo <= float(r.liq_open_usd or 0) < skip_hi
+             and not (config.KARTHIK_SKIP_AI_POOL_USD[0] <= float(r.liq_open_usd or 0)
+                      < config.KARTHIK_SKIP_AI_POOL_USD[1] and pl.ai_name(r.symbol))]
     # Repeat creators are bought again since 2026-10-06, here and on the real
     # wallets (Karthik: "remove repeat creator block from 50k pool ... assume we
     # had rule since day 1"): the block refused 57 coins, 54 winners, 1 rug.
@@ -1978,6 +1981,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
                  f"out at {arm.hold}m"),
         "pools_usd": list(config.KARTHIK_BOOK_POOLS),
         "skip_pools_usd": list(config.KARTHIK_SKIP_POOL_USD),
+        "skip_ai_pools_usd": list(config.KARTHIK_SKIP_AI_POOL_USD),
         # What the page's rule book reads, so its words cannot drift from the rule.
         "max_entry_age_s": config.MAX_ENTRY_AGE_S,
         "max_entry_age_since": config.MAX_ENTRY_AGE_AT,

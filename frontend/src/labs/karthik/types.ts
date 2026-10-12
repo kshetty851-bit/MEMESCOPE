@@ -55,6 +55,7 @@ export interface KarthikBook {
    *  Replayed from day 1, so what came before is a look back. */
   pools_usd?: [number, number | null];
   skip_pools_usd?: [number, number];
+  skip_ai_pools_usd?: [number, number];
   pools_since?: string;
   /** Never buys a coin more than this long after it graduated (seconds). */
   max_entry_age_s?: number;

@@ -54,3 +54,10 @@ def test_famous_names_are_skipped_and_ordinary_names_are_not():
         assert pl.famous_name(sym), sym
     for sym in ("QE", "CRAWLMASK", "DINK", "HOTJ", "Samurai", "metal", "", None):
         assert not pl.famous_name(sym), sym
+
+
+def test_ai_names_are_spotted():
+    for sym in ("DeepSeek", "OpenAI", "豆包AI", "GrokCoin", "ChatGPT"):
+        assert pl.ai_name(sym), sym
+    for sym in ("SOULJA", "Tesla", "", None):
+        assert not pl.ai_name(sym), sym

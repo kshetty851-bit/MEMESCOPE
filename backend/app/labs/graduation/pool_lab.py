@@ -78,6 +78,18 @@ FAMOUS_EXACT = frozenset({
 })
 
 
+#: AI names (Karthik, 2026-10-12: "apply skip AI names in 50-60k pools since day
+#: 1"): fakes of trending AI products, a rug wave from 9 Oct in small $50k pools
+#: (DeepSeek, OpenAI, Doubao AI). Lower-case substrings of the symbol.
+AI_WORDS = ("ai", "gpt", "openai", "deepseek", "claude", "grok", "gemini", "anthropic",
+            "llama", "豆包", "doubao", "qwen", "kimi", "mistral", "agi")
+
+
+def ai_name(symbol: str | None) -> bool:
+    s = (symbol or "").lower()
+    return any(w in s for w in AI_WORDS)
+
+
 def famous_name(symbol: str | None) -> bool:
     s = re.sub(r"[^a-z0-9]", "", (symbol or "").lower())
     return bool(s) and (s in FAMOUS_EXACT or any(w in s for w in FAMOUS_WORDS))
