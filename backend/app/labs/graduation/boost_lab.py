@@ -128,7 +128,10 @@ async def build(db: AsyncSession) -> dict[str, Any]:
                                          "b": [b for _, b in found.values()]})
             await db.commit()
         paid |= found
-    picked = [r for r in rows if r.mint in paid]
+    # No famous names (Karthik, 2026-10-12: "add famous name skip to boost lab"):
+    # the $10k book's rule; its two here lost -$17. Applied from the first trade.
+    famous = sum(1 for r in rows if r.mint in paid and pl.famous_name(r.symbol))
+    picked = [r for r in rows if r.mint in paid and not pl.famous_name(r.symbol)]
     sold: dict[int, list[GradPaperPosition]] = {m: [] for m in MINUTES}
     for row in picked:
         marks = await _marks(db, row)
@@ -148,7 +151,7 @@ async def build(db: AsyncSession) -> dict[str, Any]:
         "computed_at": datetime.now(UTC), "hold_minutes": HOLD_MINUTES,
         "ticket_usd": TICKET, "capital_usd": CAPITAL,
         "balance_usd": Decimal(str(walk.cash)).quantize(cents),
-        "coins_seen": len(rows), "coins_picked": len(picked),
+        "coins_seen": len(rows), "coins_picked": len(picked), "famous_skipped": famous,
         "boosted_coins": sum(1 for _, b in paid.values() if (b or 0) > 0),
         # Days from the first trade: no coin had a profile on record before
         # 8 Oct, so days from 1 Oct would open on a week of empty boxes.
