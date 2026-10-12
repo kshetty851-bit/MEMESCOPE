@@ -646,6 +646,9 @@ async def _page_skips(session: Any, bought: Any, coins: dict[str, Any],
             why = "bought by the paper book, but the page skips famous names"
         elif b.mint in repeat:
             why = "bought by the paper book, but the page skips repeat creators"
+        elif pl.too_few_sells(b):
+            why = (f"bought by the paper book, but the page skips it: only "
+                   f"{b.chain_sells_before} sells before the buy (a bundled launch)")
         else:
             continue
         coins[b.mint].page_skip = why
@@ -675,7 +678,8 @@ async def _checkpoint_live_10k(session: Any) -> dict[str, object]:
                 .where(GradOperator.mint.in_(mints)))).all():
             coins[m].blocked = why
         bought = (await session.execute(
-            select(GradPaperPosition.id, GradPaperPosition.mint, GradPaperPosition.opened_at)
+            select(GradPaperPosition.id, GradPaperPosition.mint, GradPaperPosition.opened_at,
+                   GradPaperPosition.liq_open_usd, GradPaperPosition.chain_sells_before)
             .where(GradPaperPosition.mint.in_(mints),
                    GradPaperPosition.book == live.POOL_10K_BOOK))).all()
         for b in bought:
