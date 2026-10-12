@@ -101,7 +101,21 @@ async def stop_below_floor(session: AsyncSession, now: datetime, worth: Decimal)
 #: falls below 110$"). Worth under it before a buy switches that wallet's OWN
 #: switch off, as its Stop button would; the others trade on. Starting it again
 #: while still under it stops it again at its next buy.
-MEMBER_FLOOR_USD: dict[str, Decimal] = {"USER1": Decimal(110)}
+#: A schedule, newest first: USER1 keeps $110 until it is funded with $300 for
+#: November, then stops at $225 (a 25% loss; the book's worst October dip at
+#: $50 a trade was $60). Karthik, 2026-10-12: "do changes now".
+MEMBER_FLOOR_USD: dict[str, list[tuple[datetime, Decimal]]] = {
+    "USER1": [(datetime(2026, 10, 31, 20, 0, tzinfo=UTC), Decimal(225)),   # 1 Nov 00:00 Dubai
+              (datetime(2026, 10, 12, tzinfo=UTC), Decimal(110))],
+}
+
+
+def member_floor(member: str, now: datetime) -> Decimal | None:
+    """The floor in force for `member` at `now`, or None."""
+    for since, floor in MEMBER_FLOOR_USD.get(member, []):
+        if now >= since:
+            return floor
+    return None
 
 
 async def stop_member_below_floor(session: AsyncSession, member: str, worth: Decimal,
@@ -109,7 +123,7 @@ async def stop_member_below_floor(session: AsyncSession, member: str, worth: Dec
     """Switch `member`'s own wallet off if worth under its floor. True when it did."""
     from app.models.real_wallet_family import RealWalletFamilyMember
 
-    floor = MEMBER_FLOOR_USD.get(member)
+    floor = member_floor(member, now)
     if floor is None or worth >= floor:
         return False
     row = await session.get(RealWalletFamilyMember, member)

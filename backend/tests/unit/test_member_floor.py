@@ -12,7 +12,8 @@ import pytest
 from app.real_wallet import rug_brake
 
 pytestmark = pytest.mark.unit
-NOW = datetime(2026, 10, 12, tzinfo=UTC)
+NOW = datetime(2026, 10, 12, 12, tzinfo=UTC)
+NOV = datetime(2026, 11, 2, tzinfo=UTC)
 
 
 class _Session:
@@ -41,10 +42,28 @@ async def test_at_or_over_the_floor_or_without_one_nothing_changes():
 
 
 def test_the_main_wallet_skips_only_measured_150_to_200k_pools():
-    from app.real_wallet.driver import OWNER_SKIP_POOL_USD as band, in_skipped_pool
+    from app.real_wallet.driver import OWNER_SKIP_POOL_USD, in_skipped_pool
+
+    band = OWNER_SKIP_POOL_USD
 
     assert in_skipped_pool(Decimal(150_000), band)
     assert in_skipped_pool(Decimal("199999.99"), band)
     assert not in_skipped_pool(Decimal(200_000), band)
     assert not in_skipped_pool(Decimal("149999"), band)
     assert not in_skipped_pool(None, band)  # unread pool: bought as before
+
+
+async def test_user1_floor_is_110_until_november_then_225():
+    assert rug_brake.member_floor("USER1", NOW) == Decimal(110)
+    assert rug_brake.member_floor("USER1", NOV) == Decimal(225)
+    assert rug_brake.member_floor("USER2", NOV) is None
+    s = _Session(SimpleNamespace(own_enabled=True, own_updated_at=None, own_updated_by=None))
+    assert not await rug_brake.stop_member_below_floor(s, "USER1", Decimal("200"), NOW)
+    assert await rug_brake.stop_member_below_floor(s, "USER1", Decimal("200"), NOV)
+
+
+def test_user1_skips_150_to_200k_pools_too():
+    from app.real_wallet.driver import MEMBER_SKIP_POOL_USD, in_skipped_pool
+
+    assert in_skipped_pool(Decimal(160_000), MEMBER_SKIP_POOL_USD["USER1"])
+    assert "USER2" not in MEMBER_SKIP_POOL_USD
