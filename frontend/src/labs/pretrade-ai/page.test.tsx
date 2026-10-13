@@ -1,11 +1,12 @@
 import { fireEvent, render, screen, cleanup } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { PretradeAIPage } from "./page";
+vi.mock("./live", () => ({ LivePaperLab: () => <div>Paper lab</div> }));
 afterEach(cleanup);
 describe("Pre-trade AI lab", () => {
-  it("starts disconnected and explicitly separates synthetic results", () => {
+  it("keeps imported synthetic results separate from the paper book", () => {
     render(<PretradeAIPage />);
-    expect(screen.getByText("Live candidate feed is not connected")).toBeInTheDocument();
+    expect(screen.getByText("Offline file viewer")).toBeInTheDocument();
     expect(screen.getByText("Your research starts with evidence")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Explore sample" }));
     expect(screen.getByRole("status")).toHaveTextContent("SYNTHETIC SAMPLE");

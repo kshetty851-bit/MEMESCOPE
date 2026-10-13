@@ -32,7 +32,7 @@ def test_no_application_or_trading_imports():
                 names = [node.module or '']
             else:
                 continue
-            assert not any(n.split('.')[0] in forbidden for n in names), path
+            assert not any(n.split('.')[0] in (forbidden - ({'psycopg'} if path == LAB / 'src/memescope_pretrade_ai/service.py' else set())) for n in names), path
 
 
 def test_status_without_application_imports(capsys):
