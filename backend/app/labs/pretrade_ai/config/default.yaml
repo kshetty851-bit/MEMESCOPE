@@ -1,0 +1,67 @@
+schema_version: "1.0"
+scoring:
+  # Research defaults, not production-approved optima.
+  model_weight: 0.75
+  liquidity_prior_weight: 0.25
+  risk_penalty_weight: 0.45
+  preferred_liquidity_low_usd: 50000
+  preferred_liquidity_high_usd: 75000
+  excluded_research_band_low_usd: 150000
+  excluded_research_band_high_usd: 200000
+  required_features:
+    - liquidity_usd
+    - pool_lifetime_swaps
+    - quote_age_seconds
+    - buy_price_impact_pct
+    - immediate_round_trip_loss_pct
+    - sell_route_available
+    - mint_authority_safe
+    - freeze_authority_safe
+  thresholds:
+    accept_score: 72
+    review_score: 55
+    hard_reject_risk: 80
+    minimum_feature_completeness: 0.65
+  hard_gates:
+    minimum_liquidity_usd: 50000
+    maximum_pool_lifetime_swaps: 99
+    maximum_quote_age_seconds: 5
+    maximum_buy_price_impact_pct: 1
+    maximum_round_trip_loss_pct: 2
+    require_safe_mint_authority: true
+    require_safe_freeze_authority: true
+    confirmed_rug_link_min_identity_confidence: 0.70
+  risk_weights:
+    creator_confirmed_rug: 42
+    funder_confirmed_rug: 32
+    recent_link: 18
+    creator_sale: 18
+    reserve_decline: 12
+    missing_identity: 8
+    creator_sale_reference_pct: 0.25
+    reserve_decline_reference_pct: 10
+training:
+  target: positive_matched_size_net_pnl
+  minimum_rows: 30
+  random_state: 42
+  class_weight: balanced
+  max_iter: 1000
+  split:
+    train_fraction: 0.60
+    validation_fraction: 0.20
+    test_fraction: 0.20
+    embargo_minutes: 15
+    purge_group_fields: [mint, creator_cluster_id, funder_cluster_id]
+backtest:
+  starting_cash_usd: 300
+  expected_all_in_entry_cost_usd: 10
+  entry_cost_tolerance_usd: 0.01
+  maximum_open_positions: 6
+  maximum_gross_cost_exposure_usd: 60
+  maximum_equity_exposure_fraction: 0.20
+  accept_decisions: [ACCEPT]
+integration:
+  output_mode: local_jsonl_only
+  execution_authorized: false
+  production_writes_authorized: false
+  require_acknowledgement_flag: true

@@ -60,6 +60,13 @@ export const NAV_GROUPS: NavGroup[] = [
       // NSE tracker below — no book, nothing ranked — so it is named for what
       // it records rather than for a strategy it does not have.
       {
+        href: "/pretrade-ai",
+        label: "Pre-trade AI Lab",
+        icon: IconSpark,
+        status: "ready",
+        note: "Advisory score review. Isolated from strategies and wallets.",
+      },
+      {
         href: "/graduation-lab",
         label: "Graduation Lab",
         icon: IconSpark,
