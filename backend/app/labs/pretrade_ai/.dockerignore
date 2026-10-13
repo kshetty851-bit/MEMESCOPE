@@ -1,0 +1,7 @@
+*
+!Dockerfile.paper
+!pyproject.toml
+!README.md
+!src/
+!src/**
+**/__pycache__

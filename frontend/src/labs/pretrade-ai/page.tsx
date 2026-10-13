@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
+import { LivePaperLab } from "./live";
 import demo from "./demo-scores.json";
 import { decisions, labels, MAX_BYTES, parseScores } from "./data";
 import type { Decision, Score } from "./data";
@@ -82,28 +83,30 @@ export function PretradeAIPage() {
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="mb-2 text-xs font-medium uppercase tracking-widest text-amber-400">
-            Research · Entry selection
+            Research · Automatic paper lab
           </p>
           <h1 className="text-2xl font-semibold tracking-tight text-ink">
             Pre-trade AI Lab
           </h1>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-dim">
-            Review candidate quality, missing evidence, and creator risk before an entry.
-            Every decision here is advisory.
+            Automatic coin discovery, recorded assessments and a dedicated $100 paper book.
           </p>
         </div>
         <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-400">
-          Isolated lab · No execution
+          Paper only · Existing wallets unchanged
         </span>
       </header>
 
+      <LivePaperLab />
+
+      <h2 className="text-lg font-semibold text-ink">Offline score review</h2>
       <section
         className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-5"
         aria-label="Connection status"
       >
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h2 className="font-medium text-ink">Live candidate feed is not connected</h2>
+            <h2 className="font-medium text-ink">Offline file viewer</h2>
             <p className="mt-1 max-w-3xl text-sm leading-6 text-ink-dim">
               The review interface is ready. Open a score export from the offline lab, or
               explore a synthetic example. Existing strategies and wallets operate
