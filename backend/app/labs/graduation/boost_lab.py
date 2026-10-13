@@ -48,6 +48,11 @@ TICKET = 50.0
 #: and 12-13 Oct; the sells skip did nothing before 12 Oct. Judge on new days.
 SKIP_HOURS_DUBAI = (6, 12)      # buys from 06:00 to 11:59 Dubai
 MAX_SELLS_BEFORE = 20           # sells in the pool's last 5 minutes before the buy
+#: No cover picture (Karthik, 2026-10-13: "apply no cover skip to boost lab
+#: since day 1"): coins whose DexScreener profile had no cover picture lost on
+#: 7 of 8 trades (-$96), all on 12-13 Oct. Read at the buy from the lab's own
+#: polls; picks from before 13 Oct were backfilled from DexScreener's profile
+#: as it stood on 13 Oct. Unknown is bought.
 CAPITAL = 250.0
 
 _CARRIED = ("mint", "symbol", "opened_at", "open_quote", "open_fill", "notional_usd",
@@ -85,6 +90,39 @@ _KEEP_SQL = text("""
                          cast(:p as boolean[]), cast(:b as integer[]))
     on conflict (mint) do nothing
 """)
+
+
+#: Cover picture seen in the hour before each buy, by the lab's own polls.
+_COVER_SQL = text("""
+    select x.mint, bool_or(g.has_header)
+    from unnest(cast(:m as varchar[]), cast(:t as timestamptz[])) as x(mint, at)
+    join grad_postgrad_samples g on g.mint = x.mint and g.ts <= x.at
+         and g.ts >= x.at - interval '1 hour' and g.has_header is not null
+    group by x.mint
+""")
+_COVER_KEPT_SQL = text("select mint, has_cover from grad_boost_picks where mint = any(:m)")
+_COVER_SAVE_SQL = text("""
+    update grad_boost_picks p set has_cover = v.c
+    from unnest(cast(:m as varchar[]), cast(:c as boolean[])) as v(mint, c)
+    where p.mint = v.mint and p.has_cover is null
+""")
+
+
+async def _covers(db: AsyncSession, rows: list[Any]) -> dict[str, bool | None]:
+    """Each pick's cover picture: kept answer, else read from the polls before
+    the buy (and kept). None where nothing says."""
+    if not rows:
+        return {}
+    cover = dict((await db.execute(_COVER_KEPT_SQL, {"m": [r.mint for r in rows]})).all())
+    need = [r for r in rows if cover.get(r.mint) is None]
+    if need:
+        found = dict((await db.execute(_COVER_SQL, {
+            "m": [r.mint for r in need], "t": [r.opened_at for r in need]})).all())
+        if found:
+            await db.execute(_COVER_SAVE_SQL, {"m": list(found), "c": list(found.values())})
+            await db.commit()
+        cover |= found
+    return cover
 
 
 async def _marks(db: AsyncSession, row: Any) -> list[Mark]:
@@ -138,6 +176,9 @@ async def build(db: AsyncSession) -> dict[str, Any]:
     # the $10k book's rule; its two here lost -$17. Applied from the first trade.
     famous = sum(1 for r in rows if r.mint in paid and pl.famous_name(r.symbol))
     picked = [r for r in rows if r.mint in paid and not pl.famous_name(r.symbol)]
+    covers = await _covers(db, picked)
+    no_cover = [r for r in picked if covers.get(r.mint) is False]
+    picked = [r for r in picked if covers.get(r.mint) is not False]
     lo, hi = SKIP_HOURS_DUBAI
     morning = [r for r in picked if lo <= (r.opened_at.hour + 4) % 24 < hi]
     picked = [r for r in picked if r not in morning]
@@ -170,6 +211,7 @@ async def build(db: AsyncSession) -> dict[str, Any]:
         "coins_seen": len(rows), "coins_picked": len(picked), "famous_skipped": famous,
         "skip_hours_dubai": list(SKIP_HOURS_DUBAI), "morning_skipped": len(morning),
         "max_sells_before": MAX_SELLS_BEFORE, "sellers_skipped": len(sellers),
+        "cover_rule": True, "cover_skipped": len(no_cover),
         "boosted_coins": sum(1 for _, b in paid.values() if (b or 0) > 0),
         # Days from the first trade: no coin had a profile on record before
         # 8 Oct, so days from 1 Oct would open on a week of empty boxes.

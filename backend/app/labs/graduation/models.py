@@ -328,6 +328,8 @@ class GradPostgradSample(Base):
     #: profile (`info`) and active boosts. NULL where DexScreener showed none.
     has_profile: Mapped[bool | None] = mapped_column(Boolean)
     boosts_active: Mapped[int | None] = mapped_column(Integer)
+    #: Profile has a cover picture (`info.header`); NULL with no profile.
+    has_header: Mapped[bool | None] = mapped_column(Boolean)
 
 
 class GradEarlyOpen(Base):
