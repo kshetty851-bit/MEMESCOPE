@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { API_V1 } from "@/lib/env";
 type Analysis = {
   id: number;
   at: string;
@@ -52,7 +53,7 @@ export function LivePaperLab() {
     let timer: ReturnType<typeof setTimeout>;
     async function refresh() {
       try {
-        const response = await fetch("/api/v1/labs/pretrade-ai/status", {
+        const response = await fetch(`${API_V1}/labs/pretrade-ai/status`, {
           credentials: "include",
           cache: "no-store",
           signal: controller.signal,
@@ -60,7 +61,7 @@ export function LivePaperLab() {
         if (!response.ok)
           throw new Error(
             response.status === 401
-              ? "Sign in to view the paper lab."
+              ? "Your MEMESCOPE access session has expired or was not received. Refresh this page, then unlock MEMESCOPE if prompted."
               : "Paper service unavailable. Trading status cannot be verified.",
           );
         const data: Status = await response.json();

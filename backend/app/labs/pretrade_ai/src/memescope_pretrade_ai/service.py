@@ -82,6 +82,16 @@ def worker():
         time.sleep(30)
 
 
+def cors_headers(origin: str | None) -> dict[str, str]:
+    # The lab must accept the website's credentialed GET when API_V1 uses the
+    # API subdomain. Never wildcard or reflect an arbitrary requesting site.
+    headers = {'Vary': 'Origin'}
+    if origin in {'https://www.memescope.site', 'https://memescope.site'}:
+        headers['Access-Control-Allow-Origin'] = origin
+        headers['Access-Control-Allow-Credentials'] = 'true'
+    return headers
+
+
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path != '/api/v1/labs/pretrade-ai/status':
@@ -108,6 +118,8 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
         self.send_header('Cache-Control', 'no-store')
+        for name, value in cors_headers(self.headers.get('Origin')).items():
+            self.send_header(name, value)
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
