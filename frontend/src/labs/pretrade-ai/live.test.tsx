@@ -1,6 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { LivePaperLab } from "./live";
+vi.mock("@/lib/env", () => ({ API_V1: "https://api.memescope.test/api/v1" }));
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -53,4 +54,16 @@ it("shows real scanner state and missing evidence separately from synthetic exam
   expect(screen.getByText(/Trained AI model pending/)).toBeInTheDocument();
   expect(screen.getByText(/INSUFFICIENT DATA/)).toBeInTheDocument();
   expect(screen.getByText("No simulated transactions.")).toBeInTheDocument();
+});
+
+it("uses the same API origin as the website and includes its session cookie", async () => {
+  const request = vi.fn().mockResolvedValue({ ok: false, status: 401 });
+  vi.stubGlobal("fetch", request);
+  render(<LivePaperLab />);
+  expect(await screen.findByRole("alert")).toHaveTextContent("MEMESCOPE access session");
+  expect(request).toHaveBeenCalledWith(
+    "https://api.memescope.test/api/v1/labs/pretrade-ai/status",
+    expect.objectContaining({ credentials: "include" }),
+  );
+  expect(screen.queryByText("Sign in to view the paper lab.")).not.toBeInTheDocument();
 });

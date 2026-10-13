@@ -91,6 +91,7 @@ def test_status_endpoint_checks_alpha_before_reading_book(monkeypatch, tmp_path)
     monkeypatch.setattr(service, 'STATE', str(tmp_path/'book.db'))
     def denied(request, **kwargs):
         assert request.get_header('Host') == 'api.memescope.site'
+        assert request.get_header('Cookie') == 'invalid'
         return io.BytesIO(b'{"authenticated":false}')
     monkeypatch.setattr(service, 'urlopen', denied)
     handler.do_GET()
@@ -104,3 +105,12 @@ def test_status_endpoint_checks_alpha_before_reading_book(monkeypatch, tmp_path)
     monkeypatch.setattr(service, 'urlopen', unavailable)
     handler.do_GET()
     assert replies[-1][0] == 503
+
+def test_credentialed_cors_only_allows_the_existing_website():
+    from memescope_pretrade_ai.service import cors_headers
+    for origin in ('https://www.memescope.site', 'https://memescope.site'):
+        assert cors_headers(origin)['Access-Control-Allow-Origin'] == origin
+        assert cors_headers(origin)['Access-Control-Allow-Credentials'] == 'true'
+    for origin in (None, 'null', 'https://www.memescope.site.evil.test', 'https://evil.test'):
+        assert 'Access-Control-Allow-Origin' not in cors_headers(origin)
+        assert 'Access-Control-Allow-Credentials' not in cors_headers(origin)
