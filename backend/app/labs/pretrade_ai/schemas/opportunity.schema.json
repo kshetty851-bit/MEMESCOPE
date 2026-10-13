@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MEMESCOPE pre-trade opportunity",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "opportunity_id",
+    "mint",
+    "pool",
+    "decision_ts",
+    "strategy_version",
+    "universe",
+    "baseline_eligible",
+    "features"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "opportunity_id": {
+      "type": "string"
+    },
+    "mint": {
+      "type": "string"
+    },
+    "pool": {
+      "type": "string"
+    },
+    "decision_ts": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "strategy_version": {
+      "type": "string"
+    },
+    "universe": {
+      "type": "string"
+    },
+    "baseline_eligible": {
+      "type": "boolean"
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/observed"
+      }
+    },
+    "identity": {
+      "type": "object"
+    },
+    "outcome": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "metadata": {
+      "type": "object"
+    }
+  },
+  "$defs": {
+    "observed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "observed_at",
+        "source"
+      ],
+      "properties": {
+        "value": {},
+        "observed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "source": {
+          "type": "string"
+        },
+        "quality": {
+          "enum": [
+            "observed",
+            "derived",
+            "backfilled",
+            "unknown"
+          ]
+        }
+      }
+    }
+  }
+}

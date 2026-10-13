@@ -1,0 +1,8 @@
+from datetime import datetime, timedelta, timezone
+from memescope_pretrade_ai.models import Opportunity
+
+def make_op(i=0, decision=None, pnl=1.0, creator="c0", mint=None, liquidity=56000, rug=0):
+    decision=decision or datetime(2026,1,1,tzinfo=timezone.utc)+timedelta(hours=i)
+    observed=decision-timedelta(seconds=1); exit_ts=decision+timedelta(minutes=5); label=exit_ts+timedelta(minutes=1)
+    values={"liquidity_usd":liquidity,"pool_lifetime_swaps":40,"graduation_age_seconds":70,"signal_age_seconds":10,"quote_age_seconds":2,"buy_price_impact_pct":.2,"immediate_round_trip_loss_pct":1,"unique_buyers_30s":12,"buy_sell_notional_ratio_30s":1.8,"top_buyer_cluster_share_pct":20,"top1_holder_share_pct":8,"top10_holder_share_pct":25,"reserve_decline_30s_pct":2,"creator_cluster_sale_supply_pct_30s":.01,"creator_prior_confirmed_rug_count_30d":rug,"funder_prior_confirmed_rug_count_30d":0,"malicious_link_recency_days":5 if rug else 90,"identity_confidence":.9,"sell_route_available":True,"mint_authority_safe":True,"freeze_authority_safe":True}
+    return Opportunity.model_validate({"schema_version":"1.0","opportunity_id":f"o{i}","mint":mint or f"m{i}","pool":f"p{i}","decision_ts":decision,"strategy_version":"test","universe":"test","baseline_eligible":True,"features":{k:{"value":v,"observed_at":observed,"source":"test"} for k,v in values.items()},"identity":{"creator_cluster_id":creator,"funder_cluster_id":f"f{i}","linkage_observed_at":observed,"linkage_source":"test"},"outcome":{"label_available_ts":label,"exit_ts":exit_ts,"matched_size_entry_cost_usd":10,"matched_size_exit_proceeds_usd":10+pnl,"all_costs_included":True,"unresolved":False,"source":"test"}})
