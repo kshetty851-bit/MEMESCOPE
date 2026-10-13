@@ -40,6 +40,26 @@ from app.real_wallet.jupiter_v2 import JupiterV2OrderUnavailableError
 
 logger = get_logger(__name__)
 
+#: Orders asked for when Jupiter's route would be refused by the signer
+#: (Karthik, 2026-10-13: "yes build the instant retry"). On 13 Oct a GTA 6 Coin
+#: sell came back routed through a program off the signer's allowlist
+#: (proVF4p...), was refused, and the next loop's sell 17 s later landed after
+#: the pool was drained: -82% where the lab sold at +13%. Asking again at once
+#: with that router excluded gets a route the signer accepts.
+ROUTE_TRIES = 3
+
+
+def _refused_programs(transaction: str) -> tuple[str, ...]:
+    """Programs in these bytes the signer would refuse, by the signer's own
+    rule. Undecodable bytes return nothing: the signer refuses those itself."""
+    configured = settings.REAL_WALLET_ALLOWED_PROGRAM_IDS
+    allowed = frozenset(configured) if configured else tx_inspect.DEFAULT_ALLOWED_PROGRAMS
+    try:
+        facts = tx_inspect.inspect(transaction)
+    except tx_inspect.TransactionRejectedError:
+        return ()
+    return tuple(p for p in facts.program_ids if p not in allowed)
+
 
 @dataclass(frozen=True, slots=True)
 class PreparedOrder:
@@ -64,16 +84,29 @@ class ProductionOrderFactory:
         if not intent.input_mint or not intent.output_mint:
             raise JupiterV2OrderUnavailableError("intent_missing_mints")
         amount_raw = _authorised_amount_raw(intent)
-        body = await self._fetch(
-            input_mint=intent.input_mint,
-            output_mint=intent.output_mint,
-            amount_raw=amount_raw,
-            taker=intent.wallet_public_key,
-        )
-
-        transaction = body.get("transaction") or body.get("tx")
-        if not isinstance(transaction, str) or not transaction:
-            raise JupiterV2OrderUnavailableError("jupiter_order_returned_no_transaction")
+        excluded: list[str] = []
+        for _ in range(ROUTE_TRIES):
+            body = await self._fetch(
+                input_mint=intent.input_mint,
+                output_mint=intent.output_mint,
+                amount_raw=amount_raw,
+                taker=intent.wallet_public_key,
+                exclude_routers=excluded,
+            )
+            transaction = body.get("transaction") or body.get("tx")
+            if not isinstance(transaction, str) or not transaction:
+                raise JupiterV2OrderUnavailableError("jupiter_order_returned_no_transaction")
+            refused = _refused_programs(transaction)
+            router = body.get("router")
+            if (not refused or not isinstance(router, str) or not router
+                    or router in excluded or len(excluded) == ROUTE_TRIES - 1):
+                break
+            # Nothing is widened: the route is swapped, and the signer still
+            # checks the new one itself. A third refusal goes on to the signer
+            # and is refused there, as before.
+            logger.warning("real_wallet_route_refused_retrying", intent_id=str(intent.id),
+                           router=router, programs=list(refused))
+            excluded.append(router)
         request_id = body.get("requestId")
         if not isinstance(request_id, str) or not request_id:
             raise JupiterV2OrderUnavailableError("jupiter_order_returned_no_request_id")
@@ -139,7 +172,8 @@ class ProductionOrderFactory:
         )
 
     async def _fetch(
-        self, *, input_mint: str, output_mint: str, amount_raw: int, taker: str
+        self, *, input_mint: str, output_mint: str, amount_raw: int, taker: str,
+        exclude_routers: list[str] | None = None,
     ) -> dict[str, Any]:
         # The SAME policy the evidence check verifies against, sent with the
         # request. Omitting it let Jupiter apply its own auto-slippage — 500 bps
@@ -157,6 +191,8 @@ class ProductionOrderFactory:
             "taker": taker,
             "slippageBps": str(int(settings.REAL_WALLET_EXIT_MAX_SLIPPAGE_BPS)),
         }
+        if exclude_routers:
+            params["excludeRouters"] = ",".join(exclude_routers)
         headers: dict[str, str] = {}
         api_key = settings.JUPITER_API_KEY.get_secret_value()
         if api_key:
