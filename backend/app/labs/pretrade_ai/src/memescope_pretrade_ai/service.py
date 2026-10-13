@@ -88,7 +88,7 @@ class Handler(BaseHTTPRequestHandler):
             self.reply(404, {'error': 'Not found'})
             return
         try:
-            request = Request(AUTH_URL, headers={'Cookie': self.headers.get('Cookie', '')})
+            request = Request(AUTH_URL, headers={'Cookie': self.headers.get('Cookie', ''), 'Host': os.environ.get('PRETRADE_AUTH_HOST', 'api.memescope.site')})
             with urlopen(request, timeout=5) as response:
                 session = json.load(response)
             if session.get('authenticated') is not True:

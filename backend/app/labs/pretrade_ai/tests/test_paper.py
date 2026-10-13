@@ -89,7 +89,10 @@ def test_status_endpoint_checks_alpha_before_reading_book(monkeypatch, tmp_path)
     replies = []
     handler.reply = lambda status, body: replies.append((status, body))
     monkeypatch.setattr(service, 'STATE', str(tmp_path/'book.db'))
-    monkeypatch.setattr(service, 'urlopen', lambda *args, **kwargs: io.BytesIO(b'{"authenticated":false}'))
+    def denied(request, **kwargs):
+        assert request.get_header('Host') == 'api.memescope.site'
+        return io.BytesIO(b'{"authenticated":false}')
+    monkeypatch.setattr(service, 'urlopen', denied)
     handler.do_GET()
     assert replies[-1][0] == 401
     assert not (tmp_path/'book.db').exists()
