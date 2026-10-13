@@ -44,6 +44,8 @@ export interface BoostLab {
   morning_skipped?: number;
   max_sells_before?: number;
   sellers_skipped?: number;
+  cover_rule?: boolean;
+  cover_skipped?: number;
   boosted_coins?: number;
   days?: KarthikDay[];
   closed?: BoostTrade[];
@@ -75,11 +77,12 @@ export function BoostRuleBook({ d }: { d: BoostLab }) {
     ["No famous names", `It skips coins named after famous people, brands or companies, like the $10k book.${d.famous_skipped ? ` ${d.famous_skipped} skipped so far.` : ""}`],
     ...(d.skip_hours_dubai ? [["No morning buys", `It skips coins bought from ${String(d.skip_hours_dubai[0]).padStart(2, "0")}:00 to ${String(d.skip_hours_dubai[1]).padStart(2, "0")}:00 Dubai.${d.morning_skipped ? ` ${d.morning_skipped} skipped so far.` : ""}`] as [string, string]] : []),
     ...(d.max_sells_before ? [["Not into a selloff", `It skips coins with more than ${d.max_sells_before} sells in the 5 minutes before the buy.${d.sellers_skipped ? ` ${d.sellers_skipped} skipped so far.` : ""}`] as [string, string]] : []),
+    ...(d.cover_rule ? [["Cover picture", `It skips coins whose DexScreener page has no cover picture (the wide banner).${d.cover_skipped ? ` ${d.cover_skipped} skipped so far.` : ""}`] as [string, string]] : []),
     ["Always sells", `${d.hold_minutes ?? 4} minutes after buying. No stop-loss, no price targets.`],
     ["Why 4 minutes", "On the first 28 such coins (8–10 Oct), 4 minutes made the most; past 5 minutes they fell apart, with a quarter rugged by 8–10 minutes. The table below re-prices the same coins at other sell times."],
     ["Money", `${usd(d.ticket_usd)} per trade from ${usd(d.capital_usd)}, several at once while the cash allows.`],
     ["How it knows", `It checks DexScreener for a paid profile or boosts before each buy. From ${d.samples_since ? dubai(d.samples_since) : "10 Oct"} Dubai it reads every coin as it graduates; before that it only saw about one coin in five, and boost counts only from ${d.boosts_since ? dubai(d.boosts_since) : "10 Oct"}.`],
-    ["The catch", `It was chosen after looking at those 28 coins, and three of them carried the profit.${d.skip_hours_dubai || d.max_sells_before ? " The morning and selloff skips were added on 13 Oct after looking at 103 trades and applied from the first trade, so the days before 14 Oct flatter them." : ""} This book is the test, not the proof.`],
+    ["The catch", `It was chosen after looking at those 28 coins, and three of them carried the profit.${d.skip_hours_dubai || d.max_sells_before ? " The morning, selloff and cover-picture skips were added on 13 Oct after looking at the trades and applied from the first trade, so the days before 14 Oct flatter them." : ""} This book is the test, not the proof.`],
     ["Paper money", "The books' own buys, re-priced with the same fees and price impact. No real wallet follows it."],
   ];
   return (

@@ -35,6 +35,11 @@ describe("Boost Lab", () => {
     expect(t).toHaveTextContent("flatter them");
   });
 
+  it("states the cover-picture skip", () => {
+    render(<BoostRuleBook d={{ ...d, cover_rule: true, cover_skipped: 8 }} />);
+    expect(screen.getByTestId("boost-rule-book")).toHaveTextContent("no cover picture (the wide banner). 8 skipped so far.");
+  });
+
   it("marks the book's own sell time in the minute table", () => {
     render(<MinuteTable capital={250} lines={[
       { minutes: 3, current: false, trades: 28, pnl_usd: "239.39", rugs: 1, lowest_usd: "248.15" },

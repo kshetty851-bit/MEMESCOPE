@@ -157,6 +157,10 @@ def parse_pair(pair: dict[str, Any], *, ts: datetime) -> dict[str, Any] | None:
         "has_profile": True if pair.get("info") else None,
         "boosts_active": (_int(b.get("active")) or None
                           if isinstance(b := pair.get("boosts"), dict) else None),
+        # The profile's cover picture (Boost Lab, 2026-10-13). False, not NULL,
+        # when a profile has none: that is the answer the skip needs.
+        "has_header": (bool(i.get("header")) if isinstance(i := pair.get("info"), dict) and i
+                       else None),
     }
 
 

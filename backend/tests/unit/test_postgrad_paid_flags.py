@@ -24,3 +24,9 @@ def test_absent_or_junk_is_null_not_false():
     row = parse_pair(pair(info={}, boosts={"active": 0}), ts=TS)
     assert row["has_profile"] is None and row["boosts_active"] is None
     assert parse_pair(pair(boosts="junk"), ts=TS)["boosts_active"] is None
+
+
+def test_cover_picture_is_read():
+    assert parse_pair(pair(info={"imageUrl": "x", "header": "h"}), ts=TS)["has_header"] is True
+    assert parse_pair(pair(info={"imageUrl": "x"}), ts=TS)["has_header"] is False
+    assert parse_pair(pair(), ts=TS)["has_header"] is None
