@@ -27,6 +27,14 @@ describe("Boost Lab", () => {
     expect(t).toHaveTextContent("the test, not the proof");
   });
 
+  it("states the morning and selloff skips", () => {
+    render(<BoostRuleBook d={{ ...d, skip_hours_dubai: [6, 12], morning_skipped: 24, max_sells_before: 20, sellers_skipped: 29 }} />);
+    const t = screen.getByTestId("boost-rule-book");
+    expect(t).toHaveTextContent("from 06:00 to 12:00 Dubai. 24 skipped so far.");
+    expect(t).toHaveTextContent("more than 20 sells");
+    expect(t).toHaveTextContent("flatter them");
+  });
+
   it("marks the book's own sell time in the minute table", () => {
     render(<MinuteTable capital={250} lines={[
       { minutes: 3, current: false, trades: 28, pnl_usd: "239.39", rugs: 1, lowest_usd: "248.15" },
