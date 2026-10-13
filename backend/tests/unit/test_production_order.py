@@ -178,3 +178,77 @@ def test_the_factory_cannot_sign_submit_or_hold_a_key():
               if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
     for banned in ("sign_jupiter_transaction", "sign_message", "execute_signed_order"):
         assert banned not in called
+
+
+# --- a route the signer would refuse is swapped at once ----------------------
+
+def _route_tx(program: str) -> str:
+    from base64 import b64encode
+
+    from solders.hash import Hash
+    from solders.instruction import CompiledInstruction
+    from solders.message import MessageHeader, MessageV0
+    from solders.pubkey import Pubkey
+    from solders.signature import Signature
+    from solders.transaction import VersionedTransaction
+
+    message = MessageV0(
+        header=MessageHeader(num_required_signatures=1, num_readonly_signed_accounts=0,
+                             num_readonly_unsigned_accounts=1),
+        account_keys=[Pubkey.from_string(WALLET), Pubkey.from_string(program)],
+        recent_blockhash=Hash.default(),
+        instructions=[CompiledInstruction(program_id_index=1, accounts=b"", data=bytes([0]))],
+        address_table_lookups=[],
+    )
+    return b64encode(bytes(VersionedTransaction.populate(message, [Signature.default()]))).decode()
+
+
+def _ok_body(**over):
+    return _order_body(otherAmountThreshold="900000", routePlan=[{"percent": 100}],
+                       priceImpactPct="0.001", **over)
+
+
+REFUSED = "proVF4pMXVaYqmy4NjniPh4pqKNfMmsihgd4wdkCX3u"
+JUPITER = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4"
+
+
+async def test_a_refused_route_is_asked_for_again_without_its_router():
+    asked: list[str | None] = []
+
+    def handler(request):
+        excluded = request.url.params.get("excludeRouters")
+        asked.append(excluded)
+        if excluded is None:
+            return httpx.Response(200, json=_ok_body(transaction=_route_tx(REFUSED), router="prop"))
+        return httpx.Response(200, json=_ok_body(transaction=_route_tx(JUPITER), router="metis"))
+
+    factory = ProductionOrderFactory(client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    order = await factory.prepare(_Intent())
+    assert asked == [None, "prop"]
+    assert order.unsigned_transaction == _route_tx(JUPITER)
+
+
+async def test_an_allowed_route_is_not_asked_for_twice():
+    asked: list[str | None] = []
+
+    def handler(request):
+        asked.append(request.url.params.get("excludeRouters"))
+        return httpx.Response(200, json=_ok_body(transaction=_route_tx(JUPITER), router="metis"))
+
+    factory = ProductionOrderFactory(client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    await factory.prepare(_Intent())
+    assert asked == [None]
+
+
+async def test_retries_stop_and_leave_the_refusal_to_the_signer():
+    asked: list[str | None] = []
+
+    def handler(request):
+        asked.append(request.url.params.get("excludeRouters"))
+        return httpx.Response(200, json=_ok_body(
+            transaction=_route_tx(REFUSED), router=f"r{len(asked)}"))
+
+    factory = ProductionOrderFactory(client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    order = await factory.prepare(_Intent())
+    assert asked == [None, "r1", "r1,r2"]  # three asks, never more
+    assert order.unsigned_transaction == _route_tx(REFUSED)
