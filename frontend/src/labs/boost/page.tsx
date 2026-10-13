@@ -6,6 +6,7 @@ import { Panel, PanelHeader, PanelTitle } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/states";
 import { Days, formatElapsed, Row, McapHeads } from "@/labs/karthik/page";
+import { DAY_30_MS } from "@/labs/pool/page";
 import type { KarthikDay, KarthikTrade } from "@/labs/karthik/types";
 import { api } from "@/lib/api-client";
 
@@ -123,7 +124,11 @@ export function BoostBook({ d }: { d: BoostLab }) {
           <Fig label="Coins picked" value={String(d.coins_picked ?? 0)} hint={`of ${d.coins_seen ?? 0} the books bought`} />
           <Fig label="Boosted coins" value={String(d.boosted_coins ?? 0)} hint="with boosts on record" />
         </div>
-        {d.days?.length ? <Days days={d.days} trades={closed} real={false} /> : null}
+        {/* Day 30 from the first trade (Karthik, 2026-10-13: "show in lab !"), like the $10k book. */}
+        {d.days?.length ? (
+          <Days days={d.days} trades={closed} real={false}
+                judgeAt={d.first_trade_at ? new Date(Date.parse(d.first_trade_at) + DAY_30_MS).toISOString() : undefined} />
+        ) : null}
         <details className="overflow-x-auto">
           <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wider text-ink-2">
             Closed · {closed.length} · {closed.filter((c) => c.rugged).length} rugs

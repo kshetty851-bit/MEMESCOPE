@@ -20,6 +20,13 @@ describe("Boost Lab", () => {
     expect(screen.getByTestId("boost-closed")).toHaveTextContent("PVE");
   });
 
+  it("shows the day-30 guess from the first trade", () => {
+    const day = { n: 1, from: "2026-10-08T17:15:00Z", to: "2026-10-09T17:15:00Z", trades: 12, pnl_usd: "100",
+                  pct: "40", rugs: 0, balance_usd: "350", running: false };
+    render(<BoostBook d={{ ...d, first_trade_at: "2026-10-08T17:15:00Z", days: [{ ...day, n: 2, running: true }, day] }} />);
+    expect(screen.getByTestId("day-30")).toHaveTextContent("Day 30 · expected");
+  });
+
   it("states the rule and its catch", () => {
     render(<BoostRuleBook d={d} />);
     const t = screen.getByTestId("boost-rule-book");
