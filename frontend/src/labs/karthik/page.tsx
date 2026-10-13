@@ -157,7 +157,9 @@ export function day30(days: KarthikDay[], judgeAt: string, now = Date.now()) {
   const worst = Math.min(...pnl);
   const balance = Number(days[0]!.balance_usd); // newest first, running day included
   const left = Math.max(0, (Date.parse(judgeAt) - now) / 86_400_000);
-  return { expected: balance + avg * left, worstPace: balance + worst * left, avg, basedOn: done.length };
+  // A wallet stops at $0: a bad enough pace would otherwise print a balance
+  // below nothing (Boost Lab, 2026-10-13: -$1,070 at -$80 a day).
+  return { expected: Math.max(0, balance + avg * left), worstPace: Math.max(0, balance + worst * left), avg, basedOn: done.length };
 }
 
 /** Also the Pool Lab's $10k book's days (2026-10-05), which has no judge date. */
