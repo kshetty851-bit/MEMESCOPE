@@ -42,6 +42,12 @@ SAMPLES_SINCE = datetime(2026, 10, 10, 10, 0, tzinfo=UTC)
 HOLD_MINUTES = 4
 MINUTES = (2, 3, 4, 5, 6, 8, 10)
 TICKET = 50.0
+#: Skips (Karthik, 2026-10-13: "apply both rules to boost lab since day 1"),
+#: from the first trade. Chosen AFTER looking at 103 trades: +$352.64 -> about
+#: +$618 on $250, rugs 13 -> 5. Only the morning skip helped on both 8-11 Oct
+#: and 12-13 Oct; the sells skip did nothing before 12 Oct. Judge on new days.
+SKIP_HOURS_DUBAI = (6, 12)      # buys from 06:00 to 11:59 Dubai
+MAX_SELLS_BEFORE = 20           # sells in the pool's last 5 minutes before the buy
 CAPITAL = 250.0
 
 _CARRIED = ("mint", "symbol", "opened_at", "open_quote", "open_fill", "notional_usd",
@@ -132,6 +138,16 @@ async def build(db: AsyncSession) -> dict[str, Any]:
     # the $10k book's rule; its two here lost -$17. Applied from the first trade.
     famous = sum(1 for r in rows if r.mint in paid and pl.famous_name(r.symbol))
     picked = [r for r in rows if r.mint in paid and not pl.famous_name(r.symbol)]
+    lo, hi = SKIP_HOURS_DUBAI
+    morning = [r for r in picked if lo <= (r.opened_at.hour + 4) % 24 < hi]
+    picked = [r for r in picked if r not in morning]
+    sellers: set[Any] = set()
+    if picked:
+        sellers = {i for i, n in (await db.execute(api._SELLS_BEFORE_SQL, {
+            "ids": [r.id for r in picked], "mints": [r.mint for r in picked],
+            "ats": [r.opened_at for r in picked]})).all()
+            if n is not None and n > MAX_SELLS_BEFORE}  # an unread count is kept
+    picked = [r for r in picked if r.id not in sellers]
     sold: dict[int, list[GradPaperPosition]] = {m: [] for m in MINUTES}
     for row in picked:
         marks = await _marks(db, row)
@@ -152,6 +168,8 @@ async def build(db: AsyncSession) -> dict[str, Any]:
         "ticket_usd": TICKET, "capital_usd": CAPITAL,
         "balance_usd": Decimal(str(walk.cash)).quantize(cents),
         "coins_seen": len(rows), "coins_picked": len(picked), "famous_skipped": famous,
+        "skip_hours_dubai": list(SKIP_HOURS_DUBAI), "morning_skipped": len(morning),
+        "max_sells_before": MAX_SELLS_BEFORE, "sellers_skipped": len(sellers),
         "boosted_coins": sum(1 for _, b in paid.values() if (b or 0) > 0),
         # Days from the first trade: no coin had a profile on record before
         # 8 Oct, so days from 1 Oct would open on a week of empty boxes.
