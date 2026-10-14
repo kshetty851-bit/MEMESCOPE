@@ -27,6 +27,8 @@ export interface PartnerTrade {
 export interface PartnersBook {
   partners: { started_at: string; capital_usd: string; profit_usd: string; balance_usd: string; pct: string;
               trades: number; wins: number; open: number; partners: Partner[]; days: Day[] };
+  /** The wallet's worth now (the balance card's figure) and SOL's share of the gap. */
+  sol?: { value_usd: string | null; sol_usd: string | null; sol_usd_start: string; sol_effect_usd: string | null };
   strategies: Strategy[];
   trades: PartnerTrade[];
 }
@@ -60,8 +62,12 @@ export function strategiesIn(day: Day, trades: PartnerTrade[]): string[] {
 export function PartnersSummary({ d }: { d: PartnersBook }) {
   const p = d.partners;
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="partners-summary">
-      <Fig label="Balance" value={usd(p.balance_usd)} hint={`from ${usd(p.capital_usd)}`} />
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-5" data-testid="partners-summary">
+      <Fig label="Balance · trading" value={usd(p.balance_usd)} hint={`from ${usd(p.capital_usd)}`} />
+      {d.sol?.sol_effect_usd != null ? (
+        <Fig label="Worth now · with SOL's price" value={usd(d.sol.value_usd)} cls={tone(d.sol.sol_effect_usd)}
+             hint={`SOL ${usd(d.sol.sol_usd_start)} → ${usd(d.sol.sol_usd)}: ${usd(d.sol.sol_effect_usd, true)}`} />
+      ) : null}
       <Fig label="Profit" value={`${usd(p.profit_usd, true)} · ${pct(Number(p.pct))}`} cls={tone(p.profit_usd)} />
       <Fig label="Trades" value={String(p.trades)} hint={`${p.wins} won${p.open ? ` · ${p.open} open` : ""}`} />
       <Fig label="Each partner" value={p.partners[0] ? usd(p.partners[0].now_usd) : "—"}
@@ -216,7 +222,8 @@ export function PartnersLabPage() {
         <h1 className="text-xl font-semibold">Partners Wallet</h1>
         <p className="text-sm text-ink-3">
           Real money. The main wallet since Karthik and Rafiq went 50-50 on {dubai(d.partners.started_at)} Dubai.
-          Closed trades only; SOL&apos;s own price moves are not counted. Updates every minute.
+          Profit is from closed trades; &quot;worth now&quot; is the wallet at today&apos;s SOL price, the same as the real-wallet balance,
+          and the gap between them is SOL&apos;s own price move. Updates every minute.
         </p>
       </div>
       <PartnersSummary d={d} />

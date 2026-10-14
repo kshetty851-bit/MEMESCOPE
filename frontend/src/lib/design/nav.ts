@@ -101,14 +101,6 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Private. Arjun reads a company's screener.in page when you ask.",
       },
-      // Karthik, 2026-10-14: the main wallet's days and trades since the 50-50 start.
-      {
-        href: "/partners-lab",
-        label: "Partners Wallet",
-        icon: IconSpark,
-        status: "ready",
-        note: "Real money. Karthik & Rafiq's main wallet: every day's P&L and %, every trade with its strategy.",
-      },
       // Karthik, 2026-10-12: the busy pools the $10k book refuses, on paper.
       {
         href: "/busy-lab",
@@ -143,6 +135,15 @@ export const NAV_GROUPS: NavGroup[] = [
         label: "Real wallet",
         icon: IconLedger,
         status: "ready",
+      },
+      // Karthik, 2026-10-14: the main wallet's days and trades since the 50-50
+      // start; under the real wallet ("move partners wallet below real wallet").
+      {
+        href: "/partners-lab",
+        label: "Partners Wallet",
+        icon: IconLedger,
+        status: "ready",
+        note: "Real money. Karthik & Rafiq's main wallet: every day's P&L and %, every trade with its strategy.",
       },
     ],
   },
