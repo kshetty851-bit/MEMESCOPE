@@ -5,9 +5,9 @@ import { useEffect, useState } from "react";
 import { Panel, PanelHeader, PanelTitle } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/states";
-import { Days, formatElapsed, Row, McapHeads } from "@/labs/karthik/page";
+import { Days, formatElapsed, Row, McapHeads, StartDates } from "@/labs/karthik/page";
 import { DAY_30_MS } from "@/labs/pool/page";
-import type { KarthikDay, KarthikTrade } from "@/labs/karthik/types";
+import type { KarthikDay, KarthikTrade, StartDate } from "@/labs/karthik/types";
 import { api } from "@/lib/api-client";
 
 /**
@@ -49,6 +49,8 @@ export interface BoostLab {
   cover_skipped?: number;
   boosted_coins?: number;
   days?: KarthikDay[];
+  /** The same book started fresh at each Dubai midnight (2026-10-14). */
+  start_dates?: StartDate[];
   closed?: BoostTrade[];
   minutes?: MinuteLine[];
 }
@@ -235,6 +237,9 @@ export function BoostLabPage() {
         <>
           <BoostRuleBook d={d} />
           <BoostBook d={d} />
+          {d.start_dates?.length ? (
+            <StartDates book="Boost Lab" lines={d.start_dates} capital={Number(d.capital_usd ?? 250)} ticket={Number(d.ticket_usd ?? 50)} />
+          ) : null}
           {d.minutes ? <MinuteTable lines={d.minutes} capital={d.capital_usd} /> : null}
         </>
       )}
