@@ -7,8 +7,8 @@ import { useEffect, useState } from "react";
 import { Panel, PanelHeader, PanelTitle } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/states";
-import { Days, formatElapsed, Row, McapHeads } from "@/labs/karthik/page";
-import type { KarthikDay, KarthikTrade } from "@/labs/karthik/types";
+import { Days, formatElapsed, Row, McapHeads, StartDates } from "@/labs/karthik/page";
+import type { KarthikDay, KarthikTrade, StartDate } from "@/labs/karthik/types";
 import { api } from "@/lib/api-client";
 
 /** The thirty, working for the $10k book; loaded after the page so HQ's
@@ -83,6 +83,8 @@ interface TenKBook {
   skipped_famous?: { symbol: string | null; mint: string; opened_at: string; pool_usd: string | null; pct: string; rugged: boolean }[];
   balance_usd: string;
   days: KarthikDay[];
+  /** The same book started fresh at each Dubai midnight (2026-10-14). */
+  start_dates?: StartDate[];
   closed: (KarthikTrade & { rugged: boolean })[];
   open: OpenTrade[];
 }
@@ -191,6 +193,9 @@ export function TenKBookPanel({ book, now, startedAt }: { book: TenKBook; now: n
         {book.days.length ? (
           <Days days={book.days} trades={book.closed} real={false}
                 judgeAt={startedAt ? new Date(Date.parse(startedAt) + DAY_30_MS).toISOString() : undefined} />
+        ) : null}
+        {book.start_dates?.length ? (
+          <StartDates lines={book.start_dates} capital={Number(book.capital_usd)} ticket={Number(book.ticket_usd)} />
         ) : null}
         <div className="overflow-x-auto">
           <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-ink-2">

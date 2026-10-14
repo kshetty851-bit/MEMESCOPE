@@ -12,7 +12,7 @@ import { WorldClocks } from "./world-clocks";
 import { useKarthikBook, usePumpfunDays, useWalletsProfit } from "./hooks";
 import type {
   KarthikBook, KarthikDay, KarthikFlows, KarthikTrade, KarthikWhatIfLine, PumpfunDay,
-  WalletProfit,
+  StartDate, WalletProfit,
 } from "./types";
 
 /** The Checkpoint office, loaded after the page so HQ's drawings stay out of
@@ -168,6 +168,53 @@ export function day30(days: KarthikDay[], judgeAt: string, now = Date.now()) {
  *  took that day"). A day holds the trades that CLOSED in it, as its profit does. */
 /** The floor test (Karthik, 2026-10-11): four ways to treat the smallest
  *  pools, on the book's own trades from midnight Dubai 12 Oct onward. */
+/** "If you had started on…" (Karthik, 2026-10-14: "show me profit if we
+ *  started on 2nd oct, then 3rd oct ... show both in each lab and keep
+ *  updating"): the same book from each Dubai midnight, same money and ticket. */
+export function StartDates({ lines, capital, ticket }: { lines: StartDate[]; capital: number; ticket: number }) {
+  if (!lines.length) return null;
+  const money = (v: string | number) => `$${Math.abs(Number(v)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const signed = (v: string) => `${Number(v) > 0 ? "+" : Number(v) < 0 ? "-" : ""}${money(v)}`;
+  const tone = (v: string) => (Number(v) > 0 ? "text-up" : Number(v) < 0 ? "text-down" : "text-ink-3");
+  return (
+    <details className="overflow-x-auto" data-testid="start-dates">
+      <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wider text-ink-2">
+        If you had started on… · {money(capital).replace(".00", "")} at {money(ticket).replace(".00", "")} a trade
+      </summary>
+      <table className="mt-1 w-full min-w-[30rem] text-[13px] tabular-nums">
+        <thead className="text-[11px] uppercase tracking-wider text-ink-dim">
+          <tr>
+            <th className="py-1 pr-3 text-left font-normal">started (Dubai)</th>
+            <th className="px-2 text-right font-normal">days</th>
+            <th className="px-2 text-right font-normal">balance now</th>
+            <th className="px-2 text-right font-normal">profit</th>
+            <th className="px-2 text-right font-normal">×</th>
+            <th className="px-2 text-right font-normal">lowest</th>
+            <th className="px-2 text-right font-normal">trades</th>
+            <th className="px-2 text-right font-normal">rugs</th>
+          </tr>
+        </thead>
+        <tbody>
+          {lines.map((l) => (
+            <tr key={l.start} className="border-t border-line/60">
+              <td className="py-1.5 pr-3">
+                {new Date(l.start).toLocaleDateString("en-GB", { timeZone: "Asia/Dubai", day: "numeric", month: "short" })}
+              </td>
+              <td className="px-2 text-right text-ink-3">{l.days.toFixed(1)}</td>
+              <td className="px-2 text-right">{money(l.balance_usd)}</td>
+              <td className={`px-2 text-right ${tone(l.pnl_usd)}`}>{signed(l.pnl_usd)}</td>
+              <td className="px-2 text-right text-ink-3">{(Number(l.balance_usd) / capital).toFixed(2)}×</td>
+              <td className="px-2 text-right text-ink-3">{money(l.lowest_usd)}</td>
+              <td className="px-2 text-right">{l.trades}</td>
+              <td className={`px-2 text-right ${l.rugs ? "text-down" : ""}`}>{l.rugs}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </details>
+  );
+}
+
 export function FloorTest({ data }: { data: KarthikBook }) {
   const t = data.floor_test;
   if (!t) return null;
@@ -1013,6 +1060,9 @@ export function KarthikLabPage() {
         </div>
         <Days days={data.days} judgeAt={data.judge_at} trades={data.trades_list} />
       </div>
+      {data.start_dates?.length ? (
+        <StartDates lines={data.start_dates} capital={Number(data.capital_usd)} ticket={Number(data.ticket_usd)} />
+      ) : null}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
         <Figure

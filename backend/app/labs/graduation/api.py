@@ -1609,6 +1609,34 @@ def _mcaps(row: Any) -> dict[str, int | None]:
     return {"mcap_open_usd": cap(row.open_quote), "mcap_close_usd": cap(row.close_quote)}
 
 
+def _start_dates(rows: Sequence[Any], rate: Decimal | None, *, ticket: float, capital: float,
+                 now: datetime, cents: Decimal) -> list[dict[str, Any]]:
+    """The same book started fresh at each Dubai midnight since its first trade,
+    newest start first (Karthik, 2026-10-14: "show me profit if we started on
+    2nd oct, then 3rd oct ... and keep updating"): only the trades from that
+    midnight, walked from `capital` at `ticket` exactly as the book is."""
+    if not rows:
+        return []
+    out: list[dict[str, Any]] = []
+    day = (min(r.opened_at for r in rows) + DUBAI).replace(
+        hour=0, minute=0, second=0, microsecond=0) - DUBAI
+    rug = float(config.OPERATOR_RUG_MOVE)
+    while day <= now:
+        xs = [r for r in rows if r.opened_at >= day]
+        w = _funded_walk([(r.opened_at, r.closed_at, float(r.net_return),
+                           float(r.impact_open or 0), float(r.impact_close or 0)) for r in xs],
+                         rate, ticket=ticket, start=capital)
+        took = [r for r, m in zip(xs, w.pnl, strict=True) if m is not None]
+        out.append({"start": day, "days": round((now - day).total_seconds() / 86400, 1),
+                    "balance_usd": Decimal(str(w.cash)).quantize(cents),
+                    "pnl_usd": Decimal(str(w.cash - capital)).quantize(cents),
+                    "lowest_usd": Decimal(str(w.low)).quantize(cents),
+                    "trades": w.funded,
+                    "rugs": sum(1 for r in took if float(r.net_return) <= rug)})
+        day += timedelta(days=1)
+    return list(reversed(out))
+
+
 def _karthik_days(took: Sequence[tuple[Any, float]], start: datetime,
                   capital: float, cents: Decimal) -> list[dict[str, Any]]:
     """One row per 24 hours since the book opened, newest first.
@@ -1988,6 +2016,9 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         "quiet_max_txs": config.QUIET_MAX_POOL_TXS,
         "pools_since": config.KARTHIK_BOOK_POOLS_AT,
         "floor_test": _floor_test(rows),
+        "start_dates": _start_dates(rows, sol, ticket=float(spec.ticket_usd),
+                                    capital=float(spec.capital_usd),
+                                    now=datetime.now(UTC), cents=Decimal("0.01")),
         "hold_minutes": arm.hold,
         "started_at": spec.start,
         "judge_at": config.KARTHIK_JUDGE_AT,
@@ -2728,6 +2759,8 @@ async def _pool_ten_k_book(db: AsyncSession, rows: Sequence[Any], sol: Decimal |
                   "skip_famous": True},
         "balance_usd": Decimal(str(walk.cash)).quantize(cents),
         "days": _karthik_days(took, pl.START, pl.TEN_K_START, cents),
+        "start_dates": _start_dates(rows, sol, ticket=pl.WALLET_TICKET, capital=pl.TEN_K_START,
+                                    now=datetime.now(UTC), cents=cents),
         "closed": [{"symbol": r.symbol, "mint": r.mint, "opened_at": r.opened_at,
                     "closed_at": r.closed_at, "pool_usd": r.liq_open_usd, **_mcaps(r),
                     "pct": Decimal(str(100 * float(r.net_return))).quantize(cents),
