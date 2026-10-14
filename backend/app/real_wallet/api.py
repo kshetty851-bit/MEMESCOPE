@@ -502,6 +502,42 @@ async def wallets_profit(session: DbSession) -> dict[str, object]:
             else views.decimal_str(sum(values, Decimal(0)))}
 
 
+@router.get("/partners-book", summary="Karthik & Rafiq's wallet: its days and every trade, with the strategy")
+async def partners_book(session: DbSession) -> dict[str, object]:
+    """The Partners Wallet lab page (Karthik, 2026-10-14: "i want that P&L in
+    lab section and keep updating and mention on each token which startegy
+    was used"). The main wallet from the partnership's start: the same days
+    as the box on this page, every trade with the strategy that bought it,
+    and each strategy's totals. Read-only, like `/status`."""
+    from app.labs.graduation import live_spec
+
+    owner = settings.REAL_WALLET_PUBLIC_KEY.strip()
+    positions = (await session.scalars(select(RealWalletPosition).where(
+        RealWalletPosition.opened_at >= partners.START,
+        or_(RealWalletPosition.wallet_public_key == owner,
+            RealWalletPosition.wallet_public_key.is_(None)))
+        .order_by(RealWalletPosition.opened_at.desc()))).all()
+    trades = await views.positions_payload(session, positions)
+    strategies: list[dict[str, object]] = []
+    for sid in sorted({p.strategy_id or "?" for p in positions},
+                      key=lambda s: min(p.opened_at for p in positions if (p.strategy_id or "?") == s)):
+        mine = [p for p in positions if (p.strategy_id or "?") == sid]
+        closed = [p for p in mine if p.status == "CLOSED"]
+        pnl = [p.realised_net_pnl_usd if p.realised_net_pnl_usd is not None
+               else p.realised_gross_pnl_usd for p in closed]
+        spec = live_spec.BY_ID.get(sid)
+        strategies.append({
+            "id": sid, "name": spec.name if spec else None,
+            "pool_floor_usd": live_spec.POOL_FLOORS.get(sid),
+            "trades": len(closed), "wins": sum(1 for v in pnl if v is not None and v > 0),
+            "pnl_usd": views.decimal_str(sum((Decimal(v) for v in pnl if v is not None),
+                                              Decimal(0)).quantize(Decimal("0.01"))),
+            "first_at": min(p.opened_at for p in mine), "last_at": max(p.opened_at for p in mine),
+        })
+    return {"partners": await partners.summary(session), "strategies": strategies,
+            "trades": trades}
+
+
 async def _values(session: Any, addresses: list[str], now: datetime) -> list[Decimal] | None:
     """What each wallet is worth now (Karthik, 2026-10-02: "value shud be
     same as main wallet"): its SOL at today's price plus its open trade at
