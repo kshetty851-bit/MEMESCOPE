@@ -16,6 +16,8 @@ export interface KarthikTrade {
 
 export interface KarthikBook {
   /** The floor test (2026-10-11): the book's trades from `since`, re-weighted per variant. */
+  /** The same book started fresh at each Dubai midnight, newest start first. */
+  start_dates?: StartDate[];
   floor_test?: { since: string; lines: { key: string; label: string; trades: number; rugs: number; usd: number }[] };
   /** Every pump.fun graduation seen since the book opened, bought or not. */
   graduations_seen?: number;
@@ -162,4 +164,15 @@ export interface WalletsProfit {
   wallets: WalletProfit[];
   /** All of them together now: SOL at today's price plus open trades. */
   total_value_usd?: string | null;
+}
+
+/** One "if you had started on this day" line (Karthik, 2026-10-14). */
+export interface StartDate {
+  start: string;
+  days: number;
+  balance_usd: string;
+  pnl_usd: string;
+  lowest_usd: string;
+  trades: number;
+  rugs: number;
 }
