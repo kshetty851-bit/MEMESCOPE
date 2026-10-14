@@ -534,8 +534,22 @@ async def partners_book(session: DbSession) -> dict[str, object]:
                                               Decimal(0)).quantize(Decimal("0.01"))),
             "first_at": min(p.opened_at for p in mine), "last_at": max(p.opened_at for p in mine),
         })
-    return {"partners": await partners.summary(session), "strategies": strategies,
-            "trades": trades}
+    # What the wallet is worth now against what trading made (Karthik,
+    # 2026-10-14: "in balance its showing 125$ because of solana it went down?"):
+    # the same worth as the balance card, so the gap is SOL's price move.
+    book = await partners.summary(session)
+    now = datetime.now(UTC)
+    values = await _values(session, [owner], now) if owner else None
+    value = values[0] if values else None
+    price = await sol_usd_now(now)
+    sol = {
+        "value_usd": None if value is None else views.decimal_str(value),
+        "sol_usd": None if price is None else views.decimal_str(Decimal(price).quantize(Decimal("0.01"))),
+        "sol_usd_start": views.decimal_str((partners.CAPITAL / partners.CAPITAL_SOL).quantize(Decimal("0.01"))),
+        "sol_effect_usd": None if value is None
+        else views.decimal_str((value - Decimal(str(book["balance_usd"]))).quantize(Decimal("0.01"))),
+    }
+    return {"partners": book, "sol": sol, "strategies": strategies, "trades": trades}
 
 
 async def _values(session: Any, addresses: list[str], now: datetime) -> list[Decimal] | None:

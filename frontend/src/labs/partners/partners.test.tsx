@@ -16,6 +16,7 @@ const d: PartnersBook = {
     days: [{ n: 2, from: "2026-09-29T11:00:00Z", to: "2026-09-30T11:00:00Z", running: true, trades: 1, pnl_usd: "-2.00", pct: "-1.89", balance_usd: "103.66" },
            { n: 1, from: "2026-09-28T11:00:00Z", to: "2026-09-29T11:00:00Z", running: false, trades: 1, pnl_usd: "5.66", pct: "5.66", balance_usd: "105.66" }],
   },
+  sol: { value_usd: "125.40", sol_usd: "104.20", sol_usd_start: "118.24", sol_effect_usd: "-16.44" },
   strategies: [{ id: "G-QUIET", name: "GRADUATION-QUIET-5MIN", pool_floor_usd: 75000, trades: 286, wins: 265, pnl_usd: "24.78",
                  first_at: "2026-09-28T11:44:00Z", last_at: "2026-10-03T20:20:00Z" }],
   trades: [trade("2", "G-Q50", "2026-09-29T12:00:00Z", "-2.00"), trade("1", "G-QUIET", "2026-09-28T12:00:00Z", "5.66")],
@@ -28,6 +29,8 @@ describe("Partners Wallet", () => {
     expect(s).toHaveTextContent("$141.84");
     expect(s).toHaveTextContent("+41.84%");
     expect(s).toHaveTextContent("Rafiq +$20.92");
+    expect(s).toHaveTextContent("$125.40");
+    expect(s).toHaveTextContent("SOL $118.24 → $104.20: -$16.44");
   });
 
   it("gives each day its profit, % and the strategy used", () => {
