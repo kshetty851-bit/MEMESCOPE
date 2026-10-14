@@ -217,6 +217,9 @@ async def build(db: AsyncSession) -> dict[str, Any]:
         # 8 Oct, so days from 1 Oct would open on a week of empty boxes.
         "first_trade_at": first,
         "days": api._karthik_days(took, first or FROM, CAPITAL, cents),
+        # "If you had started on…" (Karthik, 2026-10-14: "do the same table for boost lab too").
+        "start_dates": api._start_dates(book, sol, ticket=TICKET, capital=CAPITAL,
+                                        now=datetime.now(UTC), cents=cents),
         "closed": [{"symbol": c.symbol, "mint": c.mint, "opened_at": c.opened_at,
                     "closed_at": c.closed_at, "pool_usd": c.liq_open_usd, **api._mcaps(c),
                     "pct": Decimal(str(100 * float(c.net_return))).quantize(cents),
