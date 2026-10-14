@@ -59,6 +59,8 @@ def cpi_events(tx):
     expected, actual, result = Counter(), Counter(), []
     mapping = {bytes.fromhex(k):hashlib.sha256(('event:'+v).encode()).digest()[:8] for k,v in {
         '66063d1201daebea':'BuyEvent','c62e1552b4d9e870':'BuyEvent',
+        'c2ab1c46684d5b2f':'BuyEvent','b817ee6167c5d33d':'BuyEvent',
+        '5df6823ce7e940b2':'SellEvent','694406af000723a2':'BuyEvent',
         '33e685a4017f83ad':'SellEvent','e992d18ecf6840bc':'CreatePoolEvent'}.items()}
     for instruction in instructions:
         program = instruction.get('programId')
@@ -114,6 +116,8 @@ def history_features(transactions, pool, mint, at):
                     if ts > at.timestamp(): raise ValueError('future trade')
                     trades.append((ts, data[:8] == buy, b58(data[152:184]), struct.unpack_from('<Q',data,64)[0]))
     if not created:
+        if len(trades)>99:
+            raise ValueError(f'quiet-pool limit exceeded: at least {len(trades)} verified swaps; older history not fetched')
         raise ValueError('pool creation absent from bounded history')
     recent = [t for t in trades if 0 <= at.timestamp()-t[0] <= 30]
     result = {'pool_lifetime_swaps': len(trades), 'unique_buyers_30s':len({t[2] for t in recent if t[1]})}
