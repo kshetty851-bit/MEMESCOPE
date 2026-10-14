@@ -106,6 +106,6 @@ For the original package methodology, see `UPSTREAM_README.md`; for field requir
 - Every fill links to a persisted assessment and original opportunity. Transactions and balances commit atomically. Duplicate opportunity IDs cannot spend twice; a mint is entered only once. Single scanner enforced by OS lock.
 - Costs are paper assumptions: 0.5% per leg plus $0.02 fixed and a constant-product impact estimate. They are not measured executable quotes and cannot establish profitability.
 - Monthly profits above $100 are booked only when flat; losses are never refilled. No real withdrawals occur.
-- The model is explicitly `rules-only-v1`; no trained-model prediction or promised win rate. Current missing feed evidence blocks all buys.
+- The model is explicitly `rules-only-v1`; no trained-model prediction or promised win rate. The live adapter collects authority, history, holder and matched quote evidence; individual missing data still blocks entries.
 
 See [PAPER_DEPLOYMENT.md](PAPER_DEPLOYMENT.md) for service isolation and deployment.
