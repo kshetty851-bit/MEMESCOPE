@@ -194,9 +194,7 @@ export function TenKBookPanel({ book, now, startedAt }: { book: TenKBook; now: n
           <Days days={book.days} trades={book.closed} real={false}
                 judgeAt={startedAt ? new Date(Date.parse(startedAt) + DAY_30_MS).toISOString() : undefined} />
         ) : null}
-        {book.start_dates?.length ? (
-          <StartDates lines={book.start_dates} capital={Number(book.capital_usd)} ticket={Number(book.ticket_usd)} />
-        ) : null}
+
         <div className="overflow-x-auto">
           <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-ink-2">
             Open now · {book.open.length}
@@ -456,6 +454,10 @@ export function PoolLabPage() {
       ) : (
         <>
           {d.ten_k.book ? <TenKRuleBook book={d.ten_k.book} /> : null}
+          {d.ten_k.book?.start_dates?.length ? (
+            <StartDates book="$10k book" lines={d.ten_k.book.start_dates} capital={Number(d.ten_k.book.capital_usd)}
+                        ticket={Number(d.ten_k.book.ticket_usd)} />
+          ) : null}
           {d.ten_k.book ? <TenKBookPanel book={d.ten_k.book} now={now} startedAt={d.started_at} /> : null}
           <TenKTable data={d.ten_k} />
           <FiftyKTables data={d.fifty_k} />

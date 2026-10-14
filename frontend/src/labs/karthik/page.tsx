@@ -171,17 +171,22 @@ export function day30(days: KarthikDay[], judgeAt: string, now = Date.now()) {
 /** "If you had started on…" (Karthik, 2026-10-14: "show me profit if we
  *  started on 2nd oct, then 3rd oct ... show both in each lab and keep
  *  updating"): the same book from each Dubai midnight, same money and ticket. */
-export function StartDates({ lines, capital, ticket }: { lines: StartDate[]; capital: number; ticket: number }) {
+export function StartDates({ lines, capital, ticket, book }: { lines: StartDate[]; capital: number; ticket: number; book: string }) {
   if (!lines.length) return null;
   const money = (v: string | number) => `$${Math.abs(Number(v)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const signed = (v: string) => `${Number(v) > 0 ? "+" : Number(v) < 0 ? "-" : ""}${money(v)}`;
   const tone = (v: string) => (Number(v) > 0 ? "text-up" : Number(v) < 0 ? "text-down" : "text-ink-3");
   return (
-    <details className="overflow-x-auto" data-testid="start-dates">
-      <summary className="cursor-pointer text-[11px] font-semibold uppercase tracking-wider text-ink-2">
-        If you had started on… · {money(capital).replace(".00", "")} at {money(ticket).replace(".00", "")} a trade
-      </summary>
-      <table className="mt-1 w-full min-w-[30rem] text-[13px] tabular-nums">
+    // Its own open box (Karthik, 2026-10-14: "cant find this table"): it was
+    // a collapsed line inside the book's panel.
+    <Panel>
+      <PanelHeader>
+        <PanelTitle>
+          {book} · if you had started on… · {money(capital).replace(".00", "")} at {money(ticket).replace(".00", "")} a trade
+        </PanelTitle>
+      </PanelHeader>
+      <div className="overflow-x-auto p-3" data-testid="start-dates">
+      <table className="w-full min-w-[30rem] text-[13px] tabular-nums">
         <thead className="text-[11px] uppercase tracking-wider text-ink-dim">
           <tr>
             <th className="py-1 pr-3 text-left font-normal">started (Dubai)</th>
@@ -211,7 +216,8 @@ export function StartDates({ lines, capital, ticket }: { lines: StartDate[]; cap
           ))}
         </tbody>
       </table>
-    </details>
+      </div>
+    </Panel>
   );
 }
 
@@ -1061,7 +1067,7 @@ export function KarthikLabPage() {
         <Days days={data.days} judgeAt={data.judge_at} trades={data.trades_list} />
       </div>
       {data.start_dates?.length ? (
-        <StartDates lines={data.start_dates} capital={Number(data.capital_usd)} ticket={Number(data.ticket_usd)} />
+        <StartDates book="$50k book" lines={data.start_dates} capital={Number(data.capital_usd)} ticket={Number(data.ticket_usd)} />
       ) : null}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
