@@ -25,7 +25,7 @@ WITH candidates AS (
  UNION
  SELECT mint, ts FROM grad_migrations WHERE mint = ANY(%(held)s)
 ), recent AS (
- SELECT * FROM candidates ORDER BY migrated_at DESC LIMIT 200
+ SELECT DISTINCT ON (mint) * FROM candidates ORDER BY mint, migrated_at DESC
 )
 SELECT c.mint,c.migrated_at,t.symbol,s.ts,s.pair_address,s.price_usd,s.liquidity_usd
 FROM recent c LEFT JOIN grad_tokens t ON t.mint=c.mint
@@ -35,6 +35,7 @@ LEFT JOIN LATERAL (
  AND source IN ('dexscreener','held_ws')
  ORDER BY ts DESC LIMIT 1
 ) s ON true
+ORDER BY (c.mint = ANY(%(held)s)) DESC, c.migrated_at DESC LIMIT 20
 '''
 
 
@@ -56,26 +57,38 @@ def map_row(row, now: datetime) -> Snapshot:
     return Snapshot(op, float(row['price_usd']) if row['price_usd'] is not None else None, at, row['symbol'])
 
 
-def scan_once(book, connection, now):
+def scan_once(book, connection, now, evidence=None):
     from psycopg.rows import dict_row
     with connection.transaction():
         connection.execute('SET TRANSACTION READ ONLY')
         connection.execute("SET LOCAL statement_timeout = '8s'")
         rows = connection.cursor(row_factory=dict_row).execute(SQL, {'now': now, 'held': [p['mint'] for p in book.open_positions()]}).fetchall()
     for row in rows:
+        # Refresh the pool sample after preceding candidates' network reads.
+        with connection.transaction():
+            connection.execute('SET TRANSACTION READ ONLY')
+            latest = connection.cursor(row_factory=dict_row).execute("SELECT ts,pair_address,price_usd,liquidity_usd FROM grad_postgrad_samples WHERE mint=%s AND ts<=now() AND ts>=now()-interval '2 minutes' AND source IN ('dexscreener','held_ws') ORDER BY ts DESC LIMIT 1", (row['mint'],)).fetchone()
+        if latest:
+            row.update(latest)
         decision_at = datetime.now(timezone.utc)
-        book.process(map_row(row, decision_at), decision_at)
+        snapshot = map_row(row, decision_at)
+        if evidence is not None and row['pair_address']:
+            snapshot = evidence.enrich(snapshot)
+        book.process(snapshot, datetime.now(timezone.utc))
+        book.heartbeat(datetime.now(timezone.utc), None, len(rows))
     book.heartbeat(datetime.now(timezone.utc), None, len(rows))
 
 
 def worker():
     import psycopg
+    from .evidence import Evidence
+    evidence = Evidence()
     book = PaperBook(STATE)
     while True:
         now = datetime.now(timezone.utc)
         try:
             with psycopg.connect(os.environ['PRETRADE_READ_DSN'], connect_timeout=5) as connection:
-                scan_once(book, connection, now)
+                scan_once(book, connection, now, evidence)
         except Exception as error:
             # Exception text may contain connection credentials: only expose class.
             book.heartbeat(now, f'Feed unavailable ({type(error).__name__}); entries paused.', 0)

@@ -28,6 +28,7 @@ class Snapshot:
     price: float | None
     quote_at: datetime
     symbol: str | None = None
+    sell_price: float | None = None
 
 
 def iso(at: datetime) -> str:
@@ -114,8 +115,12 @@ class PaperBook:
                     (iso(now), op.mint, 'BUY', TICKET_USD, quantity, TICKET_USD-spendable, analysis_id))
             elif action == 'SELL':
                 # At most $20 gross sale per fresh snapshot; larger winners exit in pieces.
-                quantity = min(position['remaining'], MAX_ORDER_USD / snapshot.price)
-                gross = min(MAX_ORDER_USD, quantity * snapshot.price)
+                sell_price = snapshot.sell_price if snapshot.sell_price is not None else snapshot.price
+                if not math.isfinite(sell_price) or sell_price <= 0:
+                    self.db.execute("UPDATE analyses SET action='EXIT_PENDING',reason='Sell price unavailable.' WHERE id=?", (analysis_id,))
+                    return
+                quantity = min(position['remaining'], MAX_ORDER_USD / sell_price)
+                gross = min(MAX_ORDER_USD, quantity * sell_price)
                 liquidity_obs = op.features.get('liquidity_usd')
                 liquidity = float(liquidity_obs.value) if liquidity_obs and isinstance(liquidity_obs.value, (int, float)) else 0
                 if liquidity <= 0:
@@ -145,9 +150,11 @@ class PaperBook:
         heartbeat = json.loads(heartbeat[0]) if heartbeat else None
         running = bool(heartbeat and not heartbeat['error'] and 0 <= (now - datetime.fromisoformat(heartbeat['at'])).total_seconds() < 90)
         analyses = []
-        for row in self.db.execute('SELECT id,at,mint,action,reason,score FROM analyses ORDER BY id DESC LIMIT 100'):
+        for row in self.db.execute('SELECT id,at,mint,action,reason,score,opportunity FROM analyses ORDER BY id DESC LIMIT 100'):
             item = dict(row)
             item['score'] = json.loads(item['score'])
+            evidence = json.loads(item.pop('opportunity'))
+            item['evidence_errors'] = evidence.get('metadata',{}).get('evidence_errors',[])
             analyses.append(item)
         positions = [dict(r) for r in self.db.execute('SELECT * FROM positions ORDER BY opened_at DESC LIMIT 100')]
         realised = self.db.execute('SELECT coalesce(sum(proceeds-entry_cost),0) FROM positions WHERE closed_at IS NOT NULL').fetchone()[0]
@@ -158,4 +165,4 @@ class PaperBook:
             'analyses': analyses, 'analysis_count': self.db.execute('SELECT count(*) FROM analyses').fetchone()[0],
             'positions': positions, 'trades': [dict(r) for r in self.db.execute('SELECT * FROM trades ORDER BY id DESC LIMIT 100')],
             'cost_assumptions': '0.5% fee/slippage plus $0.02 per fill plus constant-product impact; simulation only.',
-            'limitation': 'Live feed lacks verified lifetime swaps, executable sell routes, authority safety and identity/holder evidence. Incomplete candidates cannot buy. No real-data-trained model is available.'}
+            'limitation': 'Live checks use matched buy/sell quotes, mint authorities, complete pool history and holder coverage. Missing or stale evidence blocks entries; expand each assessment for feed issues. Creator/funder history is still unknown. No real-data-trained model is available.'}

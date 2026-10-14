@@ -7,6 +7,7 @@ type Analysis = {
   mint: string;
   action: string;
   reason: string;
+  evidence_errors?: string[];
   score: {
     score: number;
     decision: string;
@@ -195,6 +196,11 @@ export function LivePaperLab() {
                     <div className="mt-2 space-y-2 break-words text-ink-dim">
                       <p>{a.mint}</p>
                       <p>{a.reason}</p>
+                      {a.evidence_errors?.map((issue, i) => (
+                        <p key={`feed-${i}`} className="text-amber-200">
+                          Data check: {issue}
+                        </p>
+                      ))}
                       <p>
                         Score {a.score.score.toFixed(1)}/100 · evidence{" "}
                         {(a.score.feature_completeness * 100).toFixed(0)}%

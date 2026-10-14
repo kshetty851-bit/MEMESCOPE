@@ -36,10 +36,10 @@ GRANT SELECT ON grad_migrations, grad_tokens, grad_postgrad_samples TO pretrade_
         stream.write('PRETRADE_AUTH_URL=http://backend:8000/api/v1/alpha/session\n')
 run(['docker', 'volume', 'create', 'memescope_pretrade_paper'], stdout=subprocess.DEVNULL)
 run(['docker', 'run', '--rm', '--user', '0', '--volume', 'memescope_pretrade_paper:/data',
-     '--entrypoint', 'chown', 'memescope-pretrade-ai:20261013', '10001:10001', '/data'])
+     '--entrypoint', 'chown', 'memescope-pretrade-ai:20261014', '10001:10001', '/data'])
 run(['docker', 'run', '-d', '--name', 'memescope-pretrade-ai', '--network', 'memescope_default',
      '--network-alias', 'pretrade-ai', '--restart', 'unless-stopped', '--read-only',
      '--tmpfs', '/tmp:rw,noexec,nosuid,size=32m', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
      '--memory', '512m', '--cpus', '0.5', '--pids-limit', '64', '--env-file', str(credentials),
-     '--volume', 'memescope_pretrade_paper:/data', 'memescope-pretrade-ai:20261013'])
+     '--volume', 'memescope_pretrade_paper:/data', 'memescope-pretrade-ai:20261014'])
 print('Isolated paper service started; existing services were not restarted.')
