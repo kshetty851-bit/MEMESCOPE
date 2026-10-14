@@ -61,3 +61,12 @@ def test_ai_names_are_spotted():
         assert pl.ai_name(sym), sym
     for sym in ("SOULJA", "Tesla", "", None):
         assert not pl.ai_name(sym), sym
+
+
+def test_entry_window_keeps_19_to_46_seconds():
+    from types import SimpleNamespace as N
+    g = datetime(2026, 10, 14, tzinfo=UTC)
+    at = lambda s: N(opened_at=g + timedelta(seconds=s), graduated_at=g)
+    assert not pl.in_entry_window(at(10)) and not pl.in_entry_window(at(47))
+    assert pl.in_entry_window(at(19)) and pl.in_entry_window(at(30)) and pl.in_entry_window(at(46))
+    assert pl.in_entry_window(N(opened_at=g, graduated_at=None))  # unknown is kept
