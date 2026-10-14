@@ -72,6 +72,7 @@ interface TenKRules {
   stop_pct?: number | null;
   max_sells_before?: number | null;
   max_buys_before?: number | null;
+  entry_age_s?: [number, number] | null;
   skip_famous?: boolean;
   reaction_s?: number;
 }
@@ -296,6 +297,7 @@ export function TenKRuleBook({ book }: { book: TenKBook }) {
     ...(r.max_buys_before != null ? [["Not already pumped", `It skips a coin whose pool already had more than ${r.max_buys_before} buys in DexScreener's last 5 minutes when it buys: the early pump has mostly happened.`] as [string, string]] : []),
     ...(r.skip_famous ? [["No famous names", "It skips coins named after famous people, brands or companies (OpenAI, Tesla, Trump, GTA, Pepe…). On this book they rugged one time in six and lost money; the coins it refused are listed under the trades."] as [string, string]] : []),
     ["Only fresh coins", `It buys within ${r.max_entry_age_s / 60} minutes of the coin graduating, or not at all.`],
+    ...(r.entry_age_s ? [["Not too early, not too late", `It only keeps coins it bought ${r.entry_age_s[0]} to ${r.entry_age_s[1]} seconds after they graduated: the very first seconds rugged most (about one in six), and later buys lost a little.`] as [string, string]] : []),
     ["No repeat creators", "Coins whose creator has launched a coin before are left out: on this book they lost money. (The $50k books buy them again.)"],
     ["Several at once", `${usd(book.ticket_usd)} per trade from a ${usd(book.capital_usd)} balance. It buys every coin that passes while a whole ${usd(book.ticket_usd)} is free.`],
     ...(r.stop_pct ? [["Stop-loss", `If the price falls ${r.stop_pct}% below what it paid, it sells about ${r.reaction_s ?? 3} seconds later instead of waiting. Tiny-pool rugs drain over seconds, so most are caught before they reach -50%.`] as [string, string]] : []),
@@ -325,7 +327,8 @@ export function TenKRuleBook({ book }: { book: TenKBook }) {
         {k(lo)}–{k(hi)} skip{r.stop_pct ? ", the stop-loss" : ""}
         {r.max_sells_before != null ? ", the few-sellers rule" : ""}
         {r.max_buys_before != null ? ", the already-pumped skip" : ""}
-        {r.skip_famous ? " and the famous-name skip" : ""} came later (5–12 Oct; the stop-loss
+        {r.entry_age_s ? ", the 19–46 second window (14 Oct)" : ""}
+        {r.skip_famous ? " and the famous-name skip" : ""} came later (5–14 Oct; the stop-loss
         came off again on 12 Oct) and are
         applied from the first trade, like every rule here.
       </p>

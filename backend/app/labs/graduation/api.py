@@ -2735,7 +2735,8 @@ async def _pool_ten_k_book(db: AsyncSession, rows: Sequence[Any], sol: Decimal |
                GradPaperPosition.excluded.is_(None), GradPaperPosition.opened_at >= pl.START)
         .order_by(GradPaperPosition.opened_at.desc()))).all()
     busy = await _busy_sellers(db, held) | await _busy_buyers(db, held)
-    held = [p for p in held if p.id not in busy and not pl.famous_name(p.symbol)]
+    held = [p for p in held if p.id not in busy and not pl.famous_name(p.symbol)
+            and pl.in_entry_window(p)]
 
     def move(p: Any) -> Decimal | None:
         live = net_return(p, p.last_quote)  # after costs, as the trade list's open rows
@@ -2756,6 +2757,7 @@ async def _pool_ten_k_book(db: AsyncSession, rows: Sequence[Any], sol: Decimal |
                   "reaction_s": config.EXIT_REACTION_S,
                   "max_sells_before": pl.MAX_SELLS_BEFORE,
                   "max_buys_before": pl.MAX_BUYS_BEFORE,
+                  "entry_age_s": list(pl.ENTRY_AGE_S),
                   "skip_famous": True},
         "balance_usd": Decimal(str(walk.cash)).quantize(cents),
         "days": _karthik_days(took, pl.START, pl.TEN_K_START, cents),
@@ -2796,6 +2798,7 @@ async def _pool_lab_build(db: AsyncSession) -> dict[str, Any]:
     ten_live = [r for r in ten_live if r.id not in busy]
     famous = [r for r in ten_live if pl.famous_name(r.symbol)]
     ten_live = [r for r in ten_live if not pl.famous_name(r.symbol)]
+    ten_live = [r for r in ten_live if pl.in_entry_window(r)]
     ten_book = await _pool_ten_k_book(db, ten_live, sol, cents)
     # What the famous-name skip refused, and what each would have done.
     ten_book["skipped_famous"] = [

@@ -55,6 +55,21 @@ MAX_SELLS_BEFORE = 5
 #: (Karthik, 2026-10-12): the early pump has mostly happened. Chosen on 5-9 Oct
 #: (+$20) and held on 10-12 Oct (+$40); one of 4 rules out of 146 that did.
 MAX_BUYS_BEFORE = 39
+#: Buys only this many seconds after graduation (Karthik, 2026-10-14: "apply
+#: rule 1 to 10k pool since day 1"). Buys in the first ~19 s rugged 14-19% of
+#: the time; after 46 s they lost a little. Chosen on 5-10 Oct (+$41) and held
+#: on 11-14 Oct (+$114), better on 8 of 10 days: +$702 -> +$857, rugs 49 -> 35.
+#: The edges were fitted on 10 days. Unknown graduation time is kept.
+ENTRY_AGE_S = (19, 46)
+
+
+def in_entry_window(position: Any) -> bool:
+    """Was this coin bought inside `ENTRY_AGE_S` of its graduation?"""
+    graduated = getattr(position, "graduated_at", None)
+    if graduated is None:
+        return True
+    age = (position.opened_at - graduated).total_seconds()
+    return ENTRY_AGE_S[0] <= age <= ENTRY_AGE_S[1]
 #: Famous names the $10k book skips (Karthik, 2026-10-11: "skip tokens with
 #: famous names, they just come to rug"; "yes build and deploy it for 10k
 #: pool"). On its 555 trades 5-11 Oct the 40 famous names rugged 17.5% vs 2.1%
