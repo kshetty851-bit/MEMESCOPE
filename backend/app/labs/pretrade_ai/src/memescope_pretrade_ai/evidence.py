@@ -20,6 +20,7 @@ PROGRAM = 'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA'
 TOKEN_2022 = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'
 TOKEN = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'
 USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
+NON_TRADE_INSTRUCTIONS = {'2d3da597680031bd': 'admin_cto_pool', 'd10b7357d5177ccc': 'admin_update_token_incentives', '694406af000723a2': 'boost_buy_and_burn', 'c2ab1c46684d5b2f': 'buy_exact_quote_in_v2', 'b817ee6167c5d33d': 'buy_v2', '253a237ebe35e4c5': 'claim_cashback', '1004471ccc01281b': 'claim_token_incentives', 'f945a4da9667548a': 'close_user_volume_accumulator', 'a039592ab58b2b42': 'collect_coin_creator_fee', 'c9cff3724b6f2fbd': 'create_config', 'f223c68952e1f2b6': 'deposit', 'b9adbb5ad80feee9': 'disable', 'ea66c2cb96483ee5': 'extend_account', '8ce9215e845ac28f': 'init_boost', '5e06ca73ff60e8b7': 'init_user_volume_accumulator', 'd0089f044aaf103a': 'migrate_pool_coin_creator', '2b644913e9f66f94': 'multi_hop_swap', '5df6823ce7e940b2': 'sell_v2', 'e3954c2a8227eacd': 'set_boost_authority', 'd295802dbc3a4eaf': 'set_coin_creator', '6faca2e87259d58e': 'set_reserved_fee_recipients', '20f6bf3408c949ba': 'sweep_creator_fee', '0830be07b644b7e5': 'sweep_protocol_fee', '561fc057a3574fee': 'sync_user_volume_accumulator', '75a1a04adf897663': 'toggle_boost', '7367e0ffbd5956c3': 'toggle_cashback_enabled', '01096fd0641fffa3': 'toggle_mayhem_mode', '8b348655e4e56cf1': 'transfer_creator_fees_to_pump', '01214eb921432c5c': 'transfer_creator_fees_to_pump_v2', 'a1b028d53cb8b3e4': 'update_admin', 'fbe0ab92a01a71e9': 'update_buyback_config', '3dafa0f9424288af': 'update_creator_fee_config', '68b867f258976b14': 'update_fee_config', 'b712469c946da122': 'withdraw'}
 ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 
 def now():
@@ -35,14 +36,57 @@ def b58(raw):
 def observation(value, source, at=None):
     return ObservedValue(value=value, observed_at=at or now(), source=source)
 
+def b58decode(value):
+    number = 0
+    for char in value:
+        number = number*58 + ALPHABET.index(char)
+    return b'\0'*(len(value)-len(value.lstrip('1'))) + number.to_bytes((number.bit_length()+7)//8,'big')
+
+
+def cpi_events(tx):
+    """Recover truncated logs only when every trade/create instruction has its event.
+
+    Anchor emit_cpi preserves events in complete inner instructions. Verify the
+    program and instruction/event counts; never combine log and CPI duplicates.
+    """
+    from collections import Counter
+    meta = tx['meta']
+    if meta.get('innerInstructions') is None: raise ValueError('inner history unavailable')
+    message = tx['transaction']['message']
+    keys = [k['pubkey'] if isinstance(k,dict) else k for k in message['accountKeys']]
+    instructions = list(message['instructions'])
+    for group in meta['innerInstructions']: instructions.extend(group['instructions'])
+    expected, actual, result = Counter(), Counter(), []
+    mapping = {bytes.fromhex(k):hashlib.sha256(('event:'+v).encode()).digest()[:8] for k,v in {
+        '66063d1201daebea':'BuyEvent','c62e1552b4d9e870':'BuyEvent',
+        '33e685a4017f83ad':'SellEvent','e992d18ecf6840bc':'CreatePoolEvent'}.items()}
+    for instruction in instructions:
+        program = instruction.get('programId')
+        if program is None: program = keys[instruction['programIdIndex']]
+        if program != PROGRAM: continue
+        data = b58decode(instruction['data'])
+        if data[:8] in mapping:
+            expected[mapping[data[:8]]] += 1
+        elif data[:8] == bytes.fromhex('e445a52e51cb9a1d'):
+            if data[8:16] in mapping.values():
+                actual[data[8:16]] += 1
+                result.append(data[8:])
+        elif data[:8].hex() not in NON_TRADE_INSTRUCTIONS:
+            raise ValueError('unknown PumpSwap instruction')
+    if expected != actual:
+        raise ValueError('incomplete CPI event coverage')
+    return result
+
 def events(tx):
     """Only accept event logs while the verified PumpSwap program is executing."""
     meta = tx.get('meta') or {}
     if meta.get('err') is not None:
         return []
+    if meta.get('innerInstructions') is not None and tx.get('transaction',{}).get('message'):
+        return cpi_events(tx)
     logs = meta.get('logMessages')
     if logs is None or any('Log truncated' in s for s in logs):
-        raise ValueError('history logs unavailable')
+        return cpi_events(tx)
     stack, result = [], []
     for line in logs:
         if line.startswith('Program ') and ' invoke [' in line:

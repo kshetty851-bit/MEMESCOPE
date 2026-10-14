@@ -76,3 +76,11 @@ def test_sell_uses_bid_not_buy_price(tmp_path):
  assert status['trades'][0]['side']=='SELL'
  assert status['trades'][0]['amount']<5
  assert status['cash_usd']<95
+
+def test_truncated_logs_recover_only_complete_cpi_coverage():
+ from memescope_pretrade_ai.evidence import events
+ d=payload('BuyEvent',184)
+ t={'transaction':{'message':{'accountKeys':[],'instructions':[{'programId':PROGRAM,'data':b58(bytes.fromhex('66063d1201daebea'))}]}},'meta':{'err':None,'logMessages':['Log truncated'],'innerInstructions':[{'instructions':[{'programId':PROGRAM,'data':b58(bytes.fromhex('e445a52e51cb9a1d')+d)}]}]}}
+ assert events(t)==[d]
+ t['meta']['innerInstructions'][0]['instructions']=[]
+ with pytest.raises(ValueError): events(t)
