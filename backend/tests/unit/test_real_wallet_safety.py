@@ -822,3 +822,29 @@ async def test_a_quote_refused_every_try_still_fails(monkeypatch: pytest.MonkeyP
     with pytest.raises(ExecutionQuoteUnavailableError):
         await _Gate(_inspection(), flaky)._buy_quote(output_mint=MINT)
     assert flaky.calls == service.QUOTE_TRIES
+
+
+
+async def test_untraceable_on_helius_uses_the_labs_read_and_refuses_a_match(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Helius out of quota (15 Oct): the lab's own read of the coin decides."""
+    async def lab_ids(session, mint):
+        return {"BundleWallet", "FunderB"}
+
+    monkeypatch.setattr(service, "_lab_ids", lab_ids)
+    decision = await _source_decision(monkeypatch, _Helius(_COIN, fail=True), blocked={"FunderB"})
+    assert decision.reason_codes == (Reason.LINKED_TO_RECENT_RUG,)
+    assert decision.provenance["sources"]["matched"] == ["FunderB"]
+
+
+async def test_untraceable_on_helius_with_a_clean_lab_read_buys_inside_a_rug_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def lab_ids(session, mint):
+        return {"SomeoneNew"}
+
+    monkeypatch.setattr(service, "_lab_ids", lab_ids)
+    decision = await _source_decision(monkeypatch, _Helius(_COIN, fail=True), blocked={"FunderB"})
+    assert decision.decision == "ALLOW", decision.reason_codes
+    assert decision.provenance["sources"]["lab_ids"] == 1

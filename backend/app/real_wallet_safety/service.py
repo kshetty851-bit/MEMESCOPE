@@ -22,6 +22,7 @@ from app.core.logging import get_logger
 from app.labs.graduation import moneyblock
 from app.labs.graduation.models import (
     SOURCE_HELD_WS,
+    GradOperator,
     GradPaperPosition,
     GradPostgradSample,
     GradToken,
@@ -86,6 +87,16 @@ logger = get_logger(__name__)
 #: Buy-quote attempts before BUY_QUOTE_UNAVAILABLE, and the wait between them.
 QUOTE_TRIES = 3
 QUOTE_RETRY_S = 1.0
+
+
+async def _lab_ids(session: AsyncSession, mint: str) -> set[str] | None:
+    """The wallets the graduation lab recorded for this coin, or None."""
+    try:
+        ids = await session.scalar(select(GradOperator.ids).where(
+            GradOperator.mint == mint, GradOperator.ids.is_not(None)).limit(1))
+    except Exception:   # a fact we could not read, not a crash
+        return None
+    return set(ids) if ids else None
 
 
 class Reason:
@@ -439,6 +450,20 @@ class RealWalletSafetyGate:
             finally:
                 await rpc.close()
         except Exception as exc:
+            # The lab's own read of this coin (holders 1%+ and their first
+            # funders, off the public node since 2026-10-15) when Helius cannot
+            # answer (Karthik, 2026-10-15: "yes make that change"): Helius spent
+            # its quota, and refusing every buy for hours after any rug froze
+            # the wallet. Same comparison; nothing read still refuses.
+            lab = await _lab_ids(self._session, mint)
+            if lab:
+                matched = sorted(lab & (recent | sources.ALWAYS_BLOCKED))
+                if lab & recent:
+                    reasons.append(Reason.LINKED_TO_RECENT_RUG)
+                if lab & sources.ALWAYS_BLOCKED:
+                    reasons.append(Reason.KNOWN_RUG_MONEY)
+                return {"recent_rug_ids": len(recent), "failure": type(exc).__name__,
+                        "lab_ids": len(lab), "matched": matched}
             if recent:
                 reasons.append(Reason.SOURCES_UNREADABLE)
             return {"recent_rug_ids": len(recent), "failure": type(exc).__name__}
