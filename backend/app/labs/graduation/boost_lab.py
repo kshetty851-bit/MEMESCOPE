@@ -176,6 +176,13 @@ async def build(db: AsyncSession) -> dict[str, Any]:
     # the $10k book's rule; its two here lost -$17. Applied from the first trade.
     famous = sum(1 for r in rows if r.mint in paid and pl.famous_name(r.symbol))
     picked = [r for r in rows if r.mint in paid and not pl.famous_name(r.symbol)]
+    # Not in the first seconds (Karthik, 2026-10-15: "block the rugs"): coins
+    # bought within pool_lab.ENTRY_AGE_S[0] s of graduating rugged 14-25% here
+    # and lost on both halves (-$23 on 8-11 Oct, -$27 on 12-15 Oct), as on the
+    # $10k book. Unknown graduation time is kept.
+    too_early = [r for r in picked if r.graduated_at is not None
+                 and (r.opened_at - r.graduated_at).total_seconds() < pl.ENTRY_AGE_S[0]]
+    picked = [r for r in picked if r not in too_early]
     covers = await _covers(db, picked)
     no_cover = [r for r in picked if covers.get(r.mint) is False]
     picked = [r for r in picked if covers.get(r.mint) is not False]
@@ -212,6 +219,7 @@ async def build(db: AsyncSession) -> dict[str, Any]:
         "skip_hours_dubai": list(SKIP_HOURS_DUBAI), "morning_skipped": len(morning),
         "max_sells_before": MAX_SELLS_BEFORE, "sellers_skipped": len(sellers),
         "cover_rule": True, "cover_skipped": len(no_cover),
+        "min_entry_age_s": pl.ENTRY_AGE_S[0], "too_early_skipped": len(too_early),
         "boosted_coins": sum(1 for _, b in paid.values() if (b or 0) > 0),
         # Days from the first trade: no coin had a profile on record before
         # 8 Oct, so days from 1 Oct would open on a week of empty boxes.
