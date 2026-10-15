@@ -867,6 +867,24 @@ def _account_keys(tx: dict[str, Any]) -> list[str]:
     return [k["pubkey"] if isinstance(k, dict) else k for k in keys]
 
 
+def _first_payer(tx: dict[str, Any], wallet: str) -> str | None:
+    """The account whose balance fell most in a transaction that paid `wallet`
+    SOL; None if this transaction did not pay it."""
+    keys = _account_keys(tx)
+    meta = tx.get("meta") or {}
+    if meta.get("err") is not None:
+        return None
+    pre, post = meta.get("preBalances") or [], meta.get("postBalances") or []
+    if wallet not in keys:
+        return None
+    i = keys.index(wallet)
+    if i >= len(post) or i >= len(pre) or post[i] <= pre[i]:
+        return None
+    span = range(min(len(keys), len(pre), len(post)))
+    paid = [(pre[j] - post[j], keys[j]) for j in span if j != i and pre[j] > post[j]]
+    return max(paid)[1] if paid else None
+
+
 async def funder(rpc: Any, wallet: str) -> str | None:
     """Who paid SOL into `wallet` the first time it got any: the account whose
     balance fell most in that transaction. None when its oldest transactions
@@ -886,18 +904,8 @@ async def funder(rpc: Any, wallet: str) -> str | None:
             opts["paginationToken"] = token
         page = await rpc.call("getTransactionsForAddress", [wallet, opts]) or {}
         for tx in page.get("data") or []:
-            keys = _account_keys(tx)
-            meta = tx.get("meta") or {}
-            pre, post = meta.get("preBalances") or [], meta.get("postBalances") or []
-            if wallet not in keys:
-                continue
-            i = keys.index(wallet)
-            if i >= len(post) or i >= len(pre) or post[i] <= pre[i]:
-                continue
-            span = range(min(len(keys), len(pre), len(post)))
-            paid = [(pre[j] - post[j], keys[j]) for j in span if j != i and pre[j] > post[j]]
-            if paid:
-                return max(paid)[1]
+            if (payer := _first_payer(tx, wallet)) is not None:
+                return payer
         token = page.get("paginationToken")
         if not token:
             break
@@ -951,18 +959,149 @@ async def operator_ids_when_visible(rpc: Any, mint: str, pool: str, *,
             await asyncio.sleep(pause_s)
 
 
+# --- The operator off the public node (Karthik, 2026-10-15) --------------------
+#
+# "i thought we block connected wallets to prevent rugs?" They are, but the
+# wallets were read on Helius only, and Helius spent its quota at 07:00 Dubai:
+# 2 of the next 88 coins had their holders read, so the linked-to-a-rug check
+# had nothing to compare and Riot Games (funded through one hop by Rockstar's
+# creator, 13 minutes after Rockstar's -88%) went through. Chainstack and the
+# public node both refuse `getTokenLargestAccounts`, but the public node lists
+# a mint's token accounts (`getProgramAccounts`, 0.03-0.3 s) and a wallet's
+# oldest transactions. Same holders (1%+), same first-funder rule.
+
+TOKEN_PROGRAMS = ("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+                  "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb")
+#: Concurrent public-node calls for one coin: it rate-limits per address.
+PUBLIC_CONCURRENCY = 4
+#: Oldest transactions read per wallet looking for the first payment.
+FUNDER_OLDEST_TXS = 6
+#: Signature pages (1,000 each) paged back per wallet. One: a wallet with more
+#: history is a busy trading bot, not a fresh operator wallet, and paging it
+#: cost the whole 6 s budget on coins a few minutes old.
+PUBLIC_FUNDING_PAGES = 1
+_FUNDERS: dict[str, str | None] = {}
+_FUNDERS_KEEP = 20_000
+
+
+class PublicUnread(RuntimeError):
+    """The public node did not answer (not "no such data")."""
+
+
+async def _public(client: httpx.AsyncClient, gate: asyncio.Semaphore,
+                  method: str, params: list[Any]) -> Any:
+    async with gate:
+        got = (await client.post(PUBLIC_RPC_URL, json={
+            "jsonrpc": "2.0", "id": 1, "method": method, "params": params})).json()
+    if not isinstance(got, dict) or "result" not in got:
+        raise PublicUnread(method)
+    return got["result"]
+
+
+def big_holders(accounts: Sequence[dict[str, Any]], supply: Decimal,
+                exclude: set[str]) -> set[str]:
+    """Owners of token accounts holding `OPERATOR_MIN_SHARE` of `supply`, from
+    jsonParsed `getProgramAccounts` rows; `exclude` (pool, curve) left out."""
+    owners: dict[str, Decimal] = {}
+    for row in accounts:
+        info = ((((row.get("account") or {}).get("data") or {}).get("parsed") or {})
+                .get("info") or {})
+        owner = info.get("owner")
+        amount = Decimal(str((info.get("tokenAmount") or {}).get("uiAmountString") or 0))
+        if owner:
+            owners[owner] = owners.get(owner, Decimal(0)) + amount
+    return {o for o, a in owners.items()
+            if supply and a / supply >= config.OPERATOR_MIN_SHARE and o not in exclude}
+
+
+async def _public_funder(client: httpx.AsyncClient, gate: asyncio.Semaphore,
+                         wallet: str) -> str | None:
+    """`funder` off the public node: the wallet's oldest signatures (paging back
+    up to `FUNDING_PAGES` thousand), then its oldest transactions in order."""
+    if wallet in _FUNDERS:
+        return _FUNDERS[wallet]
+    before: str | None = None
+    oldest: list[dict[str, Any]] = []
+    for _ in range(PUBLIC_FUNDING_PAGES):
+        opts: dict[str, Any] = {"limit": 1000, "commitment": "confirmed"}
+        if before:
+            opts["before"] = before
+        page = await _public(client, gate, "getSignaturesForAddress", [wallet, opts]) or []
+        if page:
+            oldest = page
+            before = page[-1]["signature"]
+        if len(page) < 1000:
+            break
+    else:
+        oldest = []   # more history than we page through: no first funder known
+    found: str | None = None
+    for sig in [s["signature"] for s in reversed(oldest) if s.get("err") is None][:FUNDER_OLDEST_TXS]:
+        try:
+            tx = await _public(client, gate, "getTransaction", [
+                sig, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 1,
+                      "commitment": "confirmed"}])
+        except PublicUnread:
+            continue   # one unreadable transaction does not end the search
+        if tx and (found := _first_payer(tx, wallet)) is not None:
+            break
+    if len(_FUNDERS) >= _FUNDERS_KEEP:
+        _FUNDERS.clear()
+    _FUNDERS[wallet] = found
+    return found
+
+
+async def public_operator_ids(mint: str, pool: str) -> frozenset[str] | None:
+    """`operator_ids` off the public node. None when it could not be read."""
+    gate = asyncio.Semaphore(PUBLIC_CONCURRENCY)
+    async with httpx.AsyncClient(timeout=OPERATOR_READ_TIMEOUT_S) as client:
+        while True:   # the mint can take seconds to be visible; the caller's timeout ends this
+            try:
+                supply = Decimal(str((((await _public(client, gate, "getTokenSupply",
+                                                      [mint, CONFIRMED])) or {})
+                                      .get("value") or {}).get("uiAmountString") or 0))
+                rows: list[dict[str, Any]] = []
+                for program in TOKEN_PROGRAMS:
+                    rows += await _public(client, gate, "getProgramAccounts", [program, {
+                        "encoding": "jsonParsed", **CONFIRMED,
+                        "filters": [{"memcmp": {"offset": 0, "bytes": mint}}]}]) or []
+            except PublicUnread:
+                await asyncio.sleep(OPERATOR_RETRY_PAUSE_S)
+                continue
+            if supply and rows:
+                break
+            await asyncio.sleep(OPERATOR_RETRY_PAUSE_S)
+        curve = bonding_curve_address(mint, program_id=config.PUMP_PROGRAM_ID)
+        owners = big_holders(rows, supply, {pool, curve})
+        funders = await asyncio.gather(*(_public_funder(client, gate, o) for o in owners),
+                                       return_exceptions=True)
+    # A funder that could not be read is left out, as Helius's reader did with
+    # a wallet whose first payment it never found; the holders still count.
+    return frozenset(owners | {f for f in funders if isinstance(f, str)})
+
+
 async def operators_now(mint: str, pool: str) -> frozenset[str] | None:
-    """`operator_ids` on Helius, bounded in time. `getTransactionsForAddress`
-    exists nowhere else, and the public node refuses `getTokenLargestAccounts`."""
-    if not settings.helius_configured:
+    """The operator behind a coin within one `OPERATOR_READ_TIMEOUT_S` budget:
+    off the public node first, `operator_ids` on Helius in whatever time is
+    left if that fails (2026-10-15), so a slow read never holds a buy longer
+    than the Helius read alone used to."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + OPERATOR_READ_TIMEOUT_S
+    try:
+        got = await asyncio.wait_for(public_operator_ids(mint, pool),
+                                     timeout=OPERATOR_READ_TIMEOUT_S)
+        if got is not None:
+            return got
+    except Exception as exc:   # a stranger, not a crash: the tick goes on
+        logger.info("graduation_operator_public_unread", mint=mint, error=type(exc).__name__)
+    left = deadline - loop.time()
+    if not settings.helius_configured or left < 1.0:
         return None
     from app.services.rpc.standard import StandardSolanaRPC
 
     rpc = StandardSolanaRPC(rpc_url=settings.HELIUS_RPC_URL)
     await rpc.start()
     try:
-        return await asyncio.wait_for(operator_ids_when_visible(rpc, mint, pool),
-                                      timeout=OPERATOR_READ_TIMEOUT_S)
+        return await asyncio.wait_for(operator_ids_when_visible(rpc, mint, pool), timeout=left)
     except Exception as exc:  # a stranger, not a crash: the tick goes on
         logger.info("graduation_operator_unread", mint=mint, error=type(exc).__name__)
         return None

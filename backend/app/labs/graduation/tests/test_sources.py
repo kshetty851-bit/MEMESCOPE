@@ -316,3 +316,30 @@ async def test_a_failed_pool_read_moves_to_the_next_node(monkeypatch):
     held = await sources.pool_now("Mint", "Pool")
     assert asked == ["https://chainstack", "https://helius", sources.PUBLIC_RPC_URL]
     assert held is not None and held.price() is not None
+
+
+def _row(owner, amount):
+    return {"account": {"data": {"parsed": {"info": {"owner": owner, "tokenAmount": {"uiAmountString": str(amount)}}}}}}
+
+
+def test_big_holders_from_token_accounts():
+    from decimal import Decimal
+
+    from app.labs.graduation import sources
+
+    rows = [_row("Whale", 50_000_000), _row("Whale", 5_000_000), _row("Small", 1_000),
+            _row("Pool", 600_000_000), _row("Mid", 10_000_000)]
+    got = sources.big_holders(rows, Decimal(1_000_000_000), exclude={"Pool"})
+    assert got == {"Whale", "Mid"}   # 5.5% and 1%; the pool and a 0.0001% wallet left out
+
+
+def test_first_payer_sees_through_a_one_transaction_hop():
+    from app.labs.graduation import sources
+
+    # Source -> Hop -> Creator in one transaction: the hop nets zero, the source pays.
+    tx = {"transaction": {"message": {"accountKeys": ["Source", "Hop", "Creator"]}},
+          "meta": {"err": None, "preBalances": [700, 1, 0], "postBalances": [92, 1, 607]}}
+    assert sources._first_payer(tx, "Creator") == "Source"
+    assert sources._first_payer(tx, "Source") is None          # Source was not paid
+    tx["meta"]["err"] = {"InstructionError": [0, "x"]}
+    assert sources._first_payer(tx, "Creator") is None          # a failed transaction pays nobody
