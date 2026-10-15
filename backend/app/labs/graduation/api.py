@@ -1907,6 +1907,31 @@ def _floor_test(rows: Sequence[Any]) -> dict[str, Any]:
                     "usd": round(sum(50 * k * r for k, r in xs), 2)})
     return {"since": FLOOR_TEST_FROM, "lines": out}
 
+def _without_bad_names(rows: Sequence[Any]) -> tuple[list[Any], int, int]:
+    """Karthik's book less a coin named like one of its own coins that closed at
+    a rug's loss in the `KARTHIK_RUGGED_NAME_HOURS` before it (only rugs it
+    actually took, closed before the buy), and less the blocked names."""
+    from app.labs.graduation import pool_lab as pl
+
+    window = timedelta(hours=config.KARTHIK_RUGGED_NAME_HOURS)
+    rug = float(config.OPERATOR_RUG_MOVE)
+    kept: list[Any] = []
+    rugs: list[tuple[str, datetime]] = []
+    rugged = blocked = 0
+    for r in sorted(rows, key=_opened_order):
+        key = pl.name_key(r.symbol)
+        if key and key in config.KARTHIK_BLOCKED_NAMES:
+            blocked += 1
+            continue
+        if key and any(k == key and r.opened_at - window < at < r.opened_at for k, at in rugs):
+            rugged += 1
+            continue
+        kept.append(r)
+        if float(r.net_return) <= rug and r.closed_at is not None:
+            rugs.append((key, r.closed_at))
+    return kept, rugged, blocked
+
+
 @router.get("/karthik", summary="Karthik's own $500 book, and its judge date")
 async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """His book alone, with the two things a balance cannot say.
@@ -1974,6 +1999,8 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     # The crew of any coin that closed 30% or more down is refused from then
     # on (Karthik, 2026-10-10, `moneyblock.CREW`), replayed from day 1.
     rows = await moneyblock.without_crew(db, every, datetime.now(UTC))
+    crewless = len(rows)
+    rows, rugged_names, blocked_names = _without_bad_names(rows)
     walk = _funded_walk(
         [(p.opened_at, p.closed_at, float(p.net_return),
           float(p.impact_open or 0), float(p.impact_close or 0)) for p in rows],
@@ -2034,7 +2061,11 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         "skipped": walk.skipped,
         # Signals let go because a trade was already open: none since the book
         # buys as many at once as the balance allows (2026-10-03).
-        "busy_skipped": len(every) - len(rows),
+        "busy_skipped": len(every) - crewless,
+        "rugged_name_hours": config.KARTHIK_RUGGED_NAME_HOURS,
+        "rugged_name_skipped": rugged_names,
+        "blocked_names": sorted(config.KARTHIK_BLOCKED_NAMES),
+        "blocked_name_skipped": blocked_names,
         "one_at_a_time_since": None,
         "many_at_once_since": config.KARTHIK_MANY_AT_ONCE_AT,
         "wins": sum(1 for money in pnl if money > 0),

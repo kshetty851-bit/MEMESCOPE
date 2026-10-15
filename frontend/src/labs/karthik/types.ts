@@ -58,6 +58,10 @@ export interface KarthikBook {
   pools_usd?: [number, number | null];
   skip_pools_usd?: [number, number];
   skip_ai_pools_usd?: [number, number];
+  rugged_name_hours?: number;
+  rugged_name_skipped?: number;
+  blocked_names?: string[];
+  blocked_name_skipped?: number;
   pools_since?: string;
   /** Never buys a coin more than this long after it graduated (seconds). */
   max_entry_age_s?: number;

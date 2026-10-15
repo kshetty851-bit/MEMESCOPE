@@ -70,3 +70,8 @@ def test_entry_window_keeps_19_to_46_seconds():
     assert not pl.in_entry_window(at(10)) and not pl.in_entry_window(at(47))
     assert pl.in_entry_window(at(19)) and pl.in_entry_window(at(30)) and pl.in_entry_window(at(46))
     assert pl.in_entry_window(N(opened_at=g, graduated_at=None))  # unknown is kept
+
+
+def test_name_key_matches_spacing_and_case():
+    assert pl.name_key("Mr Beast") == pl.name_key("MRBEAST") == pl.name_key("MrBeast") == "mrbeast"
+    assert pl.name_key(None) == ""
