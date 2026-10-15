@@ -572,6 +572,19 @@ def _retry_after(response: httpx.Response) -> float:
 POOL_READ_ATTEMPTS = 3
 
 
+def _pool_node() -> str | None:
+    """Where the pool reads go: Chainstack when it is set, Helius otherwise.
+
+    Moved off Helius on 2026-10-15 (Karthik: "option 2"): Helius answered
+    "max usage reached" from 07:00 Dubai, the pool read before every lab buy
+    failed, and the lab and the real wallets bought nothing for 12 hours.
+    Chainstack answers `getMultipleAccounts` (matched Helius 99% on 3 Oct).
+    """
+    if settings.CHAINSTACK_RPC_URL.strip():
+        return settings.CHAINSTACK_RPC_URL.strip()
+    return settings.HELIUS_RPC_URL if settings.helius_configured else None
+
+
 async def pool_now(mint: str, pool: str) -> held_watch.Held | None:
     """A pool's own price and depth this moment, off its two vaults.
 
@@ -585,8 +598,7 @@ async def pool_now(mint: str, pool: str) -> held_watch.Held | None:
     poll; Helius is paid for and this is a handful of reads a minute. Asked up
     to `POOL_READ_ATTEMPTS` times, since a refused read costs the entry a tick.
     """
-    stream = HeldVaultStream(
-        url=settings.HELIUS_RPC_URL if settings.helius_configured else None)
+    stream = HeldVaultStream(url=_pool_node())
     for attempt in range(POOL_READ_ATTEMPTS):
         try:
             held = await stream.resolve(mint, pool)
@@ -632,7 +644,19 @@ async def pool_txs_before(rpc: Any, pool: str, at: datetime, *, stop_at: int) ->
 
 
 async def pool_txs_now(pool: str, at: datetime) -> int | None:
-    """`pool_txs_before` on Helius, bounded in time like the operator read."""
+    """How many transactions the pool had before `at`, no further than the
+    quiet line: off the public node's `getSignaturesForAddress` first, Helius's
+    `pool_txs_before` only if that fails (2026-10-15: Helius spent its quota and
+    every retry cost the buy 2-3 s; every quiet book needs this count, and
+    Chainstack's plan refuses history calls)."""
+    try:
+        sigs = await asyncio.wait_for(_signatures(PUBLIC_RPC_URL, pool),
+                                      timeout=OPERATOR_READ_TIMEOUT_S)
+    except Exception as exc:   # a stranger, not a crash: the tick goes on
+        logger.info("graduation_pool_sigs_unread", pool=pool, error=type(exc).__name__)
+        sigs = None
+    if sigs is not None:
+        return count_signatures(sigs, at, stop_at=config.QUIET_MAX_POOL_TXS)
     if not settings.helius_configured:
         return None
     from app.services.rpc.standard import StandardSolanaRPC
@@ -643,9 +667,35 @@ async def pool_txs_now(pool: str, at: datetime) -> int | None:
         return await asyncio.wait_for(
             pool_txs_before(rpc, pool, at, stop_at=config.QUIET_MAX_POOL_TXS),
             timeout=OPERATOR_READ_TIMEOUT_S)
-    except Exception as exc:   # a stranger, not a crash: the tick goes on
+    except Exception as exc:
         logger.info("graduation_pool_txs_unread", pool=pool, error=type(exc).__name__)
         return None
+    finally:
+        await rpc.close()
+
+
+#: The public node: it answers `getSignaturesForAddress`, which Chainstack's
+#: plan refuses. A handful of reads a minute.
+PUBLIC_RPC_URL = "https://api.mainnet-beta.solana.com"
+
+
+async def _signatures(url: str, pool: str) -> list[dict[str, Any]] | None:
+    """The pool's newest 1,000 signatures, or None if the node did not answer."""
+    body = {"jsonrpc": "2.0", "id": 1, "method": "getSignaturesForAddress",
+            "params": [pool, {"limit": 1000, "commitment": "confirmed"}]}
+    async with httpx.AsyncClient(timeout=OPERATOR_READ_TIMEOUT_S) as client:
+        got = (await client.post(url, json=body)).json()
+    sigs = got.get("result") if isinstance(got, dict) else None
+    return sigs if isinstance(sigs, list) else None
+
+
+def count_signatures(sigs: Sequence[dict[str, Any]], at: datetime, *, stop_at: int) -> int:
+    """What `pool_txs_before` counts, from signatures: succeeded, at or before
+    `at`, no further than `stop_at`."""
+    cutoff = int(at.timestamp())
+    n = sum(1 for s in sigs if s.get("err") is None
+            and (s.get("blockTime") is None or s["blockTime"] <= cutoff))
+    return min(n, stop_at)
 
 
 @dataclass(frozen=True, slots=True)
