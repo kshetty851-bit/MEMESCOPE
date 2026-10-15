@@ -271,15 +271,23 @@ _CREW_SQL = text("""
         union all
         select d.creator_address, b.known_at
         from bad b join discovered_tokens d on d.mint_address = b.mint
-        where d.creator_address is not null) x
+        where d.creator_address is not null
+        union all
+        -- pump.fun's own launch record names a different creator on ~11% of
+        -- coins (Karthik, 2026-10-15: "yes block both creator wallets", after
+        -- Rockstar's launch creator was left off the list).
+        select t.creator, b.known_at
+        from bad b join grad_tokens t on t.mint = b.mint
+        where t.creator is not null) x
     group by w
 """)
 
 _COIN_WALLETS_SQL = text("""
-    select m.mint, o.ids, d.creator_address
+    select m.mint, o.ids, d.creator_address, t.creator
     from unnest(cast(:m as varchar[])) as m(mint)
     left join grad_operators o on o.mint = m.mint
     left join discovered_tokens d on d.mint_address = m.mint
+    left join grad_tokens t on t.mint = m.mint
 """)
 
 _CREW: tuple[datetime, dict[str, datetime]] | None = None
@@ -296,12 +304,15 @@ async def crew_list(session: AsyncSession, now: datetime) -> dict[str, datetime]
 
 
 async def coin_wallets(session: AsyncSession, mints: Iterable[str]) -> dict[str, set[str]]:
-    """Mint -> its creator and recorded insider wallets."""
+    """Mint -> its creators (both records) and recorded insider wallets."""
     mints = list(mints)
     if not mints:
         return {}
     rows = await session.execute(_COIN_WALLETS_SQL, {"m": mints})
-    return {m: {*(ids or ()), *([c] if c else [])} for m, ids, c in rows.all()}
+    out: dict[str, set[str]] = {}
+    for m, ids, scanned, launched in rows.all():
+        out.setdefault(m, set()).update(ids or (), (c for c in (scanned, launched) if c))
+    return out
 
 
 def crew_hit(wallets: Iterable[str], at: datetime, crew: dict[str, datetime]) -> bool:
