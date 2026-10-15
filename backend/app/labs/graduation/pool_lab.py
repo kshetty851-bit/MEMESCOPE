@@ -105,6 +105,12 @@ def ai_name(symbol: str | None) -> bool:
     return any(w in s for w in AI_WORDS)
 
 
+def name_key(symbol: str | None) -> str:
+    """A coin's name for matching: letters and digits, lower case, so
+    "Mr Beast", "MrBeast" and "MRBEAST" are one name."""
+    return re.sub(r"[^a-z0-9]", "", (symbol or "").lower())
+
+
 def famous_name(symbol: str | None) -> bool:
     s = re.sub(r"[^a-z0-9]", "", (symbol or "").lower())
     return bool(s) and (s in FAMOUS_EXACT or any(w in s for w in FAMOUS_WORDS))

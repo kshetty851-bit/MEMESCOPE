@@ -7,7 +7,7 @@ import type { KarthikBook } from "./types";
 describe("Karthik's Lab rule book", () => {
   it("states the rules in plain words, with the book's own numbers", () => {
     const book = {
-      pools_usd: [75000, null], skip_pools_usd: [150000, 200000], skip_ai_pools_usd: [50000, 60000], quiet_max_txs: 100, max_entry_age_s: 120,
+      pools_usd: [75000, null], skip_pools_usd: [150000, 200000], skip_ai_pools_usd: [50000, 60000], rugged_name_hours: 48, rugged_name_skipped: 19, blocked_names: ["mrbeast"], blocked_name_skipped: 6, quiet_max_txs: 100, max_entry_age_s: 120,
       max_entry_age_since: "2026-09-27T09:00:00Z", ticket_usd: "50", capital_usd: "100",
       hold_minutes: 5, rugs: 1, trades: 196,
     } as unknown as KarthikBook;
@@ -15,6 +15,8 @@ describe("Karthik's Lab rule book", () => {
     expect(screen.getByText(/The pool must hold \$75,000 or more\./)).toBeInTheDocument();
     expect(screen.getByText(/No pools between \$150,000 and \$200,000/)).toBeInTheDocument();
     expect(screen.getByText(/named after AI products/)).toBeInTheDocument();
+    expect(screen.getByText(/48 hours after one of this book's coins/)).toBeInTheDocument();
+    expect(screen.getByText(/Never buys coins named mrbeast/)).toBeInTheDocument();
     expect(screen.getByText(/Fewer than 100 trades/)).toBeInTheDocument();
     expect(screen.getByText(/within 2 minutes of the coin graduating/)).toBeInTheDocument();
     expect(screen.getByText(/\$50\.00 per trade, from a \$100\.00 balance\./)).toBeInTheDocument();

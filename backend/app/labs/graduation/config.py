@@ -1114,6 +1114,13 @@ KARTHIK_SKIP_POOL_USD: tuple[int, int] = (150_000, 200_000)
 #: better on 9-13 Oct (+$128) but slightly worse on 1-8 Oct (-$18), so a
 #: rule for the current wave, to review after a week, not a proven edge.
 KARTHIK_SKIP_AI_POOL_USD: tuple[int, int] = (50_000, 60_000)
+#: Karthik, 2026-10-15 ("apply 48 hour rule to 50k pool since day 1 and block
+#: mrbeast name"): a name is not rebought within this many hours of one of the
+#: book's coins with that name closing at a rug's loss, and these names (letters
+#: and digits, lower case) are never bought. Re-run from 1 Oct: $840.70 ->
+#: $856.94 for the 48 h rule, resting on one coin (MrBeast, 15 Oct).
+KARTHIK_RUGGED_NAME_HOURS = 48
+KARTHIK_BLOCKED_NAMES: frozenset[str] = frozenset({"mrbeast"})
 
 #: Never buy a coin more than this long after it graduated (Karthik,
 #: 2026-09-27, after EVO). EVO was bought 186s after graduating, the slowest
