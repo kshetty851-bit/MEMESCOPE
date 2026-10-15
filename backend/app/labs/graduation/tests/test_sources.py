@@ -282,3 +282,37 @@ async def test_pool_count_uses_helius_only_when_the_public_node_fails(monkeypatc
     monkeypatch.setattr(sources, "_signatures", down)
     monkeypatch.setattr(type(sources.settings), "helius_configured", property(lambda self: False))
     assert await sources.pool_txs_now("Pool", datetime(2026, 10, 15, tzinfo=UTC)) is None
+
+
+
+async def test_a_failed_pool_read_moves_to_the_next_node(monkeypatch):
+    from app.labs.graduation import sources
+
+    asked: list[str] = []
+
+    class Stream:
+        def __init__(self, *, url=None):
+            self.url = url
+
+        async def resolve(self, mint, pool):
+            asked.append(self.url)
+            if self.url != sources.PUBLIC_RPC_URL:
+                raise ConnectionError("max usage reached")
+            from app.labs.graduation import held_watch
+            return held_watch.Held(mint=mint, pool=pool, base_vault="Vb", quote_vault="Vq",
+                                   base_decimals=6, quote_decimals=9)
+
+        async def _read(self, helds):
+            for h in helds:
+                h.apply("base", 10**12, 1)
+                h.apply("quote", 10**11, 1)
+
+    async def no_wait(_s):
+        return None
+
+    monkeypatch.setattr(sources, "HeldVaultStream", Stream)
+    monkeypatch.setattr(sources.asyncio, "sleep", no_wait)
+    monkeypatch.setattr(sources, "_pool_nodes", lambda: ["https://chainstack", "https://helius", sources.PUBLIC_RPC_URL])
+    held = await sources.pool_now("Mint", "Pool")
+    assert asked == ["https://chainstack", "https://helius", sources.PUBLIC_RPC_URL]
+    assert held is not None and held.price() is not None
