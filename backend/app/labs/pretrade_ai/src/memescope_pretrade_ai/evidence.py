@@ -10,6 +10,8 @@ import hashlib
 import json
 import os
 import struct
+import time
+from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -130,11 +132,33 @@ class Evidence:
     def __init__(self):
         self.rpc_url = os.environ.get('PRETRADE_RPC_URL')
         self.key = os.environ.get('PRETRADE_QUOTE_KEY')
+        self.cooldowns = {}
+
+    def feed_error(self):
+        active = [reason for until,reason in self.cooldowns.values() if until>time.monotonic()]
+        return '; '.join(active) or None
+
+    def read_json(self, provider, request, timeout):
+        blocked = self.cooldowns.get(provider)
+        if blocked and blocked[0]>time.monotonic():
+            raise ValueError(blocked[1])
+        try:
+            with urlopen(request,timeout=timeout) as response:
+                return json.load(response)
+        except HTTPError as error:
+            if error.code == 429:
+                body = error.read().decode(errors='replace').lower()
+                quota = any(word in body for word in ['max usage','credits','monthly','quota','usage limit'])
+                delay = 900 if quota else 120
+                reason = f'{provider} quota exhausted; retry in 15 minutes' if quota else f'{provider} rate limited; retry in 2 minutes'
+                self.cooldowns[provider] = (time.monotonic()+delay,reason)
+                raise ValueError(reason) from None
+            raise ValueError(f'{provider} HTTP {error.code}') from None
 
     def rpc(self, method, params):
         if not self.rpc_url: raise ValueError('read-only RPC not configured')
         request = Request(self.rpc_url, data=json.dumps({'jsonrpc':'2.0','id':1,'method':method,'params':params}).encode(),headers={'Content-Type':'application/json'})
-        with urlopen(request, timeout=8) as response: value=json.load(response)
+        value = self.read_json('Helius',request,8)
         if 'error' in value: raise ValueError('RPC rejected read')
         return value['result']
 
@@ -190,14 +214,16 @@ class Evidence:
 
     def quote(self, mint_in, mint_out, amount):
         query = urlencode({'inputMint':mint_in,'outputMint':mint_out,'amount':str(amount),'slippageBps':50,'restrictIntermediateTokens':'true'})
-        with urlopen(Request('https://api.jup.ag/swap/v1/quote?'+query,headers={'x-api-key':self.key or ''}),timeout=4) as response:
-            quote = json.load(response)
+        quote = self.read_json('Jupiter',Request('https://api.jup.ag/swap/v1/quote?'+query,headers={'x-api-key':self.key or ''}),4)
         if quote['inputMint'] != mint_in or quote['outputMint'] != mint_out or int(quote['inAmount']) != amount or int(quote['outAmount']) <= 0:
             raise ValueError('quote amount or mint mismatch')
         return quote
 
     def enrich(self, snapshot):
         op = snapshot.opportunity
+        if self.feed_error():
+            blocked = op.model_copy(update={'metadata':{**op.metadata,'evidence_errors':[self.feed_error()]}})
+            return Snapshot(blocked,None,snapshot.quote_at,snapshot.symbol)
         features = dict(op.features)
         errors = []
         decimals = None
