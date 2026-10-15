@@ -36,6 +36,10 @@ TASK_NAME = "app.labs.graduation.scheduler.graduation_prune_tick"
 FEATURES_TASK = "app.labs.graduation.scheduler.graduation_features_tick"
 PAPER_TASK = "app.labs.graduation.scheduler.graduation_paper_tick"
 FLOWS_TASK = "app.labs.graduation.scheduler.graduation_flows_tick"
+#: The "who bought during the hold" pass (Karthik's Lab flows panel). Off
+#: (Karthik, 2026-10-15: "switch it off"): a report, not a trading input, and
+#: its history reads exist only on Helius.
+FLOWS_ENABLED = False
 #: Coins read per pass, and how often: ~45 Helius credits a coin, so a full
 #: backfill of a few hundred trades takes about an hour and then keeps pace.
 FLOWS_PER_PASS = 10
@@ -234,6 +238,8 @@ async def flows_tick() -> dict[str, Any]:
     Read-only on the chain; writes one `grad_trade_flows` row per coin. A coin
     whose read fails is simply left for the next pass.
     """
+    if not FLOWS_ENABLED:
+        return {"skipped": "switched_off"}
     if not config.enabled():
         return {"skipped": "graduation_disabled"}
     from app.core.config import settings
@@ -374,10 +380,11 @@ celery_app.conf.beat_schedule.setdefault("graduation-lab-rugs", {
     "task": RUGS_TASK,
     "schedule": float(RUGS_INTERVAL_SECONDS),
 })
-celery_app.conf.beat_schedule.setdefault("graduation-lab-flows", {
-    "task": FLOWS_TASK,
-    "schedule": float(FLOWS_INTERVAL_SECONDS),
-})
+if FLOWS_ENABLED:
+    celery_app.conf.beat_schedule.setdefault("graduation-lab-flows", {
+        "task": FLOWS_TASK,
+        "schedule": float(FLOWS_INTERVAL_SECONDS),
+    })
 celery_app.conf.beat_schedule.setdefault("graduation-lab-paper", {
     "task": PAPER_TASK,
     "schedule": float(config.PAPER_INTERVAL_SECONDS),

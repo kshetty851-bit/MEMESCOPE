@@ -613,6 +613,13 @@ class GraduationRecorder:
 
     async def poll_once(self, now: datetime) -> dict[str, int]:
         """Read every watched curve, fold it in, then sweep what has expired."""
+        if not config.curve_poll_enabled():
+            # No chain read (switched off 2026-10-15), but expired tokens still
+            # leave the watch set, or it would fill and stop admitting new ones.
+            for state, reason in self.watch.sweep(now):
+                self._retired.setdefault(state.mint, (state, reason))
+                self._dirty.discard(state.mint)
+            return {"polled": 0, "live": len(self.watch)}
         mints = self.watch.mints()
         if not mints:
             return {"polled": 0}

@@ -25,6 +25,12 @@ from app.labs.graduation.tests.fakes import (
 from app.labs.graduation.tests.test_parse import MESSAGES, by_signature
 from app.labs.graduation.tests.test_postgrad import PAIRS
 
+
+@pytest.fixture(autouse=True)
+def _curve_poll_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests cover the curve poll, which is off by default since 2026-10-15."""
+    monkeypatch.setenv("LAB_GRADUATION_CURVE_POLL", "1")
+
 D = Decimal
 START = datetime(2026, 9, 11, 12, 0, tzinfo=UTC)
 MINT = "Bjsxb2QErbB4rhpSRsUgtNBPPri24R3AK58tQwjvpump"
@@ -641,3 +647,19 @@ async def test_an_early_crossing_is_found_watched_and_written() -> None:
         await recorder._held_socket(Stream(), wanted, {}, MarkWriter())
     assert "grad_early_opens" in writes.table_names()
     assert not recorder.early.due
+
+
+
+async def test_with_the_curve_poll_off_nothing_is_read_but_the_watch_set_is_swept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LAB_GRADUATION_CURVE_POLL", "0")
+    recorder, rpc, *_ = build()
+    launch(recorder)
+    rpc.readings[MINT] = curve_state(real_token=AT_70)
+    result = await recorder.poll_once(START)
+    assert rpc.fetches == [] and result["polled"] == 0
+    swept = []
+    monkeypatch.setattr(recorder.watch, "sweep", lambda now: swept.append(now) or [])
+    await recorder.poll_once(START)
+    assert swept == [START]
