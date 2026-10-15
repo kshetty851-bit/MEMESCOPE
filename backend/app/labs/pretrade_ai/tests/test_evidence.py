@@ -85,3 +85,20 @@ def test_truncated_logs_recover_only_complete_cpi_coverage(buy_instruction):
  assert events(t)==[d]
  t['meta']['innerInstructions'][0]['instructions']=[]
  with pytest.raises(ValueError): events(t)
+
+def test_provider_quota_is_reported_and_requests_back_off(monkeypatch):
+ import io
+ from urllib.error import HTTPError
+ from memescope_pretrade_ai import evidence
+ calls=[]
+ def limited(*args,**kwargs):
+  calls.append(1)
+  raise HTTPError('https://provider.example',429,'limit',{},io.BytesIO(b'max usage reached'))
+ monkeypatch.setattr(evidence,'urlopen',limited)
+ client=Evidence()
+ with pytest.raises(ValueError,match='quota exhausted'):client.read_json('Helius',None,1)
+ with pytest.raises(ValueError,match='quota exhausted'):client.read_json('Helius',None,1)
+ assert len(calls)==1
+ assert 'Helius quota exhausted' in client.feed_error()
+ client.cooldowns['Helius']=(0,'expired')
+ assert client.feed_error() is None

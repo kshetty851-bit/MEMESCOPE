@@ -75,8 +75,8 @@ def scan_once(book, connection, now, evidence=None):
         if evidence is not None and row['pair_address']:
             snapshot = evidence.enrich(snapshot)
         book.process(snapshot, datetime.now(timezone.utc))
-        book.heartbeat(datetime.now(timezone.utc), None, len(rows))
-    book.heartbeat(datetime.now(timezone.utc), None, len(rows))
+        book.heartbeat(datetime.now(timezone.utc), evidence.feed_error() if evidence is not None else None, len(rows))
+    book.heartbeat(datetime.now(timezone.utc), evidence.feed_error() if evidence is not None else None, len(rows))
 
 
 def worker():
