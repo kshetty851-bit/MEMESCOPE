@@ -76,6 +76,16 @@ PUMP_MIGRATION_ACCOUNT = "39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg"
 
 def chain_migrations_enabled() -> bool:
     return os.getenv("LAB_GRADUATION_CHAIN_MIGRATIONS", "1").strip() not in ("0", "false", "")
+
+
+def curve_poll_enabled() -> bool:
+    """Read every watched bonding curve each tick? OFF by default (Karthik,
+    2026-10-15: "switch it off"): research only — graduations come from the
+    migration feeds and every buy happens after graduation — and it was the
+    bulk of the Helius credits that ran out that morning. The watch set is
+    still swept, so it never fills up. `LAB_GRADUATION_CURVE_POLL=1` turns it
+    back on (pass it through docker-compose)."""
+    return os.getenv("LAB_GRADUATION_CURVE_POLL", "0").strip() in ("1", "true")
 #: Where the held-position watcher subscribes. The PUBLIC Solana node, on
 #: purpose and not as a fallback.
 #:
