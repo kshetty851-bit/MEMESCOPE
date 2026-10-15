@@ -572,17 +572,20 @@ def _retry_after(response: httpx.Response) -> float:
 POOL_READ_ATTEMPTS = 3
 
 
-def _pool_node() -> str | None:
-    """Where the pool reads go: Chainstack when it is set, Helius otherwise.
+def _pool_nodes() -> list[str]:
+    """Where the pool reads go, in order: Chainstack, Helius, the public node.
 
     Moved off Helius on 2026-10-15 (Karthik: "option 2"): Helius answered
     "max usage reached" from 07:00 Dubai, the pool read before every lab buy
     failed, and the lab and the real wallets bought nothing for 12 hours.
     Chainstack answers `getMultipleAccounts` (matched Helius 99% on 3 Oct).
+    Each failed read moves to the next node (Karthik, 2026-10-15: "hope this
+    RPC will never stop trading"), so one provider down no longer stops buying.
     """
-    if settings.CHAINSTACK_RPC_URL.strip():
-        return settings.CHAINSTACK_RPC_URL.strip()
-    return settings.HELIUS_RPC_URL if settings.helius_configured else None
+    nodes = [settings.CHAINSTACK_RPC_URL.strip(),
+             settings.HELIUS_RPC_URL if settings.helius_configured else "",
+             PUBLIC_RPC_URL]
+    return [n for i, n in enumerate(nodes) if n and n not in nodes[:i]]
 
 
 async def pool_now(mint: str, pool: str) -> held_watch.Held | None:
@@ -598,8 +601,9 @@ async def pool_now(mint: str, pool: str) -> held_watch.Held | None:
     poll; Helius is paid for and this is a handful of reads a minute. Asked up
     to `POOL_READ_ATTEMPTS` times, since a refused read costs the entry a tick.
     """
-    stream = HeldVaultStream(url=_pool_node())
+    nodes = _pool_nodes()
     for attempt in range(POOL_READ_ATTEMPTS):
+        stream = HeldVaultStream(url=nodes[attempt % len(nodes)])
         try:
             held = await stream.resolve(mint, pool)
         except ConnectionError:
