@@ -241,3 +241,44 @@ async def test_reserves_after_is_the_first_swap_at_or_after_the_moment() -> None
     assert await reserves_after(Helius(), mint="Mint", pool="Pool", at=at,
                                 within_s=600) == (9000, 2)
 
+
+
+
+def test_signatures_count_like_the_helius_read():
+    from datetime import UTC, datetime
+
+    from app.labs.graduation import sources
+
+    at = datetime(2026, 10, 15, 12, 0, tzinfo=UTC)
+    t = int(at.timestamp())
+    sigs = [{"blockTime": t - 5, "err": None}, {"blockTime": t, "err": None},
+            {"blockTime": t - 1, "err": {"InstructionError": [0, "x"]}},  # failed: not counted
+            {"blockTime": t + 9, "err": None}]                             # after the buy: not counted
+    assert sources.count_signatures(sigs, at, stop_at=100) == 2
+    assert sources.count_signatures([{"blockTime": t, "err": None}] * 500, at, stop_at=100) == 100
+
+
+async def test_pool_count_falls_back_to_the_public_node(monkeypatch):
+    from datetime import UTC, datetime
+
+    from app.labs.graduation import sources
+
+    async def sigs(url, pool):
+        assert url == sources.PUBLIC_RPC_URL
+        return [{"blockTime": 1, "err": None}] * 7
+
+    monkeypatch.setattr(sources, "_signatures", sigs)
+    assert await sources.pool_txs_now("Pool", datetime(2026, 10, 15, tzinfo=UTC)) == 7
+
+
+async def test_pool_count_uses_helius_only_when_the_public_node_fails(monkeypatch):
+    from datetime import UTC, datetime
+
+    from app.labs.graduation import sources
+
+    async def down(url, pool):
+        raise OSError("refused")
+
+    monkeypatch.setattr(sources, "_signatures", down)
+    monkeypatch.setattr(type(sources.settings), "helius_configured", property(lambda self: False))
+    assert await sources.pool_txs_now("Pool", datetime(2026, 10, 15, tzinfo=UTC)) is None
