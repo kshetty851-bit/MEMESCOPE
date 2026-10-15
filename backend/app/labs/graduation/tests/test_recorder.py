@@ -641,3 +641,43 @@ async def test_an_early_crossing_is_found_watched_and_written() -> None:
         await recorder._held_socket(Stream(), wanted, {}, MarkWriter())
     assert "grad_early_opens" in writes.table_names()
     assert not recorder.early.due
+
+
+def test_every_graduation_is_owed_a_holder_read() -> None:
+    """The feed is global: most graduates were no longer in the watch set when
+    they migrated, and on 2026-09-17 three in four were never asked."""
+    from app.labs.graduation.parse import MigrationRow
+
+    recorder, *_ = build()
+    recorder._on_migration(MigrationRow(
+        mint="NeverWatched", ts=START, pool="pump-amm", signature="sig", raw={}))
+    assert recorder._owe_holders == {"NeverWatched"}
+
+
+async def test_a_refused_holder_read_is_retried_briefly_then_dropped() -> None:
+    """The node refuses reads in bursts; a refusal gets a short second chance
+    and no more, because a late read describes a different token."""
+    from app.labs.graduation import config
+    from app.labs.graduation.sources import Holders
+
+    recorder, rpc, _, _, clock = build()
+    recorder._owe_holders.add(MINT)
+    assert await recorder._read_holders() == {}          # refused
+    assert rpc.holders_asked == [MINT]
+    assert await recorder._read_holders() == {}          # not due yet: no ask
+    assert rpc.holders_asked == [MINT]
+
+    clock.now = START + timedelta(seconds=config.HOLDER_RETRY_S[0])
+    rpc.holder_readings[MINT] = Holders(top1_share=D("0.3"), top10_share=D("0.6"),
+                                        top_address="POOL", seen=20)
+    got = await recorder._read_holders()                 # second try answers
+    assert set(got) == {MINT}
+    assert not recorder._holder_retry
+
+    # A mint that is refused every time is asked 1 + len(HOLDER_RETRY_S) times.
+    recorder._owe_holders.add("Refused")
+    for wait in (0, *config.HOLDER_RETRY_S):
+        clock.now += timedelta(seconds=wait)
+        await recorder._read_holders()
+    assert rpc.holders_asked.count("Refused") == 1 + len(config.HOLDER_RETRY_S)
+    assert not recorder._holder_retry and not recorder._owe_holders
