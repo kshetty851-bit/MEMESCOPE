@@ -42,6 +42,11 @@ describe("Boost Lab", () => {
     expect(t).toHaveTextContent("flatter them");
   });
 
+  it("states the first-seconds skip", () => {
+    render(<BoostRuleBook d={{ ...d, min_entry_age_s: 19, too_early_skipped: 15 }} />);
+    expect(screen.getByTestId("boost-rule-book")).toHaveTextContent("within 19 seconds of graduating");
+  });
+
   it("states the cover-picture skip", () => {
     render(<BoostRuleBook d={{ ...d, cover_rule: true, cover_skipped: 8 }} />);
     expect(screen.getByTestId("boost-rule-book")).toHaveTextContent("no cover picture (the wide banner). 8 skipped so far.");
