@@ -102,3 +102,34 @@ def test_provider_quota_is_reported_and_requests_back_off(monkeypatch):
  assert 'Helius quota exhausted' in client.feed_error()
  client.cooldowns['Helius']=(0,'expired')
  assert client.feed_error() is None
+
+
+def test_quotes_wait_for_chain_evidence_and_a_budget(monkeypatch):
+ e=Evidence(); calls=[]
+ monkeypatch.setattr(e,'authorities',lambda mint:(_ for _ in ()).throw(ValueError('Helius HTTP 401')))
+ monkeypatch.setattr(e,'history',lambda *a:{})
+ def quote(mi,mo,amount):
+  e.spend_jupiter(); calls.append(mo)
+  return {'outAmount':'10000000' if mo==MINT else '9900000','priceImpactPct':'0.001','routePlan':[{'swapInfo':{'ammKey':POOL}}]}
+ monkeypatch.setattr(e,'quote',quote)
+ row={'mint':MINT,'migrated_at':AT,'symbol':'TEST','ts':AT,'pair_address':POOL,'price_usd':1,'liquidity_usd':60000}
+ skipped=e.enrich(map_row(row,AT))
+ assert calls==[] and 'sell_route_available' not in skipped.opportunity.features
+ held=e.enrich(map_row(row,AT),held=True)          # a held coin still gets its exit quote
+ assert len(calls)==2 and 'sell_route_available' in held.opportunity.features
+ from memescope_pretrade_ai import evidence as ev
+ for _ in range(ev.JUPITER_PER_MINUTE): e.jupiter_calls.append(__import__('time').monotonic())
+ with pytest.raises(ValueError): e.spend_jupiter()
+
+
+def test_identity_from_creator_and_prior_pool_collapse():
+ from datetime import timedelta
+ from memescope_pretrade_ai.service import identity_of
+ row={'creator':'C1','token_seen_at':AT-timedelta(minutes=3)}
+ ident,f=identity_of(row,AT,{'C1':(2,AT-timedelta(days=3))})
+ assert ident.creator_address=='C1' and f['identity_confidence'].value==1.0
+ assert f['creator_prior_confirmed_rug_count_30d'].value==2 and round(f['malicious_link_recency_days'].value)==3
+ ident,f=identity_of(row,AT,{})
+ assert f['creator_prior_confirmed_rug_count_30d'].value==0 and 'malicious_link_recency_days' not in f
+ assert identity_of({'creator':None,'token_seen_at':AT},AT,{})==(identity_of({},AT,{})[0],{})
+ assert identity_of({'creator':'C1','token_seen_at':AT+timedelta(seconds=1)},AT,{})[1]=={}

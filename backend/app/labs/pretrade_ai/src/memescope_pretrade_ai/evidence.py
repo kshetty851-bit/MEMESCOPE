@@ -11,6 +11,7 @@ import json
 import os
 import struct
 import time
+from collections import deque
 from urllib.error import HTTPError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -22,6 +23,11 @@ PROGRAM = 'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA'
 TOKEN_2022 = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'
 TOKEN = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'
 USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
+# The quote key is shared with the real wallets (2026-10-16): this lab asked for
+# up to 40 quotes a cycle and was rate limited 812 times in 1,000 assessments,
+# eating the allowance live buys and sells need. A per-minute budget, and quotes
+# only for a held coin or a candidate whose chain evidence is already complete.
+JUPITER_PER_MINUTE = int(os.environ.get('PRETRADE_JUPITER_PER_MINUTE', '6'))
 NON_TRADE_INSTRUCTIONS = {'2d3da597680031bd': 'admin_cto_pool', 'd10b7357d5177ccc': 'admin_update_token_incentives', '694406af000723a2': 'boost_buy_and_burn', 'c2ab1c46684d5b2f': 'buy_exact_quote_in_v2', 'b817ee6167c5d33d': 'buy_v2', '253a237ebe35e4c5': 'claim_cashback', '1004471ccc01281b': 'claim_token_incentives', 'f945a4da9667548a': 'close_user_volume_accumulator', 'a039592ab58b2b42': 'collect_coin_creator_fee', 'c9cff3724b6f2fbd': 'create_config', 'f223c68952e1f2b6': 'deposit', 'b9adbb5ad80feee9': 'disable', 'ea66c2cb96483ee5': 'extend_account', '8ce9215e845ac28f': 'init_boost', '5e06ca73ff60e8b7': 'init_user_volume_accumulator', 'd0089f044aaf103a': 'migrate_pool_coin_creator', '2b644913e9f66f94': 'multi_hop_swap', '5df6823ce7e940b2': 'sell_v2', 'e3954c2a8227eacd': 'set_boost_authority', 'd295802dbc3a4eaf': 'set_coin_creator', '6faca2e87259d58e': 'set_reserved_fee_recipients', '20f6bf3408c949ba': 'sweep_creator_fee', '0830be07b644b7e5': 'sweep_protocol_fee', '561fc057a3574fee': 'sync_user_volume_accumulator', '75a1a04adf897663': 'toggle_boost', '7367e0ffbd5956c3': 'toggle_cashback_enabled', '01096fd0641fffa3': 'toggle_mayhem_mode', '8b348655e4e56cf1': 'transfer_creator_fees_to_pump', '01214eb921432c5c': 'transfer_creator_fees_to_pump_v2', 'a1b028d53cb8b3e4': 'update_admin', 'fbe0ab92a01a71e9': 'update_buyback_config', '3dafa0f9424288af': 'update_creator_fee_config', '68b867f258976b14': 'update_fee_config', 'b712469c946da122': 'withdraw'}
 ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 
@@ -133,6 +139,7 @@ class Evidence:
         self.rpc_url = os.environ.get('PRETRADE_RPC_URL')
         self.key = os.environ.get('PRETRADE_QUOTE_KEY')
         self.cooldowns = {}
+        self.jupiter_calls = deque()
 
     def feed_error(self):
         active = [reason for until,reason in self.cooldowns.values() if until>time.monotonic()]
@@ -212,14 +219,26 @@ class Evidence:
         return {'top1_holder_share_pct':observation(100*amounts[0]/supply,'complete indexed owner balances, including vaults'),
                 'top10_holder_share_pct':observation(100*sum(amounts[:10])/supply,'complete indexed owner balances, including vaults')}
 
+    def jupiter_left(self):
+        cutoff = time.monotonic() - 60
+        while self.jupiter_calls and self.jupiter_calls[0] < cutoff:
+            self.jupiter_calls.popleft()
+        return JUPITER_PER_MINUTE - len(self.jupiter_calls)
+
+    def spend_jupiter(self):
+        if self.jupiter_left() <= 0:
+            raise ValueError('Jupiter budget for this minute used; waiting')
+        self.jupiter_calls.append(time.monotonic())
+
     def quote(self, mint_in, mint_out, amount):
+        self.spend_jupiter()
         query = urlencode({'inputMint':mint_in,'outputMint':mint_out,'amount':str(amount),'slippageBps':50,'restrictIntermediateTokens':'true'})
         quote = self.read_json('Jupiter',Request('https://api.jup.ag/swap/v1/quote?'+query,headers={'x-api-key':self.key or ''}),4)
         if quote['inputMint'] != mint_in or quote['outputMint'] != mint_out or int(quote['inAmount']) != amount or int(quote['outAmount']) <= 0:
             raise ValueError('quote amount or mint mismatch')
         return quote
 
-    def enrich(self, snapshot):
+    def enrich(self, snapshot, held=False):
         op = snapshot.opportunity
         if self.feed_error():
             blocked = op.model_copy(update={'metadata':{**op.metadata,'evidence_errors':[self.feed_error()]}})
@@ -239,6 +258,10 @@ class Evidence:
         price, sell_price, quoted_at = None, None, snapshot.quote_at
         # Last operation: both matched quotes must still be younger than five seconds.
         try:
+            if not held and (errors or not op.baseline_eligible):
+                raise ValueError('skipped until chain evidence is complete')
+            if not held and self.jupiter_left() < 2:
+                raise ValueError('Jupiter budget for this minute used; waiting')
             started = now()
             buy = self.quote(USDC,op.mint,10_000_000)
             sell = self.quote(op.mint,USDC,int(buy['outAmount']))
