@@ -1941,7 +1941,9 @@ def _without_bad_names(rows: Sequence[Any]) -> tuple[list[Any], int, int, int]:
         if config.KARTHIK_SKIP_SPACED_NAMES and " " in (r.symbol or "").strip():
             spaced += 1
             continue
-        if key and any(k == key and r.opened_at - window < at < r.opened_at for k, at in rugs):
+        if (config.KARTHIK_LAB_RUGGED_NAME_BAN and key
+                and any(k == key and r.opened_at - window < at < r.opened_at
+                        for k, at in rugs)):
             rugged += 1
             continue
         kept.append(r)
@@ -2089,7 +2091,8 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         # Signals let go because a trade was already open: none since the book
         # buys as many at once as the balance allows (2026-10-03).
         "busy_skipped": len(every) - crewless,
-        "rugged_name_hours": config.KARTHIK_RUGGED_NAME_HOURS,
+        "rugged_name_hours": (config.KARTHIK_RUGGED_NAME_HOURS
+                              if config.KARTHIK_LAB_RUGGED_NAME_BAN else None),
         "rugged_name_skipped": rugged_names,
         "blocked_names": sorted(config.KARTHIK_BLOCKED_NAMES),
         "skip_spaced_names": config.KARTHIK_SKIP_SPACED_NAMES,
