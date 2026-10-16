@@ -1525,13 +1525,14 @@ def _opened_order(row: Any) -> tuple[datetime, str]:
 
 
 def _karthik_line(rows: Sequence[Any], sol: Decimal | None, *, size: float,
-                  capital: float, cents: Decimal) -> dict[str, Any]:
+                  capital: float, cents: Decimal,
+                  tickets: Sequence[float] | None = None) -> dict[str, Any]:
     """One way of trading the book: the book's own walk (`_funded_walk`) over
     these rows, so skips, pool impact at that size and the cash limit are all
     the real book's."""
     w = _funded_walk([(r.opened_at, r.closed_at, float(r.net_return),
                        float(r.impact_open or 0), float(r.impact_close or 0))
-                      for r in rows], sol, ticket=size, start=capital)
+                      for r in rows], sol, ticket=size, start=capital, tickets=tickets)
     took = [(r, m) for r, m in zip(rows, w.pnl, strict=True) if m is not None]
     return {
         "balance_usd": Decimal(str(w.cash)).quantize(cents),
@@ -1566,7 +1567,8 @@ def _pools_words() -> str:
 
 def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
                     ticket: float, cents: Decimal,
-                    small: Sequence[Any] = ()) -> dict[str, Any]:
+                    small: Sequence[Any] = (),
+                    stake: Callable[[Any], float] | None = None) -> dict[str, Any]:
     """The book's rule at every trade size and every pool floor, one grid
     (Karthik, 2026-09-27; floors cut to $75k-$200k on 2026-09-30).
 
@@ -1577,6 +1579,10 @@ def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
     next deep one, so a cell is never the book's trades filtered afterwards. `rows` are the
     $75k+ signals his arm took; `small` is the same rule on $25-75k pools
     (`KARTHIK_BAND_BOOKS`). Nothing here changes what the book trades.
+
+    `stake(row)` is the book's stake on a row per dollar of ticket: each size
+    then stakes like the book, so the current size on the book's column IS
+    the book (Karthik, 2026-10-16).
     """
     signals = sorted([*small, *rows], key=_opened_order)
 
@@ -1586,8 +1592,8 @@ def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
         sub = [r for r in signals if float(r.liq_open_usd or 0) >= floor
                and (cap is None or float(r.liq_open_usd or 0) < cap)
                and (since is None or r.opened_at >= since)]
-        return _karthik_line(sub, sol, size=size, capital=capital,
-                             cents=cents)
+        return _karthik_line(sub, sol, size=size, capital=capital, cents=cents,
+                             tickets=[size * stake(r) for r in sub] if stake else None)
 
     lo, hi = config.KARTHIK_BOOK_POOLS
     return {
@@ -2029,6 +2035,19 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
           float(p.impact_open or 0), float(p.impact_close or 0)) for p in rows],
         sol, ticket=float(spec.ticket_usd), start=float(spec.capital_usd),
         tickets=[config.karthik_ticket(p.liq_open_usd, buys_before.get(p.id)) for p in rows])
+    # The size grid follows the book's rules too (Karthik, 2026-10-16: "fix this
+    # in 50k pool lab as per new rules"): the book's skips on every pool size,
+    # in the book's order, and each size staking like the book.
+    grid = [r for r in sorted([*small, *signals], key=_opened_order)
+            if not skip_lo <= float(r.liq_open_usd or 0) < skip_hi
+            and not (config.KARTHIK_SKIP_AI_POOL_USD[0] <= float(r.liq_open_usd or 0)
+                     < config.KARTHIK_SKIP_AI_POOL_USD[1] and pl.ai_name(r.symbol))]
+    grid = [r for r in await moneyblock.without_crew(db, grid, datetime.now(UTC))
+            if not _unnamed_evening(r)]
+    grid = _without_bad_names(grid)[0]
+    grid_buys = dict((await db.execute(_BUYS_BEFORE_SQL, {
+        "ids": [p.id for p in grid], "mints": [p.mint for p in grid],
+        "ats": [p.opened_at for p in grid]})).all()) if grid else {}
     cents = Decimal("0.01")
     # EVERY FIGURE BELOW COUNTS THE SAME TRADES: the ones this $500 book could
     # actually fund. `walk.pnl` is aligned to `rows` and is None where the book
@@ -2121,9 +2140,11 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         "days": _karthik_days(took, spec.start, float(spec.capital_usd), cents),
         # The same trades at other sizes, and on $150k+ pools only. A check,
         # shown beside the book; the book itself stays on its own rule.
-        "whatif": _karthik_whatif(signals, sol, small=small,
-                                  capital=float(spec.capital_usd),
-                                  ticket=float(spec.ticket_usd), cents=cents),
+        "whatif": _karthik_whatif(grid, sol, capital=float(spec.capital_usd),
+                                  ticket=float(spec.ticket_usd), cents=cents,
+                                  stake=lambda r: config.karthik_ticket(
+                                      r.liq_open_usd, grid_buys.get(r.id))
+                                  / float(spec.ticket_usd)),
         # The rows the BOOK bought, with the money the book made on them --
         # not the arm's $100-notional figure, which is the same only while the
         # ticket is $100 and silently diverges the moment it is not.
