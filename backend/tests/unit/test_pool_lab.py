@@ -84,3 +84,17 @@ def test_karthik_stake_by_pool_and_quietness():
     assert config.karthik_ticket(60_000, 13) == 100.0       # small pool, quiet
     assert config.karthik_ticket(60_000, 14) == 75.0        # small pool, busier
     assert config.karthik_ticket(400_000, 3) == 25.0        # large pool, quiet or not
+
+
+def test_unnamed_evening_is_dubai_17_to_midnight() -> None:
+    from types import SimpleNamespace
+
+    from app.labs.graduation import api as gapi
+    at = lambda h, m=0: datetime(2026, 10, 16, h, m, tzinfo=UTC)  # noqa: E731 - UTC hour
+    row = lambda sym, t: SimpleNamespace(symbol=sym, opened_at=t)  # noqa: E731
+    assert gapi._unnamed_evening(row("", at(13)))         # 17:00 Dubai
+    assert gapi._unnamed_evening(row(None, at(19, 59)))   # 23:59 Dubai
+    assert gapi._unnamed_evening(row("  ", at(15)))
+    assert not gapi._unnamed_evening(row("", at(12, 59)))  # 16:59 Dubai
+    assert not gapi._unnamed_evening(row("", at(20)))      # 00:00 Dubai
+    assert not gapi._unnamed_evening(row("PEPE", at(15)))

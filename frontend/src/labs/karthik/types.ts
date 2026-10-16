@@ -61,6 +61,8 @@ export interface KarthikBook {
   rugged_name_hours?: number;
   skip_spaced_names?: boolean;
   spaced_name_skipped?: number;
+  skip_unnamed_dubai_hours?: [number, number] | null;
+  unnamed_evening_skipped?: number;
   /** [pool below this (null = any larger), stake] rows, smallest pool first. */
   tickets_by_pool?: [number | null, number][];
   /** [max buys in the 5 minutes before, stake]: quiet small-pool coins (2026-10-16). */
