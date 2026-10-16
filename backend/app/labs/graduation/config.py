@@ -1141,9 +1141,23 @@ KARTHIK_SKIP_SPACED_NAMES = True
 KARTHIK_TICKETS_BY_POOL: tuple[tuple[int | None, float], ...] = ((150_000, 75.0), (None, 25.0))
 
 
-def karthik_ticket(pool_usd: Any) -> float:
-    """Karthik's book's stake for a coin with this pool."""
+#: Karthik, 2026-10-16 ("yes apply to karthik lab since day 1"): in the
+#: first pool band, a QUIET coin - at most this many buys in DexScreener's
+#: 5-minute count before the buy - is bought at this stake instead. Quiet small
+#: coins earned about +$5 a trade against +$1 for busier ones, on both halves
+#: (+$125 on 1-8 Oct, +$124 on 9-16 Oct at $100). Same 23 rugs, which cost
+#: about $137 more; the page went $1,302 -> $1,556 on $300.
+KARTHIK_QUIET_STAKE: tuple[int, float] = (13, 100.0)
+
+
+def karthik_ticket(pool_usd: Any, buys_before: int | None = None) -> float:
+    """Karthik's book's stake for a coin with this pool (and, in the first
+    band, this many buys before the buy; unknown is not quiet)."""
     pool = float(pool_usd or 0)
+    first_limit = KARTHIK_TICKETS_BY_POOL[0][0]
+    if (buys_before is not None and buys_before <= KARTHIK_QUIET_STAKE[0]
+            and first_limit is not None and pool < first_limit):
+        return KARTHIK_QUIET_STAKE[1]
     for limit, stake in KARTHIK_TICKETS_BY_POOL:
         if limit is None or pool < limit:
             return stake

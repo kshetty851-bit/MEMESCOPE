@@ -75,3 +75,12 @@ def test_entry_window_keeps_19_to_46_seconds():
 def test_name_key_matches_spacing_and_case():
     assert pl.name_key("Mr Beast") == pl.name_key("MRBEAST") == pl.name_key("MrBeast") == "mrbeast"
     assert pl.name_key(None) == ""
+
+
+def test_karthik_stake_by_pool_and_quietness():
+    from app.labs.graduation import config
+
+    assert config.karthik_ticket(60_000) == 75.0            # small pool, buys unknown
+    assert config.karthik_ticket(60_000, 13) == 100.0       # small pool, quiet
+    assert config.karthik_ticket(60_000, 14) == 75.0        # small pool, busier
+    assert config.karthik_ticket(400_000, 3) == 25.0        # large pool, quiet or not

@@ -606,7 +606,7 @@ export function RuleBook({ data }: { data: KarthikBook }) {
       ? ["Several at once", `It buys every coin that passes while at least ${usd(data.ticket_usd)} of the balance is free, so it can hold several at once.`]
       : ["One at a time", "While it holds a coin, the next one is skipped. It can never be caught in two bad coins at once."],
     ["Trade size", data.tickets_by_pool?.length
-      ? `${sizeWords(data.tickets_by_pool)}, from a ${usd(data.capital_usd)} balance: more where the profit is (small pools), less where it is thin.`
+      ? `${sizeWords(data.tickets_by_pool)}, from a ${usd(data.capital_usd)} balance: more where the profit is (small pools), less where it is thin.${data.quiet_stake ? ` A quiet small-pool coin (at most ${data.quiet_stake[0]} buys in the 5 minutes before) gets $${data.quiet_stake[1]}: those earned about five times more.` : ""}`
       : `${usd(data.ticket_usd)} per trade, from a ${usd(data.capital_usd)} balance.`],
     ["Always sells", `Exactly ${data.hold_minutes} minutes after buying. No price targets, no stop-loss — the clock decides.`],
     ["The risk", `If a coin's creator drains the pool (a “rug”), that trade loses almost all of it.${rugEvery ? ` So far about 1 in ${rugEvery} trades.` : ""}`],

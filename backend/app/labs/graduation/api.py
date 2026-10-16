@@ -2011,11 +2011,14 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     rows = await moneyblock.without_crew(db, every, datetime.now(UTC))
     crewless = len(rows)
     rows, rugged_names, blocked_names, spaced_names = _without_bad_names(rows)
+    buys_before = dict((await db.execute(_BUYS_BEFORE_SQL, {
+        "ids": [p.id for p in rows], "mints": [p.mint for p in rows],
+        "ats": [p.opened_at for p in rows]})).all()) if rows else {}
     walk = _funded_walk(
         [(p.opened_at, p.closed_at, float(p.net_return),
           float(p.impact_open or 0), float(p.impact_close or 0)) for p in rows],
         sol, ticket=float(spec.ticket_usd), start=float(spec.capital_usd),
-        tickets=[config.karthik_ticket(p.liq_open_usd) for p in rows])
+        tickets=[config.karthik_ticket(p.liq_open_usd, buys_before.get(p.id)) for p in rows])
     cents = Decimal("0.01")
     # EVERY FIGURE BELOW COUNTS THE SAME TRADES: the ones this $500 book could
     # actually fund. `walk.pnl` is aligned to `rows` and is None where the book
@@ -2057,7 +2060,8 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         "start_dates": _start_dates(rows, sol, ticket=float(spec.ticket_usd),
                                     capital=float(spec.capital_usd),
                                     now=datetime.now(UTC), cents=Decimal("0.01"),
-                                    ticket_of=lambda r: config.karthik_ticket(r.liq_open_usd)),
+                                    ticket_of=lambda r: config.karthik_ticket(
+                                        r.liq_open_usd, buys_before.get(r.id))),
         "hold_minutes": arm.hold,
         "started_at": spec.start,
         "judge_at": config.KARTHIK_JUDGE_AT,
@@ -2080,6 +2084,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         "skip_spaced_names": config.KARTHIK_SKIP_SPACED_NAMES,
         "spaced_name_skipped": spaced_names,
         "tickets_by_pool": [list(t) for t in config.KARTHIK_TICKETS_BY_POOL],
+        "quiet_stake": list(config.KARTHIK_QUIET_STAKE),
         "blocked_name_skipped": blocked_names,
         "one_at_a_time_since": None,
         "many_at_once_since": config.KARTHIK_MANY_AT_ONCE_AT,
