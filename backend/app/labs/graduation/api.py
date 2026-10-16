@@ -1916,10 +1916,7 @@ def _floor_test(rows: Sequence[Any]) -> dict[str, Any]:
 
 def _unnamed_evening(row: Any) -> bool:
     """A coin with no name bought in `KARTHIK_SKIP_UNNAMED_DUBAI_HOURS` (Dubai)."""
-    hours = config.KARTHIK_SKIP_UNNAMED_DUBAI_HOURS
-    if not hours or (row.symbol or "").strip():
-        return False
-    return hours[0] <= (row.opened_at + timedelta(hours=4)).hour < hours[1]
+    return config.unnamed_evening(row.symbol, row.opened_at)
 
 
 def _without_bad_names(rows: Sequence[Any]) -> tuple[list[Any], int, int, int]:
@@ -1938,7 +1935,7 @@ def _without_bad_names(rows: Sequence[Any]) -> tuple[list[Any], int, int, int]:
         if key and key in config.KARTHIK_BLOCKED_NAMES:
             blocked += 1
             continue
-        if config.KARTHIK_SKIP_SPACED_NAMES and " " in (r.symbol or "").strip():
+        if config.spaced_name(r.symbol):
             spaced += 1
             continue
         if (config.KARTHIK_LAB_RUGGED_NAME_BAN and key

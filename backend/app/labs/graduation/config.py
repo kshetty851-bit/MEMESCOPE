@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from itertools import pairwise
 from typing import Any, TypeVar
@@ -1133,7 +1133,8 @@ KARTHIK_RUGGED_NAME_HOURS = 48
 #: Karthik, 2026-10-16 ("apply 48h removal to karthik lab since day 1"): the
 #: 48 h ban is OFF on Karthik Lab. It cost profit in both months: -$6 on the
 #: unseen 23-30 Sep, -$32 on Oct (it skipped 40 winners, avoided 2 rugs). The
-#: real wallets keep it (driver._bad_name reads KARTHIK_RUGGED_NAME_HOURS).
+#: real wallets dropped it too the same day ("yes build it for real wallets";
+#: driver._bad_name reads this flag), so the two cannot drift.
 KARTHIK_LAB_RUGGED_NAME_BAN = False
 KARTHIK_BLOCKED_NAMES: frozenset[str] = frozenset({"mrbeast"})
 #: Karthik, 2026-10-16 ("apply this since day 1"): a coin whose name has a
@@ -1149,6 +1150,19 @@ KARTHIK_SKIP_SPACED_NAMES = True
 #: within what luck gives such a scan (2 passes vs 1.1 by chance): judge it on
 #: new trades.
 KARTHIK_SKIP_UNNAMED_DUBAI_HOURS: tuple[int, int] | None = (17, 24)
+
+
+def spaced_name(symbol: str | None) -> bool:
+    """A name with a space in it, skipped when `KARTHIK_SKIP_SPACED_NAMES`."""
+    return KARTHIK_SKIP_SPACED_NAMES and " " in (symbol or "").strip()
+
+
+def unnamed_evening(symbol: str | None, at: datetime) -> bool:
+    """No name, bought inside `KARTHIK_SKIP_UNNAMED_DUBAI_HOURS` (Dubai, UTC+4)."""
+    hours = KARTHIK_SKIP_UNNAMED_DUBAI_HOURS
+    if not hours or (symbol or "").strip():
+        return False
+    return hours[0] <= (at + timedelta(hours=4)).hour < hours[1]
 #: (pool below this, stake); the last row's limit is None (every larger pool).
 KARTHIK_TICKETS_BY_POOL: tuple[tuple[int | None, float], ...] = ((150_000, 75.0), (None, 25.0))
 
