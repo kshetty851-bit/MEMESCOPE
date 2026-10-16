@@ -63,6 +63,8 @@ export interface KarthikBook {
   spaced_name_skipped?: number;
   /** [pool below this (null = any larger), stake] rows, smallest pool first. */
   tickets_by_pool?: [number | null, number][];
+  /** [max buys in the 5 minutes before, stake]: quiet small-pool coins (2026-10-16). */
+  quiet_stake?: [number, number];
   rugged_name_skipped?: number;
   blocked_names?: string[];
   blocked_name_skipped?: number;
