@@ -1914,6 +1914,14 @@ def _floor_test(rows: Sequence[Any]) -> dict[str, Any]:
                     "usd": round(sum(50 * k * r for k, r in xs), 2)})
     return {"since": FLOOR_TEST_FROM, "lines": out}
 
+def _unnamed_evening(row: Any) -> bool:
+    """A coin with no name bought in `KARTHIK_SKIP_UNNAMED_DUBAI_HOURS` (Dubai)."""
+    hours = config.KARTHIK_SKIP_UNNAMED_DUBAI_HOURS
+    if not hours or (row.symbol or "").strip():
+        return False
+    return hours[0] <= (row.opened_at + timedelta(hours=4)).hour < hours[1]
+
+
 def _without_bad_names(rows: Sequence[Any]) -> tuple[list[Any], int, int, int]:
     """Karthik's book less a coin named like one of its own coins that closed at
     a rug's loss in the `KARTHIK_RUGGED_NAME_HOURS` before it (only rugs it
@@ -2010,6 +2018,9 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     # on (Karthik, 2026-10-10, `moneyblock.CREW`), replayed from day 1.
     rows = await moneyblock.without_crew(db, every, datetime.now(UTC))
     crewless = len(rows)
+    named = len(rows)
+    rows = [r for r in rows if not _unnamed_evening(r)]
+    unnamed_evening = named - len(rows)
     rows, rugged_names, blocked_names, spaced_names = _without_bad_names(rows)
     buys_before = dict((await db.execute(_BUYS_BEFORE_SQL, {
         "ids": [p.id for p in rows], "mints": [p.mint for p in rows],
@@ -2083,6 +2094,9 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         "blocked_names": sorted(config.KARTHIK_BLOCKED_NAMES),
         "skip_spaced_names": config.KARTHIK_SKIP_SPACED_NAMES,
         "spaced_name_skipped": spaced_names,
+        "skip_unnamed_dubai_hours": (list(config.KARTHIK_SKIP_UNNAMED_DUBAI_HOURS)
+                                     if config.KARTHIK_SKIP_UNNAMED_DUBAI_HOURS else None),
+        "unnamed_evening_skipped": unnamed_evening,
         "tickets_by_pool": [list(t) for t in config.KARTHIK_TICKETS_BY_POOL],
         "quiet_stake": list(config.KARTHIK_QUIET_STAKE),
         "blocked_name_skipped": blocked_names,

@@ -1137,6 +1137,13 @@ KARTHIK_BLOCKED_NAMES: frozenset[str] = frozenset({"mrbeast"})
 #: stake follows the pool: $75 below $150k (where nearly all the profit is,
 #: about +$2.50 a trade) and $25 above (about +$0.10). Both from day 1.
 KARTHIK_SKIP_SPACED_NAMES = True
+#: Karthik, 2026-10-16 ("apply 5pm unnamed skip to karthik lab since day 1"):
+#: a coin with no name bought from 17:00 to midnight Dubai is not bought - 92
+#: trades, 5 of the 23 rugs; +$35 on 1-8 Oct, +$127 on 9-16 Oct, +$162 without
+#: its best coin too ($1,556 -> $1,718 on $300). The best of a 399-rule scan, but
+#: within what luck gives such a scan (2 passes vs 1.1 by chance): judge it on
+#: new trades.
+KARTHIK_SKIP_UNNAMED_DUBAI_HOURS: tuple[int, int] | None = (17, 24)
 #: (pool below this, stake); the last row's limit is None (every larger pool).
 KARTHIK_TICKETS_BY_POOL: tuple[tuple[int | None, float], ...] = ((150_000, 75.0), (None, 25.0))
 
