@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import random
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from functools import lru_cache
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -1092,6 +1092,7 @@ def _low_through(cash: float, held: list[tuple[datetime, float, float]],
 def _funded_walk(
     trades: Sequence[tuple], rate: Decimal | None = None,
     ticket: float | None = None, start: float | None = None,
+    tickets: Sequence[float] | None = None,
 ) -> Walk:
     """What a real $100 account could have taken — equity, funded, skipped,
     and the lowest it stood.
@@ -1099,7 +1100,8 @@ def _funded_walk(
     `trades` are (opened, closed, return[, impact_open, impact_close]).
     `ticket` changes the stake from `PAPER_NOTIONAL_USD`, and the floor
     scales with it (`wallet_floor`); `start` is the opening balance
-    (`WALLET_DEMO_USD` unless given).
+    (`WALLET_DEMO_USD` unless given). `tickets`, aligned with `trades`, gives
+    each trade its own stake instead (Karthik's Lab sizes by pool, 2026-10-16).
 
     `_wallet_walk` walks the arm's returns one after another and never asks
     whether the account could have held them at the same time. That is right
@@ -1133,7 +1135,10 @@ def _funded_walk(
     took: list[tuple[datetime, float]] = []
     pnl: list[float | None] = []
     funded = skipped = 0
-    for opened, closed, ret, *impact in trades:
+    for i, (opened, closed, ret, *impact) in enumerate(trades):
+        if tickets is not None:
+            cap = tickets[i]
+            floor = config.wallet_floor(cap)
         due = [h for h in held if h[0] <= opened]
         if due:
             held = [h for h in held if h[0] > opened]
@@ -1610,7 +1615,8 @@ def _mcaps(row: Any) -> dict[str, int | None]:
 
 
 def _start_dates(rows: Sequence[Any], rate: Decimal | None, *, ticket: float, capital: float,
-                 now: datetime, cents: Decimal) -> list[dict[str, Any]]:
+                 now: datetime, cents: Decimal,
+                 ticket_of: Callable[[Any], float] | None = None) -> list[dict[str, Any]]:
     """The same book started fresh at each Dubai midnight since its first trade,
     newest start first (Karthik, 2026-10-14: "show me profit if we started on
     2nd oct, then 3rd oct ... and keep updating"): only the trades from that
@@ -1625,7 +1631,8 @@ def _start_dates(rows: Sequence[Any], rate: Decimal | None, *, ticket: float, ca
         xs = [r for r in rows if r.opened_at >= day]
         w = _funded_walk([(r.opened_at, r.closed_at, float(r.net_return),
                            float(r.impact_open or 0), float(r.impact_close or 0)) for r in xs],
-                         rate, ticket=ticket, start=capital)
+                         rate, ticket=ticket, start=capital,
+                         tickets=[ticket_of(r) for r in xs] if ticket_of else None)
         took = [r for r, m in zip(xs, w.pnl, strict=True) if m is not None]
         out.append({"start": day, "days": round((now - day).total_seconds() / 86400, 1),
                     "balance_usd": Decimal(str(w.cash)).quantize(cents),
@@ -1907,7 +1914,7 @@ def _floor_test(rows: Sequence[Any]) -> dict[str, Any]:
                     "usd": round(sum(50 * k * r for k, r in xs), 2)})
     return {"since": FLOOR_TEST_FROM, "lines": out}
 
-def _without_bad_names(rows: Sequence[Any]) -> tuple[list[Any], int, int]:
+def _without_bad_names(rows: Sequence[Any]) -> tuple[list[Any], int, int, int]:
     """Karthik's book less a coin named like one of its own coins that closed at
     a rug's loss in the `KARTHIK_RUGGED_NAME_HOURS` before it (only rugs it
     actually took, closed before the buy), and less the blocked names."""
@@ -1917,11 +1924,14 @@ def _without_bad_names(rows: Sequence[Any]) -> tuple[list[Any], int, int]:
     rug = float(config.OPERATOR_RUG_MOVE)
     kept: list[Any] = []
     rugs: list[tuple[str, datetime]] = []
-    rugged = blocked = 0
+    rugged = blocked = spaced = 0
     for r in sorted(rows, key=_opened_order):
         key = pl.name_key(r.symbol)
         if key and key in config.KARTHIK_BLOCKED_NAMES:
             blocked += 1
+            continue
+        if config.KARTHIK_SKIP_SPACED_NAMES and " " in (r.symbol or "").strip():
+            spaced += 1
             continue
         if key and any(k == key and r.opened_at - window < at < r.opened_at for k, at in rugs):
             rugged += 1
@@ -1929,7 +1939,7 @@ def _without_bad_names(rows: Sequence[Any]) -> tuple[list[Any], int, int]:
         kept.append(r)
         if float(r.net_return) <= rug and r.closed_at is not None:
             rugs.append((key, r.closed_at))
-    return kept, rugged, blocked
+    return kept, rugged, blocked, spaced
 
 
 @router.get("/karthik", summary="Karthik's own $500 book, and its judge date")
@@ -2000,11 +2010,12 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     # on (Karthik, 2026-10-10, `moneyblock.CREW`), replayed from day 1.
     rows = await moneyblock.without_crew(db, every, datetime.now(UTC))
     crewless = len(rows)
-    rows, rugged_names, blocked_names = _without_bad_names(rows)
+    rows, rugged_names, blocked_names, spaced_names = _without_bad_names(rows)
     walk = _funded_walk(
         [(p.opened_at, p.closed_at, float(p.net_return),
           float(p.impact_open or 0), float(p.impact_close or 0)) for p in rows],
-        sol, ticket=float(spec.ticket_usd), start=float(spec.capital_usd))
+        sol, ticket=float(spec.ticket_usd), start=float(spec.capital_usd),
+        tickets=[config.karthik_ticket(p.liq_open_usd) for p in rows])
     cents = Decimal("0.01")
     # EVERY FIGURE BELOW COUNTS THE SAME TRADES: the ones this $500 book could
     # actually fund. `walk.pnl` is aligned to `rows` and is None where the book
@@ -2045,7 +2056,8 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         "floor_test": _floor_test(rows),
         "start_dates": _start_dates(rows, sol, ticket=float(spec.ticket_usd),
                                     capital=float(spec.capital_usd),
-                                    now=datetime.now(UTC), cents=Decimal("0.01")),
+                                    now=datetime.now(UTC), cents=Decimal("0.01"),
+                                    ticket_of=lambda r: config.karthik_ticket(r.liq_open_usd)),
         "hold_minutes": arm.hold,
         "started_at": spec.start,
         "judge_at": config.KARTHIK_JUDGE_AT,
@@ -2065,6 +2077,9 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         "rugged_name_hours": config.KARTHIK_RUGGED_NAME_HOURS,
         "rugged_name_skipped": rugged_names,
         "blocked_names": sorted(config.KARTHIK_BLOCKED_NAMES),
+        "skip_spaced_names": config.KARTHIK_SKIP_SPACED_NAMES,
+        "spaced_name_skipped": spaced_names,
+        "tickets_by_pool": [list(t) for t in config.KARTHIK_TICKETS_BY_POOL],
         "blocked_name_skipped": blocked_names,
         "one_at_a_time_since": None,
         "many_at_once_since": config.KARTHIK_MANY_AT_ONCE_AT,

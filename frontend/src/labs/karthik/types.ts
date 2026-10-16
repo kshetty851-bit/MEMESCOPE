@@ -59,6 +59,10 @@ export interface KarthikBook {
   skip_pools_usd?: [number, number];
   skip_ai_pools_usd?: [number, number];
   rugged_name_hours?: number;
+  skip_spaced_names?: boolean;
+  spaced_name_skipped?: number;
+  /** [pool below this (null = any larger), stake] rows, smallest pool first. */
+  tickets_by_pool?: [number | null, number][];
   rugged_name_skipped?: number;
   blocked_names?: string[];
   blocked_name_skipped?: number;

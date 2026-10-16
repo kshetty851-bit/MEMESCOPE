@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from itertools import pairwise
-from typing import TypeVar
+from typing import Any, TypeVar
 
 _Money = TypeVar("_Money", float, Decimal)
 
@@ -1131,6 +1131,23 @@ KARTHIK_SKIP_AI_POOL_USD: tuple[int, int] = (50_000, 60_000)
 #: $856.94 for the 48 h rule, resting on one coin (MrBeast, 15 Oct).
 KARTHIK_RUGGED_NAME_HOURS = 48
 KARTHIK_BLOCKED_NAMES: frozenset[str] = frozenset({"mrbeast"})
+#: Karthik, 2026-10-16 ("apply this since day 1"): a coin whose name has a
+#: space ("GTA 6 Coin", "Riot Games", "Muse AI") is not bought - 24 trades, 5
+#: rugs (21% vs 2.5%), +$101 skipped on 1-8 Oct and +$25 on 9-16 Oct; and the
+#: stake follows the pool: $75 below $150k (where nearly all the profit is,
+#: about +$2.50 a trade) and $25 above (about +$0.10). Both from day 1.
+KARTHIK_SKIP_SPACED_NAMES = True
+#: (pool below this, stake); the last row's limit is None (every larger pool).
+KARTHIK_TICKETS_BY_POOL: tuple[tuple[int | None, float], ...] = ((150_000, 75.0), (None, 25.0))
+
+
+def karthik_ticket(pool_usd: Any) -> float:
+    """Karthik's book's stake for a coin with this pool."""
+    pool = float(pool_usd or 0)
+    for limit, stake in KARTHIK_TICKETS_BY_POOL:
+        if limit is None or pool < limit:
+            return stake
+    return KARTHIK_TICKETS_BY_POOL[-1][1]
 
 #: Never buy a coin more than this long after it graduated (Karthik,
 #: 2026-09-27, after EVO). EVO was bought 186s after graduating, the slowest
