@@ -1130,6 +1130,11 @@ KARTHIK_SKIP_AI_POOL_USD: tuple[int, int] = (50_000, 60_000)
 #: and digits, lower case) are never bought. Re-run from 1 Oct: $840.70 ->
 #: $856.94 for the 48 h rule, resting on one coin (MrBeast, 15 Oct).
 KARTHIK_RUGGED_NAME_HOURS = 48
+#: Karthik, 2026-10-16 ("apply 48h removal to karthik lab since day 1"): the
+#: 48 h ban is OFF on Karthik Lab. It cost profit in both months: -$6 on the
+#: unseen 23-30 Sep, -$32 on Oct (it skipped 40 winners, avoided 2 rugs). The
+#: real wallets keep it (driver._bad_name reads KARTHIK_RUGGED_NAME_HOURS).
+KARTHIK_LAB_RUGGED_NAME_BAN = False
 KARTHIK_BLOCKED_NAMES: frozenset[str] = frozenset({"mrbeast"})
 #: Karthik, 2026-10-16 ("apply this since day 1"): a coin whose name has a
 #: space ("GTA 6 Coin", "Riot Games", "Muse AI") is not bought - 24 trades, 5

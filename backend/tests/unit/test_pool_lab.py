@@ -98,3 +98,20 @@ def test_unnamed_evening_is_dubai_17_to_midnight() -> None:
     assert not gapi._unnamed_evening(row("", at(12, 59)))  # 16:59 Dubai
     assert not gapi._unnamed_evening(row("", at(20)))      # 00:00 Dubai
     assert not gapi._unnamed_evening(row("PEPE", at(15)))
+
+
+def test_karthik_lab_rebuys_a_rugged_name_when_the_ban_is_off(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from app.labs.graduation import api as gapi
+    from app.labs.graduation import config
+    t = datetime(2026, 10, 10, 12, tzinfo=UTC)
+    rug = SimpleNamespace(symbol="PEPE", mint="a", opened_at=t,
+                          closed_at=t + timedelta(minutes=5),
+                          net_return=-0.95)
+    again = SimpleNamespace(symbol="PEPE", mint="b", opened_at=t + timedelta(hours=1),
+                            closed_at=t + timedelta(hours=1, minutes=5), net_return=0.1)
+    monkeypatch.setattr(config, "KARTHIK_LAB_RUGGED_NAME_BAN", False)
+    assert gapi._without_bad_names([rug, again])[0] == [rug, again]
+    monkeypatch.setattr(config, "KARTHIK_LAB_RUGGED_NAME_BAN", True)
+    assert gapi._without_bad_names([rug, again])[0] == [rug]
