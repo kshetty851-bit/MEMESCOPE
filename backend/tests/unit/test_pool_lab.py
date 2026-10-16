@@ -115,3 +115,24 @@ def test_karthik_lab_rebuys_a_rugged_name_when_the_ban_is_off(monkeypatch) -> No
     assert gapi._without_bad_names([rug, again])[0] == [rug, again]
     monkeypatch.setattr(config, "KARTHIK_LAB_RUGGED_NAME_BAN", True)
     assert gapi._without_bad_names([rug, again])[0] == [rug]
+
+
+def test_real_wallets_size_like_karthik_lab() -> None:
+    from decimal import Decimal
+
+    from app.real_wallet.driver import lab_sized
+    d = Decimal
+    assert lab_sized("G-Q50", d("50"), 60_000, 13) == d("66.66")      # quiet small coin
+    assert lab_sized("G-Q50", d("50"), 60_000, 14) == d("50.00")      # busier small coin
+    assert lab_sized("G-Q50", d("50"), 400_000, 3) == d("16.66")      # $150k+ pool
+    assert lab_sized("G-Q50", d("50"), None, 3) == d("50")            # pool unread: plain
+    assert lab_sized("G-Q150", d("50"), 60_000, 3) == d("50")         # other strategies: plain
+
+
+def test_lab_name_rules_shared_with_real_wallets() -> None:
+    from app.labs.graduation import config
+    eve = datetime(2026, 10, 16, 14, tzinfo=UTC)                     # 18:00 Dubai
+    assert config.spaced_name("GTA 6 Coin") and not config.spaced_name(" PEPE ")
+    assert config.unnamed_evening(None, eve) and config.unnamed_evening("", eve)
+    assert not config.unnamed_evening("PEPE", eve)
+    assert not config.unnamed_evening(None, eve - timedelta(hours=2))  # 16:00 Dubai

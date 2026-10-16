@@ -93,6 +93,28 @@ MEMBER_SKIP_POOL_USD: dict[str, tuple[int, int]] = {"USER1": (150_000, 200_000)}
 OWNER_SKIP_AI_POOL_USD: tuple[int, int] = (50_000, 60_000)
 
 
+#: The strategy that trades Karthik Lab's rules (Karthik, 2026-10-16: "yes
+#: build it for real wallets"). Every wallet on it, main or user, skips what the
+#: lab skips -- $150-200k pools, AI names in $50-60k pools, spaced names,
+#: unnamed coins 17:00-midnight Dubai -- and sizes like the lab: its own ticket
+#: buys what the lab's $75 buys, so a $50 ticket is $66.67 on a quiet small
+#: coin, $50 on a small one and $16.67 at $150k+.
+LAB_RULES_STRATEGY = "G-Q50"
+
+
+def lab_sized(strategy_id: str, ticket: Decimal, pool_usd: Decimal | float | None,
+              buys_before: int | None) -> Decimal:
+    """`ticket` scaled by Karthik Lab's stake for this coin, for the lab's
+    strategy only. An unread pool keeps the plain ticket."""
+    from app.labs.graduation import config as grad_config
+
+    if strategy_id.upper() != LAB_RULES_STRATEGY or pool_usd is None:
+        return ticket
+    stake = Decimal(str(grad_config.karthik_ticket(pool_usd, buys_before)))
+    base = Decimal(str(grad_config.KARTHIK_TICKETS_BY_POOL[0][1]))
+    return (ticket * stake / base).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+
+
 def in_skipped_pool(pool_usd: Decimal | float | None, band: tuple[int, int]) -> bool:
     """Is a coin's pool inside the skipped band? An unread pool is not skipped."""
     return pool_usd is not None and band[0] <= float(pool_usd) < band[1]
@@ -205,7 +227,8 @@ class RealWalletDriver:
         open_positions = await repo.open_positions_count(wallet)
         # Their own ticket, never above the platform's per-trade ceiling. No
         # growth ladder: the member chose a size, and it is the size.
-        ticket = min(account.ticket_usd, settings.REAL_WALLET_MAX_TRADE_USD)
+        ticket = min(await self._lab_ticket(strategy_id, account.ticket_usd, candidate, now),
+                     settings.REAL_WALLET_MAX_TRADE_USD)
         entry_usd = self._fundable(strategy_id, ticket, balance_lamports=balance_lamports,
                                    sol_price=price, open_positions=open_positions)
         if entry_usd is None or entry_usd <= 0:
@@ -332,8 +355,10 @@ class RealWalletDriver:
         if entry_usd is None or entry_usd <= 0:
             return DriverOutcome(0, "entry_size_not_configured")
 
+        ticket = await self._lab_ticket(switch.nominated_strategy,
+                                        ticket_for(switch, entry_usd), candidate, now)
         entry_usd = self._fundable(
-            switch.nominated_strategy, ticket_for(switch, entry_usd),
+            switch.nominated_strategy, ticket,
             balance_lamports=balance_lamports, sol_price=sol_price,
             open_positions=open_positions)
         if entry_usd is None:
@@ -490,6 +515,12 @@ class RealWalletDriver:
         Per wallet since 2026-09-25: a coin the owner bought is still a coin a
         family wallet may buy, and the other way round.
         """
+        from app.labs.graduation import config as grad_config
+
+        lab = strategy_id.upper() == LAB_RULES_STRATEGY
+        if lab:
+            skip_pools = skip_pools or grad_config.KARTHIK_SKIP_POOL_USD
+            skip_ai_pools = skip_ai_pools or grad_config.KARTHIK_SKIP_AI_POOL_USD
         cutoff = now - self._decision_age(strategy_id)
         traded = select(RealWalletLiveIntent.mint_address).where(
             RealWalletLiveIntent.wallet_public_key == wallet)
@@ -508,6 +539,8 @@ class RealWalletDriver:
             if self._too_old(strategy_id, features, now):
                 continue
             if await self._bad_name(mint, strategy_id, now):
+                continue
+            if lab and await self._lab_name_skipped(mint, strategy_id, now):
                 continue
             if skip_pools is None and skip_ai_pools is None:
                 return mint
@@ -603,7 +636,7 @@ class RealWalletDriver:
         if key in grad_config.KARTHIK_BLOCKED_NAMES:
             return True
         book = PAPER_BOOKS.get(strategy_id.upper())
-        if book is None:
+        if book is None or not grad_config.KARTHIK_LAB_RUGGED_NAME_BAN:
             return False
         rugged = (await self._session.scalars(select(GradPaperPosition.symbol).where(
             GradPaperPosition.book == book,
@@ -612,6 +645,42 @@ class RealWalletDriver:
             GradPaperPosition.closed_at <= now,
             GradPaperPosition.net_return <= grad_config.OPERATOR_RUG_MOVE))).all()
         return key in {name_key(s) for s in rugged}
+
+    async def _lab_name_skipped(self, mint: str, strategy_id: str, now: datetime) -> bool:
+        """Karthik Lab's name skips (spaced name; no name 17:00-midnight Dubai),
+        read from this strategy's own paper position, written at the same tick
+        as the decision. No position means the name is unknown: bought."""
+        from app.labs.graduation import config as grad_config
+        from app.labs.graduation.live_spec import PAPER_BOOKS
+        from app.labs.graduation.models import GradPaperPosition
+
+        row = (await self._session.execute(select(GradPaperPosition.symbol).where(
+            GradPaperPosition.mint == mint,
+            GradPaperPosition.book == PAPER_BOOKS.get(strategy_id.upper())).limit(1))).first()
+        if row is None:
+            return False
+        return (grad_config.spaced_name(row.symbol)
+                or grad_config.unnamed_evening(row.symbol, now))
+
+    async def _lab_ticket(self, strategy_id: str, ticket: Decimal, mint: str,
+                          now: datetime) -> Decimal:
+        """`lab_sized` for this coin, read now: its pool and DexScreener's
+        5-minute buy count, the readings Karthik Lab sizes on. Never above the
+        arm's own cap."""
+        from app.labs.graduation import live_spec
+        from app.labs.graduation.models import GradPostgradSample
+
+        if strategy_id.upper() != LAB_RULES_STRATEGY:
+            return ticket
+        buys = await self._session.scalar(
+            select(GradPostgradSample.txns_m5_buys).where(
+                GradPostgradSample.mint == mint,
+                GradPostgradSample.txns_m5_buys.is_not(None),
+                GradPostgradSample.ts <= now,
+            ).order_by(GradPostgradSample.ts.desc()).limit(1))
+        sized = lab_sized(strategy_id, ticket, await self._pool_usd(mint, now), buys)
+        cap = live_spec.max_ticket(strategy_id)
+        return sized if cap is None else min(sized, cap)
 
     async def _ai_named(self, mint: str) -> bool:
         """Is the coin named after an AI product? Read from the lab's paper
