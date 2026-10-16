@@ -171,7 +171,16 @@ export function day30(days: KarthikDay[], judgeAt: string, now = Date.now()) {
 /** "If you had started on…" (Karthik, 2026-10-14: "show me profit if we
  *  started on 2nd oct, then 3rd oct ... show both in each lab and keep
  *  updating"): the same book from each Dubai midnight, same money and ticket. */
-export function StartDates({ lines, capital, ticket, book }: { lines: StartDate[]; capital: number; ticket: number; book: string }) {
+/** "$75 a trade in pools under $150k, $25 above" (Karthik, 2026-10-16). */
+export function sizeWords(rows: [number | null, number][]): string {
+  const k = (v: number) => `$${Math.round(v / 1000)}k`;
+  return rows.map(([limit, stake], i) =>
+    limit != null ? `$${stake} a trade in pools under ${k(limit)}` : `$${stake} ${i ? "above" : "a trade"}`).join(", ");
+}
+
+export function StartDates({ lines, capital, ticket, book, sizeText }: {
+  lines: StartDate[]; capital: number; ticket: number; book: string; sizeText?: string;
+}) {
   if (!lines.length) return null;
   const money = (v: string | number) => `$${Math.abs(Number(v)).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const signed = (v: string) => `${Number(v) > 0 ? "+" : Number(v) < 0 ? "-" : ""}${money(v)}`;
@@ -182,7 +191,7 @@ export function StartDates({ lines, capital, ticket, book }: { lines: StartDate[
     <Panel>
       <PanelHeader>
         <PanelTitle>
-          {book} · if you had started on… · {money(capital).replace(".00", "")} at {money(ticket).replace(".00", "")} a trade
+          {book} · if you had started on… · {money(capital).replace(".00", "")} at {sizeText ?? `${money(ticket).replace(".00", "")} a trade`}
         </PanelTitle>
       </PanelHeader>
       <div className="overflow-x-auto p-3" data-testid="start-dates">
@@ -588,6 +597,7 @@ export function RuleBook({ data }: { data: KarthikBook }) {
     ...(pool ? [["Only big pools", top ? `The pool must hold between ${usd(pool).replace(".00", "")} and ${usd(top).replace(".00", "")}.` : `The pool must hold ${usd(pool).replace(".00", "")} or more.`] as [string, string]] : []),
     ...(data.skip_pools_usd ? [["Skips $150k–$200k pools", `No pools between ${usd(data.skip_pools_usd[0]).replace(".00", "")} and ${usd(data.skip_pools_usd[1]).replace(".00", "")}: they lost money in every period tested, and on the real wallet too. Applied from the first trade.`] as [string, string]] : []),
     ...(data.rugged_name_hours ? [["No rebuying a rugged name", `A name is not bought again for ${data.rugged_name_hours} hours after one of this book's coins with that name rugged.${data.rugged_name_skipped ? ` ${data.rugged_name_skipped} skipped so far.` : ""}`] as [string, string]] : []),
+    ...(data.skip_spaced_names ? [["No spaced names", `It skips coins whose name has a space (“GTA 6 Coin”, “Riot Games”): about one in five of them rugged.${data.spaced_name_skipped ? ` ${data.spaced_name_skipped} skipped so far.` : ""}`] as [string, string]] : []),
     ...(data.blocked_names?.length ? [["Blocked names", `Never buys coins named ${data.blocked_names.join(", ")} (any spacing or capitals).${data.blocked_name_skipped ? ` ${data.blocked_name_skipped} skipped so far.` : ""}`] as [string, string]] : []),
     ...(data.skip_ai_pools_usd ? [["No AI fakes in small pools", `It skips coins named after AI products (DeepSeek, OpenAI, Grok…) in pools between ${usd(data.skip_ai_pools_usd[0]).replace(".00", "")} and ${usd(data.skip_ai_pools_usd[1]).replace(".00", "")}: since 9 Oct about one in four of them rugged. A rule for the current wave, reviewed weekly.`] as [string, string]] : []),
     ...(data.quiet_max_txs ? [["Only quiet pools", `Fewer than ${data.quiet_max_txs} trades in the pool so far when it buys. A busy start is skipped.`] as [string, string]] : []),
@@ -595,7 +605,9 @@ export function RuleBook({ data }: { data: KarthikBook }) {
     data.many_at_once_since
       ? ["Several at once", `It buys every coin that passes while at least ${usd(data.ticket_usd)} of the balance is free, so it can hold several at once.`]
       : ["One at a time", "While it holds a coin, the next one is skipped. It can never be caught in two bad coins at once."],
-    ["Trade size", `${usd(data.ticket_usd)} per trade, from a ${usd(data.capital_usd)} balance.`],
+    ["Trade size", data.tickets_by_pool?.length
+      ? `${sizeWords(data.tickets_by_pool)}, from a ${usd(data.capital_usd)} balance: more where the profit is (small pools), less where it is thin.`
+      : `${usd(data.ticket_usd)} per trade, from a ${usd(data.capital_usd)} balance.`],
     ["Always sells", `Exactly ${data.hold_minutes} minutes after buying. No price targets, no stop-loss — the clock decides.`],
     ["The risk", `If a coin's creator drains the pool (a “rug”), that trade loses almost all of it.${rugEvery ? ` So far about 1 in ${rugEvery} trades.` : ""}`],
     ["Paper money", "A simulation on real market prices. The real wallet follows the same rules on its own."],
@@ -1017,7 +1029,7 @@ export function KarthikLabPage() {
         </div>
         <div className="min-[1150px]:col-start-1 min-[1150px]:row-start-2">
         <p className="mt-1 max-w-[78ch] text-[13px] leading-relaxed text-ink-dim">
-          {usd(data.capital_usd)} at {usd(data.ticket_usd)} a trade on one
+          {usd(data.capital_usd)} at {data.tickets_by_pool?.length ? sizeWords(data.tickets_by_pool) : `${usd(data.ticket_usd)} a trade`} on one
           rule: <b>{data.rule}</b>. Started {day(data.started_at)},{" "}
           <b>judged {day(data.judge_at)}</b>. Paper only: this book holds no
           wallet and has never placed an order.
@@ -1069,7 +1081,8 @@ export function KarthikLabPage() {
         <Days days={data.days} judgeAt={data.judge_at} trades={data.trades_list} />
       </div>
       {data.start_dates?.length ? (
-        <StartDates book="$50k book" lines={data.start_dates} capital={Number(data.capital_usd)} ticket={Number(data.ticket_usd)} />
+        <StartDates book="$50k book" lines={data.start_dates} capital={Number(data.capital_usd)} ticket={Number(data.ticket_usd)}
+                    sizeText={data.tickets_by_pool?.length ? sizeWords(data.tickets_by_pool) : undefined} />
       ) : null}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
