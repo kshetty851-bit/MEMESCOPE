@@ -136,3 +136,23 @@ def test_lab_name_rules_shared_with_real_wallets() -> None:
     assert config.unnamed_evening(None, eve) and config.unnamed_evening("", eve)
     assert not config.unnamed_evening("PEPE", eve)
     assert not config.unnamed_evening(None, eve - timedelta(hours=2))  # 16:00 Dubai
+
+
+def test_size_grid_stakes_like_the_book() -> None:
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    from app.labs.graduation import api as gapi
+    t = datetime(2026, 10, 10, 12, tzinfo=UTC)
+    rows = [SimpleNamespace(mint=str(i), symbol="X", opened_at=t + timedelta(hours=i),
+                            closed_at=t + timedelta(hours=i, minutes=5), net_return=0.10,
+                            impact_open=0, impact_close=0, liq_open_usd=80_000)
+            for i in range(3)]
+    plain = gapi._karthik_whatif(rows, Decimal("200"), capital=600.0, ticket=100.0,
+                                 cents=Decimal("0.01"))
+    staked = gapi._karthik_whatif(rows, Decimal("200"), capital=600.0, ticket=100.0,
+                                  cents=Decimal("0.01"), stake=lambda r: 1.5)
+    book = [f["book"] for f in plain["floors"]].index(True)
+    row = next(s for s in plain["sizes"] if s["ticket_usd"] == 100)
+    row2 = next(s for s in staked["sizes"] if s["ticket_usd"] == 100)
+    assert row2["cells"][book]["pnl_usd"] > row["cells"][book]["pnl_usd"] * Decimal("1.4")
