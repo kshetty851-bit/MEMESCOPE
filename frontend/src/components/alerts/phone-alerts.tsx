@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
-import { apiFetch } from "@/lib/api-client";
+import { ApiError, apiFetch } from "@/lib/api-client";
 
 /** Web Push wants the VAPID key as raw bytes, not base64url text. */
 function keyBytes(base64url: string): Uint8Array<ArrayBuffer> {
@@ -51,7 +51,10 @@ export function PhoneAlerts() {
       await apiFetch("/push/test", { method: "POST" });
       setState("on"); setNote("A test alert is on its way.");
     } catch (error) {
-      setState("off"); setNote(error instanceof Error ? error.message : "Could not turn alerts on.");
+      setState("off");
+      // The home-screen app keeps its own login, separate from Safari's.
+      if (error instanceof ApiError && error.status === 401) setNote("signin");
+      else setNote(error instanceof Error ? error.message : "Could not turn alerts on.");
     }
   }
 
@@ -70,7 +73,12 @@ export function PhoneAlerts() {
         <div className="min-w-0 max-w-md">
           <h3 className="text-sm font-medium text-ink">Phone alerts</h3>
           <p className="mt-1 text-xs leading-relaxed text-ink-2">{text[state]}</p>
-          {note ? <p className="mt-1.5 text-xs leading-relaxed text-ink-3">{note}</p> : null}
+          {note === "signin" ? (
+            <p className="mt-1.5 text-xs leading-relaxed text-ink-3">
+              Sign in inside this app first — it keeps its own login, separate from Safari.{" "}
+              <a className="text-accent underline" href="/login?next=/settings">Sign in</a>, then tap Turn on alerts again.
+            </p>
+          ) : note ? <p className="mt-1.5 text-xs leading-relaxed text-ink-3">{note}</p> : null}
         </div>
         {state === "off" || state === "on" ? (
           <Button variant={state === "off" ? "primary" : "outline"} onClick={turnOn}>
