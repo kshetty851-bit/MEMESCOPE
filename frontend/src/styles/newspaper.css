@@ -18,7 +18,8 @@
 
   position: relative;
   isolation: isolate;
-  min-height: 100dvh;
+  min-height: 100%;
+  margin: -16px;
   background:
     radial-gradient(1200px 520px at 78% -8%, rgb(73 216 255 / 0.07), transparent 70%),
     radial-gradient(900px 480px at -10% 30%, rgb(198 255 58 / 0.045), transparent 70%),
@@ -44,7 +45,7 @@
 
 /* Newsprint grain: a fixed noise layer, quiet enough to read through. */
 .np-grain {
-  position: fixed; inset: 0; z-index: -1; pointer-events: none; opacity: 0.08; mix-blend-mode: overlay;
+  position: absolute; inset: 0; z-index: -1; pointer-events: none; opacity: 0.08; mix-blend-mode: overlay;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .9 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
@@ -57,7 +58,7 @@
 .np-mast__issue { color: var(--np-paper-3); }
 .np-date--short { display: none; }
 .np-meme > .np-dim:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.np-live { display: inline-flex; align-items: center; gap: 8px; color: var(--np-paper-2); }
+.np-live { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; color: var(--np-paper-2); }
 .np-live i { width: 8px; height: 8px; border-radius: 50%; background: var(--np-lime); box-shadow: 0 0 0 0 rgb(198 255 58 / 0.6); animation: np-beat 1.8s var(--np-ease) 1; }
 .np-live.is-stale i { background: var(--np-orange); animation: none; }
 @keyframes np-beat { 0% { box-shadow: 0 0 0 0 rgb(198 255 58 / 0.55); } 70%, 100% { box-shadow: 0 0 0 9px rgb(198 255 58 / 0); } }

@@ -3,6 +3,7 @@ import type { ComponentType, SVGProps } from "react";
 import {
   IconHq,
   IconLedger,
+  IconNews,
   IconSettings,
   IconSpark,
 } from "@/components/layout/nav-icons";
@@ -44,6 +45,11 @@ export interface NavGroup {
 }
 
 export const NAV_GROUPS: NavGroup[] = [
+  {
+    // The live crypto newspaper, the first page after sign-in (Karthik, 2026-10-17).
+    label: "Newsroom",
+    items: [{ href: "/home", label: "Home", icon: IconNews, status: "ready" }],
+  },
   {
     label: "Strategy",
     items: [
