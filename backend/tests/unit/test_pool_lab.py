@@ -193,3 +193,26 @@ def test_real_wallet_reads_the_open_buy_once(monkeypatch) -> None:
     assert run(RealWalletDriver._no_open_buy("UNREAD")) is False      # unknown is bought
     assert run(RealWalletDriver._no_open_buy("NOBUY")) is True
     assert calls == ["NOBUY", "BUY", "UNREAD"]                        # answers cached, unread re-asked later
+
+
+def test_open_buy_needs_every_transaction_read(monkeypatch) -> None:
+    import asyncio
+    from decimal import Decimal
+
+    from app.labs.graduation import open_buys
+    sigs = [{"signature": s, "err": None, "blockTime": 100} for s in ("c", "b", "a")]
+    def fake(txs):
+        async def rpc(client, method, params):
+            if method == "getSignaturesForAddress":
+                return sigs
+            got = txs[params[0]]
+            if got is None:
+                raise LookupError(method)
+            return {"meta": {"preBalances": [got], "postBalances": [0]}}
+        return rpc
+    monkeypatch.setattr(open_buys, "_rpc", fake({"a": 1000, "b": None, "c": 70_000_000_000}))
+    assert asyncio.run(open_buys.read_pool(None, "p")) == Decimal(70)      # skips the unread one, finds the buy
+    monkeypatch.setattr(open_buys, "_rpc", fake({"a": 1000, "b": None, "c": 1000}))
+    assert asyncio.run(open_buys.read_pool(None, "p")) is None             # a gap means unknown, not "no buy"
+    monkeypatch.setattr(open_buys, "_rpc", fake({"a": 1000, "b": 1000, "c": 1000}))
+    assert asyncio.run(open_buys.read_pool(None, "p")) == 0                # all read, none over the floor
