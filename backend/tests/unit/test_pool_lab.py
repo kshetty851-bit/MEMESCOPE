@@ -156,3 +156,18 @@ def test_size_grid_stakes_like_the_book() -> None:
     row = next(s for s in plain["sizes"] if s["ticket_usd"] == 100)
     row2 = next(s for s in staked["sizes"] if s["ticket_usd"] == 100)
     assert row2["cells"][book]["pnl_usd"] > row["cells"][book]["pnl_usd"] * Decimal("1.4")
+
+
+def test_open_buy_reads_the_first_minute_only() -> None:
+    from decimal import Decimal
+
+    from app.labs.graduation.models import GradOpenBuy
+    from app.labs.graduation.open_buys import biggest_open_spend, no_buy_at_open
+    tx = lambda t, pre, post: {"blockTime": t, "meta": {"preBalances": [pre], "postBalances": [post]}}  # noqa: E731
+    assert biggest_open_spend([tx(100, 70_000_000_000, 5_000_000_000)], 100) == Decimal(65)
+    assert biggest_open_spend([tx(100, 1_000_000_000, 900_000_000)], 100) == 0   # 0.1 SOL: no buy
+    assert biggest_open_spend([tx(161, 70_000_000_000, 0), None], 100) == 0      # after the minute
+    assert no_buy_at_open(GradOpenBuy(mint="a", read=True, open_buy_sol=Decimal(0)))
+    assert not no_buy_at_open(GradOpenBuy(mint="a", read=True, open_buy_sol=Decimal(60)))
+    assert not no_buy_at_open(GradOpenBuy(mint="a", read=False, open_buy_sol=None))
+    assert not no_buy_at_open(None)

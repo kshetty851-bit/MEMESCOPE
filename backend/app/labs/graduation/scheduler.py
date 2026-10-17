@@ -45,6 +45,8 @@ FLOWS_ENABLED = False
 FLOWS_PER_PASS = 10
 FLOWS_INTERVAL_SECONDS = 120
 RUGS_TASK = "app.labs.graduation.scheduler.graduation_rugs_tick"
+OPEN_BUYS_TASK = "app.labs.graduation.scheduler.graduation_open_buys_tick"
+OPEN_BUYS_INTERVAL_SECONDS = 60
 POOL_LAB_TASK = "app.labs.graduation.scheduler.graduation_pool_lab_tick"
 #: Graduations judged per pass: ~10 s of index reads on production at 200.
 RUGS_PER_PASS = 200
@@ -366,6 +368,27 @@ async def rugs_pass(session: AsyncSession, *, now: datetime) -> dict[str, Any]:
     return {"judged": len(todo), "rugged": rugged}
 
 
+@celery_app.task(name=OPEN_BUYS_TASK)
+def graduation_open_buys_tick() -> dict[str, Any]:
+    from app.workers.runtime import run_async
+
+    return run_async(open_buys_tick())
+
+
+async def open_buys_tick() -> dict[str, Any]:
+    """Karthik Lab's no-buy-at-open check (`open_buys`), contained like the rest."""
+    from app.labs.graduation.open_buys import open_buys_pass
+
+    if not config.enabled():
+        return {"skipped": "graduation_disabled"}
+    try:
+        async with SessionFactory() as session:
+            return await open_buys_pass(session, now=datetime.now(UTC))
+    except Exception:  # never raise into the beat
+        logger.exception("graduation_open_buys_failed")
+        return {"error": "graduation_open_buys_failed"}
+
+
 #: `setdefault`, so an operator who names either in `celery_app.py` wins over
 #: this and there is never a second entry for the same task.
 celery_app.conf.beat_schedule.setdefault("graduation-lab-prune", {
@@ -375,6 +398,10 @@ celery_app.conf.beat_schedule.setdefault("graduation-lab-prune", {
 celery_app.conf.beat_schedule.setdefault("graduation-lab-features", {
     "task": FEATURES_TASK,
     "schedule": float(config.FEATURES_INTERVAL_SECONDS),
+})
+celery_app.conf.beat_schedule.setdefault("graduation-lab-open-buys", {
+    "task": OPEN_BUYS_TASK,
+    "schedule": float(OPEN_BUYS_INTERVAL_SECONDS),
 })
 celery_app.conf.beat_schedule.setdefault("graduation-lab-rugs", {
     "task": RUGS_TASK,
