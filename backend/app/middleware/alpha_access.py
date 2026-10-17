@@ -35,6 +35,8 @@ EXEMPT_PREFIXES = (
     "/api/v1/auth",
     # FiveBags has its own password (app/real_wallet/fivebags_api.py).
     "/api/v1/fivebags",
+    # The public newspaper homepage (app/newsroom).
+    "/api/v1/newsroom",
 )
 
 

@@ -59,6 +59,8 @@ celery_app = Celery(
         "app.labs.btc_range.scheduler",
         # Momentum Lab. Gated by LAB_MOMENTUM_ENABLED (default off).
         "app.hq_ops.tasks",
+        # The public newspaper homepage (2026-10-17).
+        "app.newsroom.scheduler",
     ],
 )
 
