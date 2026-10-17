@@ -114,8 +114,11 @@ async def push_pass(session: AsyncSession, *, now: datetime) -> int:
     ).all()
     pushed = 0
     for alert, position, symbol in rows:
-        build = ta.opened_message if alert.event == "opened" else ta.closed_message
-        if await send_all(session, *split(build(position, symbol, now))):
+        if alert.event == "opened":
+            text = ta.opened_message(position, symbol, now)
+        else:
+            text = ta.closed_message(position, symbol, now, await ta.win_streak(session, position))
+        if await send_all(session, *split(text)):
             pushed += 1
         alert.pushed_at = now
         await session.commit()
