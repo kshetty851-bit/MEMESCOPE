@@ -13,6 +13,7 @@ import "@/styles/home-universe.css";
 import "@/styles/space-crew.css";
 import "@/styles/journey.css";
 import "@/styles/checkpoint.css";
+import "@/styles/newspaper.css";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
