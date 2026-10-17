@@ -18,7 +18,7 @@ function afterSignIn(): string {
   const next = new URLSearchParams(window.location.search).get("next");
   return next && /^\/[A-Za-z0-9/_-]*$/.test(next) && !next.startsWith("//")
     ? next
-    : "/karthik-lab";
+    : "/home";
 }
 
 export default function LoginPage() {

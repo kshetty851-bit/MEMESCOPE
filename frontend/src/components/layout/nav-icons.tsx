@@ -74,6 +74,17 @@ export function IconLedger(props: SVGProps<SVGSVGElement>) {
   );
 }
 
+/** Home — the newsroom: a folded broadsheet. */
+export function IconNews(props: SVGProps<SVGSVGElement>) {
+  return (
+    <Base {...props}>
+      <path d="M4 5.5h13v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
+      <path d="M17 8.5h3v10a2 2 0 0 1-2 2" />
+      <path d="M7.5 9h6M7.5 12.5h6M7.5 16h4" />
+    </Base>
+  );
+}
+
 /** Watchlist — a bookmark, not a star. Stars read as ratings. */
 export function IconBookmark(props: SVGProps<SVGSVGElement>) {
   return (

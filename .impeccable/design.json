@@ -1,0 +1,361 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-17T00:00:00Z",
+  "title": "Design System: MEMESCOPE Newspaper",
+  "extensions": {
+    "colorMeta": {
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "#0d0d0b",
+        "tonalRamp": [
+          "oklch(15% 0.004 106.9)",
+          "oklch(26% 0.004 106.9)",
+          "oklch(37% 0.004 106.9)",
+          "oklch(48% 0.004 106.9)",
+          "oklch(59% 0.004 106.9)",
+          "oklch(70% 0.004 106.9)",
+          "oklch(82% 0.004 106.9)",
+          "oklch(95% 0.004 106.9)"
+        ]
+      },
+      "ink-2": {
+        "role": "neutral",
+        "displayName": "Ink 2",
+        "canonical": "#161613",
+        "tonalRamp": [
+          "oklch(15% 0.006 106.9)",
+          "oklch(26% 0.006 106.9)",
+          "oklch(37% 0.006 106.9)",
+          "oklch(48% 0.006 106.9)",
+          "oklch(59% 0.006 106.9)",
+          "oklch(70% 0.006 106.9)",
+          "oklch(82% 0.006 106.9)",
+          "oklch(95% 0.006 106.9)"
+        ]
+      },
+      "ink-3": {
+        "role": "neutral",
+        "displayName": "Ink 3",
+        "canonical": "#1f1f1b",
+        "tonalRamp": [
+          "oklch(15% 0.007 107.0)",
+          "oklch(26% 0.007 107.0)",
+          "oklch(37% 0.007 107.0)",
+          "oklch(48% 0.007 107.0)",
+          "oklch(59% 0.007 107.0)",
+          "oklch(70% 0.007 107.0)",
+          "oklch(82% 0.007 107.0)",
+          "oklch(95% 0.007 107.0)"
+        ]
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "Paper",
+        "canonical": "#efe8d8",
+        "tonalRamp": [
+          "oklch(15% 0.023 87.2)",
+          "oklch(26% 0.023 87.2)",
+          "oklch(37% 0.023 87.2)",
+          "oklch(48% 0.023 87.2)",
+          "oklch(59% 0.023 87.2)",
+          "oklch(70% 0.023 87.2)",
+          "oklch(82% 0.023 87.2)",
+          "oklch(95% 0.023 87.2)"
+        ]
+      },
+      "paper-2": {
+        "role": "neutral",
+        "displayName": "Paper 2",
+        "canonical": "#cdc5b3",
+        "tonalRamp": [
+          "oklch(15% 0.026 86.9)",
+          "oklch(26% 0.026 86.9)",
+          "oklch(37% 0.026 86.9)",
+          "oklch(48% 0.026 86.9)",
+          "oklch(59% 0.026 86.9)",
+          "oklch(70% 0.026 86.9)",
+          "oklch(82% 0.026 86.9)",
+          "oklch(95% 0.026 86.9)"
+        ]
+      },
+      "paper-3": {
+        "role": "neutral",
+        "displayName": "Paper 3",
+        "canonical": "#9c9584",
+        "tonalRamp": [
+          "oklch(15% 0.026 88.3)",
+          "oklch(26% 0.026 88.3)",
+          "oklch(37% 0.026 88.3)",
+          "oklch(48% 0.026 88.3)",
+          "oklch(59% 0.026 88.3)",
+          "oklch(70% 0.026 88.3)",
+          "oklch(82% 0.026 88.3)",
+          "oklch(95% 0.026 88.3)"
+        ]
+      },
+      "live-lime": {
+        "role": "primary",
+        "displayName": "Live Lime",
+        "canonical": "#c6ff3a",
+        "tonalRamp": [
+          "oklch(15% 0.217 125.2)",
+          "oklch(26% 0.217 125.2)",
+          "oklch(37% 0.217 125.2)",
+          "oklch(48% 0.217 125.2)",
+          "oklch(59% 0.217 125.2)",
+          "oklch(70% 0.217 125.2)",
+          "oklch(82% 0.217 125.2)",
+          "oklch(95% 0.217 125.2)"
+        ]
+      },
+      "alert-orange": {
+        "role": "secondary",
+        "displayName": "Alert Orange",
+        "canonical": "#ff7a35",
+        "tonalRamp": [
+          "oklch(15% 0.181 44.9)",
+          "oklch(26% 0.181 44.9)",
+          "oklch(37% 0.181 44.9)",
+          "oklch(48% 0.181 44.9)",
+          "oklch(59% 0.181 44.9)",
+          "oklch(70% 0.181 44.9)",
+          "oklch(82% 0.181 44.9)",
+          "oklch(95% 0.181 44.9)"
+        ]
+      },
+      "data-cyan": {
+        "role": "tertiary",
+        "displayName": "Data Cyan",
+        "canonical": "#49d8ff",
+        "tonalRamp": [
+          "oklch(15% 0.130 220.0)",
+          "oklch(26% 0.130 220.0)",
+          "oklch(37% 0.130 220.0)",
+          "oklch(48% 0.130 220.0)",
+          "oklch(59% 0.130 220.0)",
+          "oklch(70% 0.130 220.0)",
+          "oklch(82% 0.130 220.0)",
+          "oklch(95% 0.130 220.0)"
+        ]
+      },
+      "rule": {
+        "role": "neutral",
+        "displayName": "Rule",
+        "canonical": "rgb(239 232 216 / 0.14)"
+      },
+      "rule-strong": {
+        "role": "neutral",
+        "displayName": "Rule Strong",
+        "canonical": "rgb(239 232 216 / 0.55)"
+      }
+    },
+    "typographyMeta": {
+      "nameplate": {
+        "displayName": "Nameplate",
+        "purpose": "The MEMESCOPE flag in the masthead and colophon only."
+      },
+      "display": {
+        "displayName": "Display",
+        "purpose": "The lead headline only; uppercase, balanced."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Section heads; rail and panel sub-heads step down at the same weight."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Ordinary wire headlines in serif."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Reading text and deks, 60-70ch."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Uppercase condensed tabs, tags, pills and figure-list terms."
+      },
+      "figures": {
+        "displayName": "Figures",
+        "purpose": "Every price, change, time and count; tabular numerals."
+      }
+    },
+    "shadows": [],
+    "motion": [
+      {
+        "name": "ease",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "The one easing for every transition and entrance."
+      },
+      {
+        "name": "flag-ink",
+        "value": "1.1s clip-path wipe left to right with blur 6px to 0",
+        "purpose": "Nameplate inks in once on load."
+      },
+      {
+        "name": "rise",
+        "value": "0.9s, translateY(18px) and blur(4px) to rest, staggered via --d",
+        "purpose": "Front page and sections enter once; scroll reveal 0.8s from 22px."
+      },
+      {
+        "name": "ticker",
+        "value": "110s linear loop",
+        "purpose": "Price strip; pauses on hover, focus-within or the pause control."
+      },
+      {
+        "name": "live-beat",
+        "value": "1.8s single lime ring, 0 to 9px",
+        "purpose": "Live dot pulses once per data refresh, never loops."
+      },
+      {
+        "name": "value-flash",
+        "value": "0.12s in, 1.2s out lime tint",
+        "purpose": "A changed figure flashes once."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "all animation and transition none",
+        "purpose": "prefers-reduced-motion stops everything."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "page-max",
+        "value": "1480px"
+      },
+      {
+        "name": "stack",
+        "value": "1024px"
+      },
+      {
+        "name": "phone",
+        "value": "640px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Lab Button",
+      "kind": "button",
+      "refersTo": "lab-button",
+      "description": "Masthead entry to /lab; outlined pill that fills lime on hover.",
+      "html": "<a class=\"ds-labbtn\" href=\"#\">Lab<svg width=\"16\" height=\"16\" viewBox=\"0 0 20 20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M6 14 14 6M7.5 6H14v6.5\"/></svg></a>",
+      "css": ":host{--np-ink:#0d0d0b;--np-paper:#efe8d8;--np-paper-2:#cdc5b3;--np-paper-3:#9c9584;--np-rule:rgb(239 232 216 / .14);--np-rule-strong:rgb(239 232 216 / .55);--np-lime:#c6ff3a;--np-cyan:#49d8ff;--np-orange:#ff7a35;--np-ease:cubic-bezier(.16,1,.3,1)} .ds-labbtn{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;font-family:'Big Shoulders',sans-serif;font-weight:800;letter-spacing:.04em;text-transform:uppercase;font-size:1rem;color:var(--np-paper);background:var(--np-ink);text-decoration:none;border:1px solid var(--np-rule-strong);border-radius:999px;transition:background .25s var(--np-ease),color .25s var(--np-ease),border-color .25s}.ds-labbtn:hover{background:var(--np-lime);color:var(--np-ink);border-color:var(--np-lime)}.ds-labbtn:focus-visible{outline:2px solid var(--np-cyan);outline-offset:3px}"
+    },
+    {
+      "name": "Updates Pill",
+      "kind": "button",
+      "refersTo": "updates-pill",
+      "description": "Sticky lime pill that releases waiting wire items; content never moves on its own.",
+      "html": "<button class=\"ds-updates\" type=\"button\">4 new reports</button>",
+      "css": ":host{--np-ink:#0d0d0b;--np-paper:#efe8d8;--np-paper-2:#cdc5b3;--np-paper-3:#9c9584;--np-rule:rgb(239 232 216 / .14);--np-rule-strong:rgb(239 232 216 / .55);--np-lime:#c6ff3a;--np-cyan:#49d8ff;--np-orange:#ff7a35;--np-ease:cubic-bezier(.16,1,.3,1)} .ds-updates{display:inline-flex;align-items:center;gap:8px;padding:8px 16px;background:var(--np-lime);color:var(--np-ink);border:0;border-radius:999px;cursor:pointer;font-family:'Big Shoulders',sans-serif;font-weight:800;letter-spacing:.04em;text-transform:uppercase;font-size:.95rem}.ds-updates:hover{filter:brightness(1.05)}.ds-updates:focus-visible{outline:2px solid var(--np-cyan);outline-offset:3px}"
+    },
+    {
+      "name": "Filter Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Topic and region filters on the wire; selected fills paper.",
+      "html": "<div style=\"display:flex;gap:6px;background:#0d0d0b;padding:12px\"><button class=\"ds-chip is-on\">All</button><button class=\"ds-chip\">Bitcoin</button><button class=\"ds-chip\">Regulation</button></div>",
+      "css": ":host{--np-ink:#0d0d0b;--np-paper:#efe8d8;--np-paper-2:#cdc5b3;--np-paper-3:#9c9584;--np-rule:rgb(239 232 216 / .14);--np-rule-strong:rgb(239 232 216 / .55);--np-lime:#c6ff3a;--np-cyan:#49d8ff;--np-orange:#ff7a35;--np-ease:cubic-bezier(.16,1,.3,1)} .ds-chip{padding:5px 11px;background:transparent;color:var(--np-paper-2);border:1px solid var(--np-rule);border-radius:999px;font:inherit;font-family:'Source Serif 4',Georgia,serif;font-size:.86rem;cursor:pointer;transition:all .25s var(--np-ease)}.ds-chip:hover{border-color:var(--np-rule-strong);color:var(--np-paper)}.ds-chip.is-on{background:var(--np-paper);color:var(--np-ink);border-color:var(--np-paper)}.ds-chip:focus-visible{outline:2px solid var(--np-cyan);outline-offset:3px}"
+    },
+    {
+      "name": "Wire Search",
+      "kind": "input",
+      "description": "Boxless search: strong-rule underline that turns lime on focus.",
+      "html": "<label class=\"ds-search\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 20 20\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" aria-hidden=\"true\"><circle cx=\"8.8\" cy=\"8.8\" r=\"5\"/><path d=\"m12.6 12.6 4 4\"/></svg><input placeholder=\"Search the wire\"></label>",
+      "css": ":host{--np-ink:#0d0d0b;--np-paper:#efe8d8;--np-paper-2:#cdc5b3;--np-paper-3:#9c9584;--np-rule:rgb(239 232 216 / .14);--np-rule-strong:rgb(239 232 216 / .55);--np-lime:#c6ff3a;--np-cyan:#49d8ff;--np-orange:#ff7a35;--np-ease:cubic-bezier(.16,1,.3,1)} .ds-search{display:flex;align-items:center;gap:8px;min-width:280px;padding:4px 2px;background:var(--np-ink);color:var(--np-paper-2);border-bottom:1px solid var(--np-rule-strong)}.ds-search input{flex:1;background:none;border:0;outline:none;color:var(--np-paper);font-family:'Source Serif 4',Georgia,serif;font-size:.98rem}.ds-search input::placeholder{color:var(--np-paper-3)}.ds-search:focus-within{border-color:var(--np-lime)}"
+    },
+    {
+      "name": "Kind Tags",
+      "kind": "chip",
+      "refersTo": "kind-tag",
+      "description": "Report status on every story: confirmed lime, single report paper-2, developing orange, commentary cyan.",
+      "html": "<div style=\"display:flex;gap:8px;background:#0d0d0b;padding:12px\"><span class=\"ds-kind ds-k-confirmed\">Confirmed</span><span class=\"ds-kind ds-k-report\">Single report</span><span class=\"ds-kind ds-k-developing\">Developing</span><span class=\"ds-kind ds-k-commentary\">Commentary</span></div>",
+      "css": ":host{--np-ink:#0d0d0b;--np-paper:#efe8d8;--np-paper-2:#cdc5b3;--np-paper-3:#9c9584;--np-rule:rgb(239 232 216 / .14);--np-rule-strong:rgb(239 232 216 / .55);--np-lime:#c6ff3a;--np-cyan:#49d8ff;--np-orange:#ff7a35;--np-ease:cubic-bezier(.16,1,.3,1)} .ds-kind{display:inline-block;font-family:'Big Shoulders',sans-serif;font-weight:800;letter-spacing:.04em;text-transform:uppercase;letter-spacing:.06em;font-size:.8rem;padding:1px 7px;border:1px solid currentColor;border-radius:2px}.ds-k-confirmed{color:var(--np-lime)}.ds-k-report{color:var(--np-paper-2)}.ds-k-developing{color:var(--np-orange)}.ds-k-commentary{color:var(--np-cyan)}"
+    },
+    {
+      "name": "Section Head",
+      "kind": "custom",
+      "refersTo": "headline",
+      "description": "Uppercase condensed section head over a hairline-ruled section.",
+      "html": "<section class=\"ds-sec\"><h2 class=\"ds-sec__head\">Market Pulse</h2><p class=\"ds-fine\">CoinGecko prices \u00b7 2 min ago</p></section>",
+      "css": ":host{--np-ink:#0d0d0b;--np-paper:#efe8d8;--np-paper-2:#cdc5b3;--np-paper-3:#9c9584;--np-rule:rgb(239 232 216 / .14);--np-rule-strong:rgb(239 232 216 / .55);--np-lime:#c6ff3a;--np-cyan:#49d8ff;--np-orange:#ff7a35;--np-ease:cubic-bezier(.16,1,.3,1)} .ds-sec{background:var(--np-ink);color:var(--np-paper);padding:34px 20px;border-bottom:1px solid var(--np-rule)}.ds-sec__head{margin:0 0 8px;font-family:'Big Shoulders',sans-serif;font-weight:900;text-transform:uppercase;font-size:clamp(2rem,3.6vw,3.1rem);line-height:.95;letter-spacing:-.005em}.ds-fine{margin:0;font-family:'Geist Mono',ui-monospace,monospace;font-size:.8rem;color:var(--np-paper-3)}"
+    },
+    {
+      "name": "Wire Row",
+      "kind": "custom",
+      "refersTo": "title",
+      "description": "Mono time column, serif headline, paper-2 dek, hairline below; faint wash on hover.",
+      "html": "<ul class=\"ds-wire\"><li class=\"ds-item\"><span class=\"ds-time\">14:05</span><div><h3 class=\"ds-head\"><a href=\"#\">Exchange outflows hit a six-month high</a></h3><p class=\"ds-dek\">Two outlets report the same on-chain figure.</p></div></li></ul>",
+      "css": ":host{--np-ink:#0d0d0b;--np-paper:#efe8d8;--np-paper-2:#cdc5b3;--np-paper-3:#9c9584;--np-rule:rgb(239 232 216 / .14);--np-rule-strong:rgb(239 232 216 / .55);--np-lime:#c6ff3a;--np-cyan:#49d8ff;--np-orange:#ff7a35;--np-ease:cubic-bezier(.16,1,.3,1)} .ds-wire{list-style:none;margin:0;padding:0 20px;background:var(--np-ink);color:var(--np-paper)}.ds-item{display:grid;grid-template-columns:52px minmax(0,1fr);gap:0 14px;padding:15px 0;border-bottom:1px solid var(--np-rule);transition:background-color .3s}.ds-item:hover{background:linear-gradient(90deg,rgb(239 232 216 / .035),transparent 70%)}.ds-time{font-family:'Geist Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;font-size:.82rem;color:var(--np-paper-3);padding-top:4px}.ds-head{margin:0;font-family:'Source Serif 4',Georgia,serif;font-weight:600;font-size:1.2rem;line-height:1.3}.ds-head a{color:inherit;text-decoration:none}.ds-head a:hover{color:var(--np-lime)}.ds-head a:focus-visible{outline:2px solid var(--np-cyan);outline-offset:3px}.ds-dek{margin:8px 0 0;color:var(--np-paper-2);font-family:'Source Serif 4',Georgia,serif;font-size:1rem}"
+    },
+    {
+      "name": "Our Lab Panel",
+      "kind": "card",
+      "refersTo": "badge-ours",
+      "description": "Cyan-washed strip with a cyan top rule and badge marking MEMESCOPE's own numbers.",
+      "html": "<p class=\"ds-ours\"><span class=\"ds-badge\">Our lab</span><span class=\"ds-fig\">0.47%</span><span>of graduations rugged in the last 24 hours</span></p>",
+      "css": ":host{--np-ink:#0d0d0b;--np-paper:#efe8d8;--np-paper-2:#cdc5b3;--np-paper-3:#9c9584;--np-rule:rgb(239 232 216 / .14);--np-rule-strong:rgb(239 232 216 / .55);--np-lime:#c6ff3a;--np-cyan:#49d8ff;--np-orange:#ff7a35;--np-ease:cubic-bezier(.16,1,.3,1)} .ds-ours{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px;margin:0;padding:12px 14px;color:var(--np-paper);font-family:'Source Serif 4',Georgia,serif;background:color-mix(in oklab,rgb(73 216 255 / .06),var(--np-ink));border-top:1px solid rgb(73 216 255 / .35)}.ds-badge{font-family:'Big Shoulders',sans-serif;font-weight:800;letter-spacing:.04em;text-transform:uppercase;letter-spacing:.06em;font-size:.8rem;background:var(--np-cyan);color:var(--np-ink);padding:1px 6px;border-radius:2px}.ds-fig{font-family:'Geist Mono',ui-monospace,monospace;font-variant-numeric:tabular-nums;color:var(--np-cyan)}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Night Edition",
+    "overview": "The homepage is a broadsheet printed on black: a blackletter nameplate over a double rule, one lead story at tabloid scale, then sections set in columns divided by hairline rules. It refuses the glowing-neon crypto dashboard of identical cards. Structure comes from rules, columns and type scale, not from boxes or shadows. Density is a newspaper's: many rows, tight leading in headlines, generous measure in reading text.\n\nColour is ink and paper first. Three accents carry meaning, never decoration: lime says live or up, orange says down or danger, cyan says a link or MEMESCOPE's own data. Every figure is set in mono with tabular numerals and sits next to its source and time.\n\nMotion is print-like and quiet: the nameplate inks in once, sections rise into place once, the ticker drifts slowly and pauses on hover, focus or the pause control. New wire items wait behind an \"updates\" pill rather than shifting the page. Everything stops under reduced motion.",
+    "keyCharacteristics": [
+      "Ink-black ground with a fixed fractal-noise grain at 8% overlay, plus two faint colour washes (cyan top right, lime left).",
+      "Four families, each with one job: blackletter flag, condensed grotesque heads, serif reading text, mono figures.",
+      "Hairline column rules and 3px double rules instead of cards.",
+      "Accents mean live/up, down/alert, link/ours; nothing else.",
+      "Every number cites its source and time."
+    ],
+    "rules": [
+      {
+        "name": "The Three Meanings Rule",
+        "body": "Lime is live or up, orange is down or danger, cyan is a link or our own data. An accent that means none of these does not ship.",
+        "section": "colors"
+      },
+      {
+        "name": "The Ink On Accent Rule",
+        "body": "Text on any filled accent (pill, risk label, badge, strong heatmap cell) is ink, never paper.",
+        "section": "colors"
+      },
+      {
+        "name": "The Figures Are Mono Rule",
+        "body": "A number that is data (price, change, time, count) is set in the mono face with tabular numerals; prose numbers are not.",
+        "section": "typography"
+      },
+      {
+        "name": "The One Flag Rule",
+        "body": "Blackletter is the nameplate. It never sets a heading, label or body text.",
+        "section": "typography"
+      },
+      {
+        "name": "The Rules Not Boxes Rule",
+        "body": "Sections and columns are divided by hairlines and double rules. The market pulse grid is the one bordered block, because it is a table of figures.",
+        "section": "layout"
+      },
+      {
+        "name": "The Printed Flat Rule",
+        "body": "Nothing on the page casts a shadow at rest. Emphasis is a heavier rule, a larger head or an accent fill.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do divide columns and sections with 1px hairlines (rule) and close the masthead and colophon with a 3px double rule (rule-strong).",
+      "Do set every price, change, time and count in the mono face with tabular numerals, and show its source and time nearby.",
+      "Do keep the accents to their meanings: lime live/up, orange down/alert, cyan link/ours.",
+      "Do put ink text on filled accents.",
+      "Do mark MEMESCOPE's own numbers with the cyan \"Our lab\" badge and panel.",
+      "Do hold new items behind the updates pill; never shift content the reader is on.",
+      "Do stop every animation under prefers-reduced-motion and give every control the cyan focus ring."
+    ],
+    "donts": [
+      "Don't build sections from stacked identical cards with shadows; the thesis refuses the glowing-neon crypto dashboard.",
+      "Don't use blackletter anywhere but the nameplate.",
+      "Don't add shadows at rest or glow effects to text or panels.",
+      "Don't use an accent colour decoratively or for a fourth meaning.",
+      "Don't fill a section with placeholder or invented figures; show the dashed \"not connected yet\" state.",
+      "Don't add text glyphs as icons; use the 1.6px stroke icon family."
+    ]
+  }
+}

@@ -8,12 +8,12 @@ web
 
 ## Users
 
-- **Public visitors** to memescope.site: crypto traders and curious newcomers who want to understand, in one glance, what is happening in crypto right now. The homepage is for them (confirmed 2026-10-17).
-- **Karthik (owner) and Rafiq (partner)**: run the labs and the real wallets behind the alpha access code. Their tools live behind the "Lab" entry, not on the public front page.
+- **Signed-in members** (Karthik, Rafiq and alpha testers): the newspaper is their home page after sign-in (/home), beside every lab and wallet in the left rail (Karthik, 2026-10-17: "i want this page inside login as an homepage").
+- **Public visitors** see the space-themed landing at "/" with the access-code entry.
 
 ## Product Purpose
 
-MEMESCOPE tests pump.fun graduation trading strategies on paper, against fair controls, before any real money follows them; a real wallet then trades the rules that held up. The public homepage is a continuously updating crypto newspaper: what happened, why it matters, what to watch next. Success is a page people reopen through the day.
+MEMESCOPE tests pump.fun graduation trading strategies on paper, against fair controls, before any real money follows them; a real wallet then trades the rules that held up. The home page after sign-in is a continuously updating crypto newspaper: what happened, why it matters, what to watch next. Success is a page people reopen through the day.
 
 ## Positioning
 
@@ -22,7 +22,7 @@ The newspaper mixes global crypto coverage with numbers only MEMESCOPE has: its 
 ## Operating Context
 
 - Frontend: Next.js on Vercel (www.memescope.site); backend: FastAPI + Postgres + Celery on an OVH server (api.memescope.site), behind Caddy.
-- The current landing (space theme, frog-astronaut mascot, alpha access-code entry, moon intro, "Built through failure" journey, live checkpoint) moves to `/lab` and stays one click away.
+- The public landing at "/" stays the space theme (frog-astronaut mascot, alpha access-code entry, moon intro, "Built through failure" journey, live checkpoint); sign-in leads to the newspaper at /home.
 - All times are shown in the visitor's local time on the newspaper; the team's own tools use Dubai time (UTC+4).
 
 ## Capabilities and Constraints

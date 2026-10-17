@@ -21,7 +21,6 @@
  * FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
  */
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { cn } from "@/lib/utils";
@@ -107,7 +106,6 @@ function Masthead({ data, now, failed }: { data?: Newsroom; now: number; failed:
             {failed ? "Connection lost — showing last edition" : updated ? `${stale ? "Stale since" : "Live ·"} ${clock(updated)}` : "Connecting"}
           </span>
         </span>
-        <Link href="/lab" className="np-labbtn">Lab<IconArrow className="np-ico" /></Link>
       </div>
       <h1 className="np-flag"><span className="np-flag__ink">Memescope</span></h1>
       <p className="np-motto">All the crypto that moved today — sourced, timed, and checked against our own on-chain lab.</p>
@@ -230,7 +228,6 @@ function Colophon({ data, now }: { data?: Newsroom; now: number }) {
       <div>
         <h2 className="np-colophon__flag">Memescope</h2>
         <p>An automated newspaper. Headlines and summaries belong to their publishers and link to the original. Market data: CoinGecko, alternative.me, mempool.space, DexScreener, DeFiLlama. Lab data: measured by MEMESCOPE from pump.fun graduations. Nothing here is financial advice.</p>
-        <p><Link href="/lab">Open the MEMESCOPE lab</Link></p>
       </div>
       <div>
         <h3>Wire status</h3>
