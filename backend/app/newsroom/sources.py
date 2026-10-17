@@ -7,6 +7,7 @@ estimated or filled in when a source is down.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -68,27 +69,57 @@ async def market(client: httpx.AsyncClient) -> dict[str, Any]:
     }
 
 
+_NOT_A_NARRATIVE = re.compile(
+    r"portfolio|made in|alleged|holdings|ecosystem|index|launchpad|launchpool|alpha spotlight|synthetic dollar|"
+    r"fan token|proof of|smart contract platform|layer 1|exchange-based|centralized exchange|"
+    r"wrapped|bridged|-themed|compliant|chain abstraction|base native|governance|infrastructure$",
+    re.I,
+)
+#: CoinGecko lists overlapping sectors (four stablecoin kinds, three privacy):
+#: one tile per family, the largest.
+_FAMILIES = [
+    (f, re.compile(p, re.I))
+    for f, p in (
+        ("stablecoin", r"stablecoin|stable coin"),
+        ("privacy", r"privacy"),
+        ("meme", r"\bmeme"),
+        ("ai", r"\(ai\)|artificial intelligence"),
+        ("rwa", r"real world|\brwa\b|tokenized"),
+        ("dex", r"decentralized exchange|\bdex\b|perpetuals|derivatives"),
+    )
+]
+
+
 async def narratives(client: httpx.AsyncClient) -> list[dict[str, Any]]:
-    """CoinGecko's sectors, ranked by size; the page measures 'attention' as each
-    sector's 24h market-cap change and says so."""
+    """CoinGecko's sectors that are real narratives, one per family, ranked by
+    size; the page measures 'attention' as each sector's 24h market-cap change
+    and says so."""
     cats = await _get(client, f"{CG}/coins/categories")
     big = [
         c
         for c in cats
         if (c.get("market_cap") or 0) >= 300_000_000
         and c.get("market_cap_change_24h") is not None
+        and not _NOT_A_NARRATIVE.search(c.get("name") or "")
     ]
     big.sort(key=lambda c: c["market_cap"], reverse=True)
-    return [
-        {
-            "id": c["id"],
-            "name": c["name"],
-            "mcap": c["market_cap"],
-            "change_24h": c["market_cap_change_24h"],
-            "volume": c.get("volume_24h"),
-        }
-        for c in big[:40]
-    ]
+    seen: set[str] = set()
+    out = []
+    for c in big:
+        fam = next((f for f, rx in _FAMILIES if rx.search(c["name"])), c["id"])
+        if fam in seen:
+            continue
+        seen.add(fam)
+        out.append(
+            {
+                "id": c["id"],
+                "name": c["name"],
+                "mcap": c["market_cap"],
+                "change_24h": c["market_cap_change_24h"],
+                "volume": c.get("volume_24h"),
+            }
+        )
+    return out[:20]
 
 
 async def fear_greed(client: httpx.AsyncClient) -> dict[str, Any]:
