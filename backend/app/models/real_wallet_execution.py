@@ -563,6 +563,9 @@ class RealWalletTradeAlert(UUIDPrimaryKeyMixin, Base):
     last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: When the phone push for this event went out (`push.push_pass`), whatever
+    #: WhatsApp did. Null = not pushed yet.
+    pushed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

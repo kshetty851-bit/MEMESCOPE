@@ -47,6 +47,9 @@ export const metadata: Metadata = {
   creator: "Karthik Shetty",
   robots:
     env.NEXT_PUBLIC_ENVIRONMENT === "production" ? "index,follow" : "noindex,nofollow",
+  // Home-screen app on iPhone (2026-10-17): full screen, own icon and name.
+  appleWebApp: { capable: true, title: "MEMESCOPE", statusBarStyle: "black-translucent" },
+  icons: { apple: "/icons/apple-touch-icon.png", icon: "/icons/icon-192.png" },
 };
 
 export const viewport: Viewport = {

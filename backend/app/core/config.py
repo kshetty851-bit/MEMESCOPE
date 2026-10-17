@@ -128,6 +128,11 @@ class Settings(BaseSettings):
     WHATSAPP_PHONE: str = ""
     #: The key CallMeBot sends back after "I allow callmebot to send me messages".
     WHATSAPP_CALLMEBOT_KEY: SecretStr = SecretStr("")
+    #: Phone push alerts (Web Push, 2026-10-17). The public key is handed to the
+    #: browser; the private key signs every push and never leaves the server.
+    VAPID_PUBLIC_KEY: str = ""
+    VAPID_PRIVATE_KEY: SecretStr = SecretStr("")
+    VAPID_SUBJECT: str = "https://www.memescope.site"
 
     # --- Outbound email -----------------------------------------------------
     #

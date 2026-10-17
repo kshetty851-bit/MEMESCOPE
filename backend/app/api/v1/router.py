@@ -41,6 +41,7 @@ from app.pumpfun import api as pumpfun
 from app.radar import api as radar
 from app.real_wallet import api as real_wallet
 from app.real_wallet import family_api as real_wallet_family
+from app.real_wallet import push_api
 from app.real_wallet_safety import api as real_wallet_safety
 from app.security import api as token_security
 from app.social import api as social
@@ -109,6 +110,7 @@ api_router.include_router(real_wallet_safety.router)
 # read as a path parameter of a wallet route.
 api_router.include_router(real_wallet_family.router)
 api_router.include_router(real_wallet.router)
+api_router.include_router(push_api.router)
 # HQ-6: shared token security. Read-only evidence, and deliberately its own
 # namespace rather than an extension of `/real-wallet-safety` — the whole
 # point is that token security is not a real-wallet concern and stays
