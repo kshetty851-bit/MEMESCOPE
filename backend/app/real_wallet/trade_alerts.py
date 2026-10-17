@@ -438,15 +438,20 @@ async def deliver_pending(
 
 async def tick(session: AsyncSession, *, now: datetime | None = None, send=send_whatsapp,
                pause: float = SEND_GAP_SECONDS) -> dict[str, object]:
-    """One pass: notice new trade events, then send what is due."""
-    if not enabled():
+    """One pass: notice new trade events, push them to phones, then send what
+    is due on WhatsApp. Either channel works without the other."""
+    from app.real_wallet import push
+
+    if not enabled() and not push.configured():
         return {"enabled": False}
     now = now or datetime.now(UTC)
-    return {
-        "enabled": True,
-        "recorded": await record_new_events(session, now=now),
-        "delivered": await deliver_pending(session, now=now, send=send, pause=pause),
-    }
+    out: dict[str, object] = {"enabled": True,
+                              "recorded": await record_new_events(session, now=now)}
+    if push.configured():
+        out["pushed"] = await push.push_pass(session, now=now)
+    if enabled():
+        out["delivered"] = await deliver_pending(session, now=now, send=send, pause=pause)
+    return out
 
 
 async def _send_test() -> None:

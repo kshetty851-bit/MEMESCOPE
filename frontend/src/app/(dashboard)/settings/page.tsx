@@ -1,6 +1,7 @@
 "use client";
 
 import { DailyReportPanel } from "@/components/alpha/daily-report-panel";
+import { PhoneAlerts } from "@/components/alerts/phone-alerts";
 import { PageBody } from "@/components/layout/app-shell";
 import { SegmentedControl } from "@/components/ui/filters";
 import { Panel } from "@/components/ui/panel";
@@ -147,6 +148,8 @@ export default function SettingsPage() {
           />
         </div>
       </Panel>
+
+      <PhoneAlerts />
 
       <DailyReportPanel />
 
