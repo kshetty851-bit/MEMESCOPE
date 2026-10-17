@@ -171,3 +171,25 @@ def test_open_buy_reads_the_first_minute_only() -> None:
     assert not no_buy_at_open(GradOpenBuy(mint="a", read=True, open_buy_sol=Decimal(60)))
     assert not no_buy_at_open(GradOpenBuy(mint="a", read=False, open_buy_sol=None))
     assert not no_buy_at_open(None)
+
+
+def test_real_wallet_reads_the_open_buy_once(monkeypatch) -> None:
+    import asyncio
+    from decimal import Decimal
+
+    from app.labs.graduation import open_buys
+    from app.real_wallet.driver import RealWalletDriver
+    calls = []
+
+    async def fake(client, pool):
+        calls.append(pool)
+        return {"NOBUY": Decimal(0), "BUY": Decimal(60)}.get(pool)
+    monkeypatch.setattr(open_buys, "read_pool", fake)
+    monkeypatch.setattr("app.labs.graduation.tournament.graduation_pool", lambda m: m)
+    open_buys._AT_BUY.clear()
+    run = asyncio.run
+    assert run(RealWalletDriver._no_open_buy("NOBUY")) is True
+    assert run(RealWalletDriver._no_open_buy("BUY")) is False
+    assert run(RealWalletDriver._no_open_buy("UNREAD")) is False      # unknown is bought
+    assert run(RealWalletDriver._no_open_buy("NOBUY")) is True
+    assert calls == ["NOBUY", "BUY", "UNREAD"]                        # answers cached, unread re-asked later
