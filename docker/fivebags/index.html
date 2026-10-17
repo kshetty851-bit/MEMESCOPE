@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#0f1115">
+<title>FiveBags</title>
+<style>
+  :root { --bg:#0f1115; --card:#171a21; --line:#262a33; --ink:#eef0f5; --dim:#8a90a0; --up:#22c55e; --down:#ef4444; --acc:#7c6cf0; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,sans-serif; padding:max(16px,env(safe-area-inset-top)) 16px 40px; }
+  h1 { font-size:22px; margin:4px 0 2px; letter-spacing:-.02em } h1 b { color:var(--acc) }
+  .dim { color:var(--dim); font-size:13px }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-top:12px }
+  .row { display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap }
+  .big { font-size:26px; font-weight:700; letter-spacing:-.02em }
+  .up { color:var(--up) } .down { color:var(--down) }
+  input, select, button { font:inherit; color:var(--ink); background:#0c0e12; border:1px solid var(--line); border-radius:10px; padding:10px 12px }
+  input { width:100% } button { cursor:pointer; background:var(--acc); border:0; font-weight:600 }
+  button.ghost { background:transparent; border:1px solid var(--line) } button.stop { background:var(--down) }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; margin-top:10px }
+  .stat .dim { font-size:12px } .stat div:last-child { font-weight:600 }
+  .pill { font-size:12px; padding:3px 9px; border-radius:99px; border:1px solid var(--line) } .pill.on { color:var(--up); border-color:#22c55e55 }
+  table { width:100%; border-collapse:collapse; font-size:13px; margin-top:8px } td { padding:6px 4px; border-top:1px solid var(--line) } td:last-child { text-align:right }
+  details summary { cursor:pointer; color:var(--dim); font-size:13px; margin-top:8px }
+  .err { color:var(--down); font-size:13px; margin-top:8px } .hide { display:none }
+  form .f { margin-top:10px }
+</style>
+</head>
+<body>
+<h1>🐸 Five<b>Bags</b></h1>
+<div class="dim">Five wallets · Karthik Lab rules (G-Q50) · real money</div>
+
+<div id="login" class="card hide">
+  <form id="f">
+    <div class="f"><input id="pw" type="password" placeholder="Password" autocomplete="current-password" autofocus></div>
+    <div class="f"><button>Open</button></div>
+  </form>
+  <div id="lerr" class="err"></div>
+</div>
+
+<div id="app" class="hide">
+  <div class="card">
+    <div class="dim">All five wallets</div>
+    <div class="row"><div id="total" class="big">…</div><div id="totalpnl" class="big">…</div></div>
+    <div class="grid" id="totals"></div>
+  </div>
+  <div id="wallets"></div>
+  <div class="dim" style="margin-top:14px">Updates every 30 s. <a href="#" id="out" style="color:var(--dim)">Lock</a></div>
+</div>
+
+<script>
+const API = "/api/v1/fivebags";
+const $ = (id) => document.getElementById(id);
+const money = (v, s) => v == null ? "—" : (s && +v > 0 ? "+" : +v < 0 ? "−" : "") + "$" + Math.abs(+v).toFixed(2);
+const cls = (v) => +v > 0 ? "up" : +v < 0 ? "down" : "";
+const esc = (t) => String(t ?? "").replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+async function call(path, opt = {}) {
+  const r = await fetch(API + path, { ...opt, credentials: "same-origin", headers: { "Content-Type": "application/json" } });
+  if (!r.ok) { let m = r.statusText; try { const j = await r.json(); m = j.detail || j.error?.message || m; } catch {} throw Object.assign(new Error(m), { status: r.status }); }
+  return r.json();
+}
+
+$("f").onsubmit = async (e) => {
+  e.preventDefault(); $("lerr").textContent = "";
+  try { await call("/unlock", { method: "POST", body: JSON.stringify({ password: $("pw").value }) }); $("pw").value = ""; show(); }
+  catch (err) { $("lerr").textContent = err.message; }
+};
+$("out").onclick = async (e) => { e.preventDefault(); try { await call("/lock", { method: "POST" }); } catch {} location.reload(); };
+
+async function toggle(m, enabled, ticket) {
+  try { await call(`/wallets/${m}/settings`, { method: "POST", body: JSON.stringify({ enabled, ticket_usd: ticket }) }); load(); }
+  catch (err) { alert(err.message); }
+}
+
+async function load() {
+  const views = (await call("/wallets")).wallets;
+  let bal = 0, today = 0, all = 0, trades = 0, open = 0;
+  $("wallets").innerHTML = views.map((v) => {
+    if (!v.own_book) return `<div class="card"><b>${esc(v.label)}</b><div class="dim">No wallet set up yet</div></div>`;
+    const b = v.own_book || {}, w = v.own_wallet || {}, s = b.since_first_trade || {};
+    const pos = (b.positions || []).filter((p) => p.status === "CLOSED");
+    const allPnl = pos.reduce((a, p) => a + +(p.realised_net_pnl_usd ?? p.realised_gross_pnl_usd ?? 0), 0);
+    bal += +(w.balance_usd || 0); today += +(b.today_pnl_usd || 0); all += allPnl; trades += +(s.trades || 0); open += +(b.open_positions || 0);
+    const opts = (b.ticket_choices || []).map((t) => `<option ${+t === +b.ticket_usd ? "selected" : ""}>${t}</option>`).join("");
+    const rows = (b.positions || []).slice(0, 12).map((p) => {
+      const pnl = p.realised_net_pnl_usd ?? p.realised_gross_pnl_usd;
+      return `<tr><td>${new Date(p.opened_at).toLocaleString("en-GB", { timeZone: "Asia/Dubai", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</td><td>${esc(p.symbol || p.mint_address.slice(0, 6))}</td><td>${money(p.cost_usd)}</td><td class="${cls(pnl)}">${p.status === "OPEN" ? "open" : money(pnl, true)}</td></tr>`;
+    }).join("");
+    return `<div class="card">
+      <div class="row"><b>${esc(v.label)}</b><span class="pill ${b.enabled ? "on" : ""}">${b.enabled ? "● trading" : "stopped"}</span></div>
+      <div class="grid">
+        <div class="stat"><div class="dim">Balance</div><div>${money(w.balance_usd)}</div></div>
+        <div class="stat"><div class="dim">Today</div><div class="${cls(b.today_pnl_usd)}">${money(b.today_pnl_usd, true)}</div></div>
+        <div class="stat"><div class="dim">All trades</div><div class="${cls(allPnl)}">${money(allPnl, true)}</div></div>
+        <div class="stat"><div class="dim">Trades · won · lost</div><div>${s.trades ?? 0} · ${s.won ?? 0} · ${s.lost ?? 0}</div></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <label class="dim">Ticket $ <select id="t-${v.member}">${opts}</select></label>
+        ${b.enabled ? `<button class="stop" onclick="toggle('${v.member}', false, document.getElementById('t-${v.member}').value)">Stop</button>`
+                    : `<button onclick="toggle('${v.member}', true, document.getElementById('t-${v.member}').value)">Start</button>`}
+      </div>
+      <details><summary>Recent trades</summary><table>${rows || "<tr><td>No trades yet</td></tr>"}</table></details>
+    </div>`;
+  }).join("");
+  $("total").textContent = money(bal);
+  $("totalpnl").textContent = money(all, true); $("totalpnl").className = "big " + cls(all);
+  $("totals").innerHTML = `<div class="stat"><div class="dim">Today</div><div class="${cls(today)}">${money(today, true)}</div></div>
+    <div class="stat"><div class="dim">Trades</div><div>${trades}</div></div><div class="stat"><div class="dim">Open now</div><div>${open}</div></div>`;
+}
+
+async function show() {
+  try { await load(); $("login").classList.add("hide"); $("app").classList.remove("hide"); setInterval(() => load().catch(() => {}), 30000); }
+  catch (err) { $("app").classList.add("hide"); $("login").classList.remove("hide"); if (err.status !== 401) $("lerr").textContent = err.message; }
+}
+show();
+</script>
+</body>
+</html>

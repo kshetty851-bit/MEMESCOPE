@@ -39,6 +39,7 @@ x-backend-env: &backend-env
   WHATSAPP_CALLMEBOT_KEY: ${WHATSAPP_CALLMEBOT_KEY:-}
   VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
   VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+  FIVEBAGS_PASSWORD_HASH: ${FIVEBAGS_PASSWORD_HASH:-}
   CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
   # In the anchor because a password-reset link is built from it. It was set in
   # .env.production and absent here, so the container fell back to the code
