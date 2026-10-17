@@ -82,8 +82,8 @@ class TestWords:
     def test_a_real_close_reads_like_the_live_one(self):
         """The DUKE trade from the live wallet, 2026-09-17."""
         text = ta.closed_message(_position(), "DUKE", NOW)
-        assert text.splitlines()[0] == "✅ REAL WALLET SOLD DUKE"
-        assert "+$0.30 (+0.6%) after fees" in text
+        assert text.splitlines()[0] == "🟢🔥 BAG SECURED — DUKE +$0.30 (+0.6%)"
+        assert "$24.49M → $24.64M" in text
         assert "timed out after 4m · held 4m" in text
         assert "https://solscan.io/tx/EXIT" in text
 
@@ -105,9 +105,9 @@ class TestWords:
 
     def test_the_short_form_keeps_the_news_and_drops_the_rest(self):
         late = ta.short_form(ta.closed_message(_position(closed_at=NOW - timedelta(minutes=10)), None, NOW))
-        assert late.splitlines() == ["✅ REAL WALLET SOLD N1wF…pump", "+$0.30 (+0.6%) after fees", "(10m ago)"]
+        assert late.splitlines() == ["🟢🔥 BAG SECURED — N1wF…pump +$0.30 (+0.6%)", "$24.49M → $24.64M", "(10m ago)"]
         fresh = ta.short_form(ta.opened_message(_position(opened_at=NOW), None, NOW))
-        assert fresh.splitlines() == ["🟢 REAL WALLET BOUGHT N1wF…pump", "$49.97 at $0.02449"]
+        assert fresh.splitlines() == ["🐸💸 APE IN — N1wF…pump", "$49.97 in at $24.49M mcap · 4-min sprint starts now"]
 
     def test_never_calls_gross_net(self):
         text = ta.closed_message(
@@ -116,8 +116,8 @@ class TestWords:
         )
         assert "🔻" in text
         assert "-$1.20" in text
-        assert "before fees (fees not priced)" in text
-        assert "after fees" not in text
+        assert "before fees — fees not priced" in text
+        assert "after fees" not in text.replace("before fees", "")
 
     def test_says_so_when_there_is_no_result_at_all(self):
         text = ta.closed_message(
@@ -127,9 +127,8 @@ class TestWords:
 
     def test_an_open_says_what_was_spent_and_at_what_price(self):
         text = ta.opened_message(_position(), "DUKE", NOW)
-        assert text.splitlines()[0] == "🟢 REAL WALLET BOUGHT DUKE"
-        assert "$49.97 at $0.02449" in text
-        assert "Strategy G-B3-4M" in text
+        assert text.splitlines()[0] == "🐸💸 APE IN — DUKE"
+        assert "$49.97 in at $24.49M mcap" in text
         assert "https://solscan.io/tx/ENTRY" in text
 
     def test_a_late_message_says_how_late(self):
@@ -139,7 +138,7 @@ class TestWords:
         assert "ago" not in ta.opened_message(fresh, "DUKE", NOW)
 
     def test_a_token_with_no_symbol_gets_a_short_mint(self):
-        assert "BOUGHT N1wF…pump" in ta.opened_message(_position(), None, NOW)
+        assert "APE IN — N1wF…pump" in ta.opened_message(_position(), None, NOW)
 
     def test_prices_never_go_scientific(self):
         assert ta._price(Decimal("0.00000000048")) == "$0.0000000004800"
@@ -317,7 +316,7 @@ class TestTheLog:
 
         await ta.tick(db_session, now=NOW, send=phone, pause=0)
         await ta.tick(db_session, now=NOW + timedelta(seconds=30), send=phone, pause=0)
-        assert len(phone.inbox) == 1 and "BOUGHT" in phone.inbox[0]
+        assert len(phone.inbox) == 1 and "APE IN" in phone.inbox[0]
 
         pos.status = "CLOSED"
         pos.closed_at = NOW + timedelta(minutes=4)
@@ -328,7 +327,7 @@ class TestTheLog:
             await ta.tick(db_session, now=NOW + timedelta(seconds=s), send=phone, pause=0)
 
         assert len(phone.inbox) == 2
-        assert "SOLD" in phone.inbox[1]
+        assert "BAG SECURED" in phone.inbox[1]
         assert {r.status for r in await _alerts(db_session)} == {"sent"}
 
     @pytest.mark.asyncio
@@ -339,8 +338,8 @@ class TestTheLog:
         await db_session.flush()
         phone = _Phone()
         await ta.tick(db_session, now=NOW, send=phone, pause=0)
-        assert ["BOUGHT" in m for m in phone.inbox] == [True, False]
-        assert "SOLD" in phone.inbox[1]
+        assert ["APE IN" in m for m in phone.inbox] == [True, False]
+        assert "BAG SECURED" in phone.inbox[1]
 
     @pytest.mark.asyncio
     async def test_a_failure_is_retried_later_not_hammered(self, configured, db_session):
@@ -360,7 +359,7 @@ class TestTheLog:
         assert phone.inbox == []
 
         await ta.tick(db_session, now=NOW + timedelta(seconds=40), send=phone, pause=0)
-        assert ["BOUGHT" in m for m in phone.inbox] == [True, False]
+        assert ["APE IN" in m for m in phone.inbox] == [True, False]
 
     @pytest.mark.asyncio
     async def test_a_firewall_refusal_sends_the_short_form(self, configured, db_session):
@@ -371,7 +370,7 @@ class TestTheLog:
         phone.refuses = "https://"
         result = await ta.tick(db_session, now=NOW, send=phone, pause=0)
         assert result["delivered"]["sent"] == 1
-        assert phone.inbox == ["🟢 REAL WALLET BOUGHT N1wF…pump\n$49.97 at $0.02449"]
+        assert phone.inbox == ["🐸💸 APE IN — N1wF…pump\n$49.97 in at $24.49M mcap · 4-min sprint starts now"]
         (alert,) = await _alerts(db_session)
         assert alert.status == "sent"
 
@@ -401,7 +400,7 @@ class TestTheLog:
         assert phone.inbox == []  # one failure per tick, never a burst
 
         await ta.tick(db_session, now=NOW + timedelta(seconds=5), send=phone, pause=0)
-        assert len(phone.inbox) == 1 and "BOUGHT FRES…2222" in phone.inbox[0]
+        assert len(phone.inbox) == 1 and "APE IN — FRES…2222" in phone.inbox[0]
         # The stuck trade's close still waits behind its own open.
         stuck = [a for a in await _alerts(db_session) if a.status == "pending"]
         assert sorted(a.event for a in stuck) == ["closed", "opened"]

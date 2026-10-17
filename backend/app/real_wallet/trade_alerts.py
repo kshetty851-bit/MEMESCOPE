@@ -46,7 +46,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 import httpx
-from sqlalchemy import case, exists, select
+from sqlalchemy import case, exists, func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -252,48 +252,105 @@ def _whose(position: RealWalletPosition) -> str:
     return f"{family.label(member)}'S WALLET" if member else "REAL WALLET"
 
 
+#: Every pump.fun coin is a fixed billion tokens, so market cap is price x this.
+_SUPPLY = Decimal(1_000_000_000)
+
+
+def _mcap(price: Decimal | None) -> str:
+    if price is None or price <= 0:
+        return "?"
+    cap = price * _SUPPLY
+    if cap >= 1_000_000:
+        return f"${cap / 1_000_000:,.2f}M"
+    return f"${cap / 1_000:,.1f}k"
+
+
+def _who(position: RealWalletPosition) -> str:
+    """Nothing for the main wallet; " · USER 3" for a user wallet."""
+    label = _whose(position)
+    return "" if label == "REAL WALLET" else " · " + label.removesuffix("'S WALLET")
+
+
+def _sprint(position: RealWalletPosition) -> str:
+    from app.labs.graduation.live_spec import BY_ID
+
+    spec = BY_ID.get((position.strategy_id or "").upper())
+    hours = spec.exits.time_exit_hours if spec else None
+    return f" · {round(float(hours) * 60)}-min sprint starts now" if hours else ""
+
+
 def opened_message(position: RealWalletPosition, symbol: str | None, now: datetime) -> str:
+    """Style C (Karthik, 2026-10-17): "APE IN", with the money in and the entry market cap."""
     cost = position.quantity * position.entry_price_usd
     lines = [
-        f"🟢 {_whose(position)} BOUGHT {_name(position, symbol)}",
-        f"{_usd(cost)} at {_price(position.entry_price_usd)}",
+        f"🐸💸 APE IN — {_name(position, symbol)}{_who(position)}",
+        f"{_usd(cost)} in at {_mcap(position.entry_price_usd)} mcap{_sprint(position)}",
     ]
-    if position.strategy_id:
-        lines.append(f"Strategy {position.strategy_id}")
     if position.entry_transaction_signature:
         lines.append(f"https://solscan.io/tx/{position.entry_transaction_signature}")
     return "\n".join(lines) + _late(position.opened_at, now)
 
 
-def closed_message(position: RealWalletPosition, symbol: str | None, now: datetime) -> str:
+def closed_message(position: RealWalletPosition, symbol: str | None, now: datetime,
+                   streak: int = 0) -> str:
+    """Style C: "BAG SECURED" / "CUT" / "RUGGED", with profit or loss in $ and %,
+    and the market cap at entry and exit. `streak` = wins in a row ending here."""
     cost = position.quantity * position.entry_price_usd
     # Net only when it IS net. The position stores net as empty, with a reason,
     # whenever the network fees could not be priced — and a gross figure
     # labelled as net is the one lie this message must not tell.
     if position.realised_net_pnl_usd is not None:
-        pnl, basis = position.realised_net_pnl_usd, "after fees"
+        pnl, basis = position.realised_net_pnl_usd, ""
     elif position.realised_gross_pnl_usd is not None:
-        pnl, basis = position.realised_gross_pnl_usd, "before fees (fees not priced)"
+        pnl, basis = position.realised_gross_pnl_usd, " (before fees — fees not priced)"
     else:
         pnl, basis = None, ""
+    name = f"{_name(position, symbol)}{_who(position)}"
+    exit_price = (
+        (cost + position.realised_gross_pnl_usd) / position.quantity
+        if position.realised_gross_pnl_usd is not None and position.quantity else None)
+    caps = f"{_mcap(position.entry_price_usd)} → {_mcap(exit_price)}"
+    held = (f"held {_duration(position.closed_at - position.opened_at)}"
+            if position.closed_at else "")
 
     if pnl is None:
-        headline = "result not recorded yet"
-        mark = "⚪"
+        lines = [f"⚪ SOLD — {name}", "result not recorded yet"]
     else:
-        pct = f" ({pnl / cost * 100:+.1f}%)" if cost > 0 else ""
-        headline = f"{_usd(pnl, signed=True)}{pct} {basis}"
-        mark = "✅" if pnl > 0 else "🔻" if pnl < 0 else "⚪"
-
-    lines = [
-        f"{mark} {_whose(position)} SOLD {_name(position, symbol)}",
-        headline,
-        describe_exit(position.exit_reason)
-        + (f" · held {_duration(position.closed_at - position.opened_at)}" if position.closed_at else ""),
-    ]
+        pct = pnl / cost * 100 if cost > 0 else Decimal(0)
+        money = f"{_usd(pnl, signed=True)} ({pct:+.1f}%)"
+        if pct <= -50:
+            lines = [f"🪦 RUGGED — {name} {money}", f"{caps} · it happens. Next one 💪"]
+        elif pnl > 0:
+            run = f" · {streak} wins in a row 🔁" if streak >= 2 else ""
+            lines = [f"🟢🔥 BAG SECURED — {name} {money}", f"{caps}{run}"]
+        elif pnl < 0:
+            lines = [f"🔻 CUT — {name} {money}", caps]
+        else:
+            lines = [f"⚪ FLAT — {name} {money}", caps]
+        lines[0] += basis
+    lines.append(describe_exit(position.exit_reason) + (f" · {held}" if held else ""))
     if position.exit_transaction_signature:
         lines.append(f"https://solscan.io/tx/{position.exit_transaction_signature}")
     return "\n".join(lines) + _late(position.closed_at or now, now)
+
+
+async def win_streak(session: AsyncSession, position: RealWalletPosition) -> int:
+    """Wins in a row for this wallet, ending with `position` (0 when it lost)."""
+    if position.closed_at is None:
+        return 0
+    rows = (await session.execute(
+        select(func.coalesce(RealWalletPosition.realised_net_pnl_usd,
+                             RealWalletPosition.realised_gross_pnl_usd))
+        .where(RealWalletPosition.wallet_public_key == position.wallet_public_key,
+               RealWalletPosition.closed_at.is_not(None),
+               RealWalletPosition.closed_at <= position.closed_at)
+        .order_by(RealWalletPosition.closed_at.desc()).limit(50))).scalars().all()
+    run = 0
+    for pnl in rows:
+        if pnl is None or pnl <= 0:
+            break
+        run += 1
+    return run
 
 
 def short_form(message: str) -> str:
@@ -391,16 +448,21 @@ async def deliver_pending(
             await session.commit()
             continue
 
-        build = opened_message if alert.event == "opened" else closed_message
+        if alert.event == "opened":
+            full, bare = (opened_message(position, s, now) for s in (symbol, None))
+        else:
+            streak = await win_streak(session, position)
+            full, bare = (closed_message(position, s, now, streak) for s in (symbol, None))
+
         try:
             try:
-                await send(build(position, symbol, now))
+                await send(full)
             except AlertSendError as exc:
                 if not exc.blocked:
                     raise
                 # The firewall refused these words, and would refuse them again
                 # on every retry. The short form carries the news without them.
-                await send(short_form(build(position, None, now)))
+                await send(short_form(bare))
         except AlertSendError as exc:
             alert.attempts += 1
             alert.last_attempt_at = now
