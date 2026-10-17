@@ -1920,6 +1920,19 @@ def _floor_test(rows: Sequence[Any]) -> dict[str, Any]:
                     "usd": round(sum(50 * k * r for k, r in xs), 2)})
     return {"since": FLOOR_TEST_FROM, "lines": out}
 
+async def _no_open_buy(db: AsyncSession, rows: Sequence[Any]) -> set[str]:
+    """Mints whose pool was read and had no buy when it opened (`open_buys`).
+    Unread or unchecked coins are kept."""
+    from app.labs.graduation.models import GradOpenBuy
+    from app.labs.graduation.open_buys import no_buy_at_open
+
+    if not config.KARTHIK_SKIP_NO_OPEN_BUY or not rows:
+        return set()
+    found = (await db.scalars(select(GradOpenBuy).where(
+        GradOpenBuy.mint.in_({r.mint for r in rows})))).all()
+    return {f.mint for f in found if no_buy_at_open(f)}
+
+
 def _unnamed_evening(row: Any) -> bool:
     """A coin with no name bought in `KARTHIK_SKIP_UNNAMED_DUBAI_HOURS` (Dubai)."""
     return config.unnamed_evening(row.symbol, row.opened_at)
@@ -2026,6 +2039,10 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     named = len(rows)
     rows = [r for r in rows if not _unnamed_evening(r)]
     unnamed_evening = named - len(rows)
+    no_open_buy = await _no_open_buy(db, [*rows, *small, *signals])
+    opened = len(rows)
+    rows = [r for r in rows if r.mint not in no_open_buy]
+    no_open_buy_skipped = opened - len(rows)
     rows, rugged_names, blocked_names, spaced_names = _without_bad_names(rows)
     buys_before = dict((await db.execute(_BUYS_BEFORE_SQL, {
         "ids": [p.id for p in rows], "mints": [p.mint for p in rows],
@@ -2043,7 +2060,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
             and not (config.KARTHIK_SKIP_AI_POOL_USD[0] <= float(r.liq_open_usd or 0)
                      < config.KARTHIK_SKIP_AI_POOL_USD[1] and pl.ai_name(r.symbol))]
     grid = [r for r in await moneyblock.without_crew(db, grid, datetime.now(UTC))
-            if not _unnamed_evening(r)]
+            if not _unnamed_evening(r) and r.mint not in no_open_buy]
     grid = _without_bad_names(grid)[0]
     grid_buys = dict((await db.execute(_BUYS_BEFORE_SQL, {
         "ids": [p.id for p in grid], "mints": [p.mint for p in grid],
@@ -2116,6 +2133,8 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         "skip_unnamed_dubai_hours": (list(config.KARTHIK_SKIP_UNNAMED_DUBAI_HOURS)
                                      if config.KARTHIK_SKIP_UNNAMED_DUBAI_HOURS else None),
         "unnamed_evening_skipped": unnamed_evening,
+        "skip_no_open_buy": config.KARTHIK_SKIP_NO_OPEN_BUY,
+        "no_open_buy_skipped": no_open_buy_skipped,
         "tickets_by_pool": [list(t) for t in config.KARTHIK_TICKETS_BY_POOL],
         "quiet_stake": list(config.KARTHIK_QUIET_STAKE),
         "blocked_name_skipped": blocked_names,

@@ -879,3 +879,22 @@ class GradRugVerdict(Base):
     rugged: Mapped[bool] = mapped_column(Boolean, nullable=False)
     decided_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class GradOpenBuy(Base):
+    """The biggest SOL a single wallet spent on a coin's pool in its first
+    minute, read from the chain (Karthik, 2026-10-17: "apply no-buy skip to
+    karthik lab since day 1"). A pool nobody bought at open had no BOOST-style
+    buy: 25 such coins rugged 6 times (24%) against 4% for the rest.
+
+    `read` False means the chain could not be read: unknown, never "no buy".
+    """
+
+    __tablename__ = "grad_open_buys"
+
+    mint: Mapped[str] = mapped_column(_ADDRESS, primary_key=True)
+    read: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    #: Largest fee-payer SOL spend in the pool's first `OPEN_WINDOW_S`; 0 = none over the floor.
+    open_buy_sol: Mapped[Decimal | None] = mapped_column(Numeric(20, 9))
+    checked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now())

@@ -1150,6 +1150,12 @@ KARTHIK_SKIP_SPACED_NAMES = True
 #: within what luck gives such a scan (2 passes vs 1.1 by chance): judge it on
 #: new trades.
 KARTHIK_SKIP_UNNAMED_DUBAI_HOURS: tuple[int, int] | None = (17, 24)
+#: Karthik, 2026-10-17 ("apply no-buy skip to karthik lab since day 1"): a coin
+#: whose pool nobody bought (> 0.5 SOL) in its first minute is not bought -
+#: 25 of 303 $50-150k coins, 6 rugs (24% vs 4%); replay $1,799 -> $1,914,
+#: rugs 18 -> 14, +$43 on 1-8 Oct and +$72 later. Read by `open_buys` from the
+#: public node; unread coins are kept.
+KARTHIK_SKIP_NO_OPEN_BUY = True
 
 
 def spaced_name(symbol: str | None) -> bool:
