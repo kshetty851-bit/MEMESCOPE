@@ -84,17 +84,25 @@ async def read_pool(client: httpx.AsyncClient, pool: str) -> Decimal | None:
         if not ok:
             return None
         t0 = ok[0].get("blockTime") or 0
+        missed = False
         for s in ok:
             if (s.get("blockTime") or 0) > t0 + OPEN_WINDOW_S:
                 break
-            tx = await _rpc(client, "getTransaction", [s["signature"], {
-                "encoding": "json", "maxSupportedTransactionVersion": 1}])
+            try:
+                tx = await _rpc(client, "getTransaction", [s["signature"], {
+                    "encoding": "json", "maxSupportedTransactionVersion": 1}])
+            except LookupError:
+                missed = True     # one unread transaction must not end the read
+                continue
             if isinstance(tx, dict):
                 tx.setdefault("blockTime", s.get("blockTime"))
+            else:
+                missed = True
             spent = biggest_open_spend([tx], t0)
             if spent:
                 return spent      # one buy over the floor answers the question
-        return Decimal(0)
+        # "No buy" only when every transaction of the window was read.
+        return None if missed else Decimal(0)
     except LookupError:
         return None
 
