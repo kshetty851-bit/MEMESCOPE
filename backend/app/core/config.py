@@ -133,6 +133,9 @@ class Settings(BaseSettings):
     VAPID_PUBLIC_KEY: str = ""
     VAPID_PRIVATE_KEY: SecretStr = SecretStr("")
     VAPID_SUBJECT: str = "https://www.memescope.site"
+    #: FiveBags (USER1-5 behind one password, 2026-10-17): the bcrypt hash of
+    #: its password, never the password. Empty = FiveBags refuses everyone.
+    FIVEBAGS_PASSWORD_HASH: SecretStr = SecretStr("")
 
     # --- Outbound email -----------------------------------------------------
     #

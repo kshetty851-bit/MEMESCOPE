@@ -33,6 +33,8 @@ EXEMPT_EXACT_PATHS = frozenset(
 EXEMPT_PREFIXES = (
     "/api/v1/alpha",
     "/api/v1/auth",
+    # FiveBags has its own password (app/real_wallet/fivebags_api.py).
+    "/api/v1/fivebags",
 )
 
 
