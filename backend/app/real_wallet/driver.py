@@ -550,6 +550,8 @@ class RealWalletDriver:
             if (skip_ai_pools is not None and in_skipped_pool(pool, skip_ai_pools)
                     and await self._ai_named(mint)):
                 continue
+            if lab and await self._no_open_buy(mint):
+                continue
             return mint
         return None
 
@@ -645,6 +647,18 @@ class RealWalletDriver:
             GradPaperPosition.closed_at <= now,
             GradPaperPosition.net_return <= grad_config.OPERATOR_RUG_MOVE))).all()
         return key in {name_key(s) for s in rugged}
+
+    @staticmethod
+    async def _no_open_buy(mint: str) -> bool:
+        """Karthik Lab's no-buy-at-open skip (Karthik, 2026-10-17: "apply skip
+        coins too"): the pool read from the chain at buy time; an unread pool
+        is bought, as the lab keeps it."""
+        from app.labs.graduation import config as grad_config
+        from app.labs.graduation.open_buys import bought_at_open
+
+        if not grad_config.KARTHIK_SKIP_NO_OPEN_BUY:
+            return False
+        return await bought_at_open(mint) is False
 
     async def _lab_name_skipped(self, mint: str, strategy_id: str, now: datetime) -> bool:
         """Karthik Lab's name skips (spaced name; no name 17:00-midnight Dubai),

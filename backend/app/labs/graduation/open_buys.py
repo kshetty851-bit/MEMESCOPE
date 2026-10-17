@@ -122,3 +122,34 @@ async def open_buys_pass(session: AsyncSession, *, now: datetime) -> dict[str, A
     await session.commit()
     logger.info("graduation_open_buys_read", read=read, of=len(todo))
     return {"read": read, "of": len(todo)}
+
+
+#: The real wallet's answers, per mint, for this process: a coin is judged once.
+_AT_BUY: dict[str, bool | None] = {}
+AT_BUY_TIMEOUT_S = 6
+
+
+async def bought_at_open(mint: str) -> bool | None:
+    """For a real-wallet buy: has anyone spent > `MIN_BUY_SOL` on this coin's
+    pool since it opened? True/False, or None when the chain cannot answer in
+    `AT_BUY_TIMEOUT_S` (then the coin is bought, as the lab keeps unread coins).
+    The opening buy lands at second 0 in 98% of coins, so at the wallet's
+    19-46 s entry it has normally happened already."""
+    from app.labs.graduation.tournament import graduation_pool
+
+    if mint in _AT_BUY:
+        return _AT_BUY[mint]
+    pool = graduation_pool(mint)
+    if not pool:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=4) as client:
+            spent = await asyncio.wait_for(read_pool(client, pool), AT_BUY_TIMEOUT_S)
+    except TimeoutError:
+        spent = None
+    answer = None if spent is None else spent > MIN_BUY_SOL
+    if answer is not None:
+        if len(_AT_BUY) > 5000:
+            _AT_BUY.clear()
+        _AT_BUY[mint] = answer
+    return answer
