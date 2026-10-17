@@ -30,12 +30,9 @@ def write(bundle: dict[str, Any]) -> dict[str, Any]:
     if m:
         coins = {c["symbol"]: c for c in m["coins"]}
         btc, eth = coins.get("BTC"), coins.get("ETH")
-        if btc:
-            what.append(
-                f"Bitcoin is at ${btc['price']:,.0f}, {_pct(btc['ch24h'])} in 24 hours."
-            )
-        if eth:
-            what.append(f"Ether trades at ${eth['price']:,.0f}, {_pct(eth['ch24h'])}.")
+        if btc and eth:
+            # The ticker carries the prices; the briefing says which way they went.
+            what.append(f"Bitcoin {_pct(btc['ch24h'])} and Ether {_pct(eth['ch24h'])} over 24 hours.")
         what.append(
             f"The whole market is worth {_usd(m['total_mcap'])}, {_pct(m['mcap_change_24h'])}, "
             f"with {_usd(m['top100_volume'])} traded across the top 100 coins in a day."
