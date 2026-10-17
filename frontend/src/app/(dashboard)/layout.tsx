@@ -27,7 +27,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       .then((session) => {
         if (cancelled) return;
         if (!session.authenticated) {
-          router.replace("/");
+          router.replace("/lab");
           return;
         }
 
@@ -39,7 +39,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         }
       })
       .catch(() => {
-        if (!cancelled) router.replace("/");
+        if (!cancelled) router.replace("/lab");
       });
 
     return () => {

@@ -1,5 +1,5 @@
-import { LandingPage } from "@/components/alpha/landing-page";
+import { Newspaper } from "@/components/newsroom/newspaper";
 
 export default function HomePage() {
-  return <LandingPage />;
+  return <Newspaper />;
 }
