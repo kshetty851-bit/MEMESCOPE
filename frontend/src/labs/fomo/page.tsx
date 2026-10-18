@@ -240,8 +240,8 @@ export function FomoLabPage() {
           <p className="max-w-3xl text-sm text-ink-dim">
             One $500 paper book follows the top 20 fomo.family traders by rolling 24-hour
             P&amp;L. Each observed buy opens a $50 lot when cash and a fresh price are
-            available. Each sell closes one matching lot. The roster refreshes every 30
-            minutes; swaps are checked every two.
+            available. Each sell closes one matching lot. The roster refreshes every
+            hour; swaps are checked every two minutes.
           </p>
         </div>
       </header>
@@ -285,7 +285,7 @@ export function FomoLabPage() {
               <span className="inline-flex items-center gap-2 rounded-full border border-line bg-sunken/80 px-3 py-1 text-xs text-ink-dim">
                 Started <span className="font-mono text-ink">{time(data.started_at)}</span>
               </span>
-              <Light label="Roster fetched" at={data.roster_at} okMinutes={40} />
+              <Light label="Roster fetched" at={data.roster_at} okMinutes={70} />
               <Light label="Source snapshot" at={data.source_captured_at} okMinutes={120} />
               <Light label="Last complete swap poll" at={data.feed_at} okMinutes={6} />
               <span className="inline-flex items-center rounded-full border border-line bg-sunken/80 px-3 py-1 text-xs text-ink-dim">

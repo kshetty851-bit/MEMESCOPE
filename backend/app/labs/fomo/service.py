@@ -21,7 +21,10 @@ from app.services.market.service import MarketEnrichmentService
 STARTING_USD = Decimal("500")
 TRADE_USD = Decimal("50")
 MAX_SIGNAL_AGE_SECONDS = 300
-ROSTER_REFRESH = timedelta(minutes=30)
+#: Hourly, not every 30 minutes: the free FOMO API plan is 250,000 credits a
+#: month at 250 a call (1,000 calls); half-hourly reads would run it dry by
+#: about day 20 and stale-roster pauses would stop every buy (2026-10-18).
+ROSTER_REFRESH = timedelta(minutes=60)
 MAX_ROSTER_AGE = timedelta(hours=2)
 
 
