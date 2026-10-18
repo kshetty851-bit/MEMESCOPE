@@ -97,6 +97,7 @@ FIRST_LOOK = timedelta(minutes=10)      # a wallet's first poll reads back no fu
 PAGE = 100
 MAX_READS = 15          # transactions read per wallet per pass; the rest wait
 READ_PAUSE_S = 0.2
+WALLET_PAUSE_S = 0.5    # one wallet at a time, half a second apart (18 Oct: 429s)
 
 
 def _token_deltas(meta: dict, wallet: str) -> dict[str, int]:
@@ -163,7 +164,12 @@ async def _rpc(client: httpx.AsyncClient, url: str, method: str, params: list) -
             response = await client.post(
                 url, json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
             if response.status_code == 429:
-                await asyncio.sleep(1 + 2 * attempt)
+                # The node's own hint when it gives one, else 2, 4, 8, 16 s.
+                try:
+                    wait = float(response.headers.get("retry-after") or 0)
+                except ValueError:
+                    wait = 0.0
+                await asyncio.sleep(min(max(wait, 2.0 * 2**attempt), 30.0))
                 continue
             response.raise_for_status()
             body = response.json()
@@ -194,12 +200,13 @@ async def fetch_swaps(
     """
     # Gentle on purpose: the lab's quiet-pool check asks this same node from the
     # same server before every buy, and a throttled node would make it skip.
-    semaphore = asyncio.Semaphore(2)
+    semaphore = asyncio.Semaphore(1)
 
     async def one(wallet: str) -> tuple[str, list[LeaderTrade], str | None, str | None]:
         async with semaphore:
             trades: list[LeaderTrade] = []
             mark = None
+            await asyncio.sleep(WALLET_PAUSE_S)
             try:
                 opts: dict = {"limit": PAGE}
                 if cursors.get(wallet):
