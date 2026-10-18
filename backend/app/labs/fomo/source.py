@@ -222,7 +222,7 @@ async def fetch_swaps(
                         await asyncio.sleep(READ_PAUSE_S)
                         tx = await _rpc(client, rpc_url, "getTransaction", [
                             entry["signature"],
-                            {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}])
+                            {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 1}])
                         trade = parse_transaction(tx, wallet, entry["signature"])
                         if trade is not None:
                             trades.append(trade)

@@ -131,6 +131,8 @@ def test_the_bookmark_reads_only_new_transactions_oldest_first(monkeypatch) -> N
     assert errors == {} and marks == {WALLET: "new"}
     assert calls[0] == ("getSignaturesForAddress", [WALLET, {"limit": 100, "until": "prev"}])
     assert [c[1][0] for c in calls[1:]] == ["old", "new"]          # failed tx never fetched
+    # Newer wallets sign version-1 transactions; asking for 0 gets -32015.
+    assert all(c[1][1]["maxSupportedTransactionVersion"] == 1 for c in calls[1:])
 
 
 def test_a_failed_read_keeps_what_was_read_and_resumes_there(monkeypatch) -> None:
