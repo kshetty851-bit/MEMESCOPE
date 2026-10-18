@@ -210,9 +210,30 @@ def test_open_buy_needs_every_transaction_read(monkeypatch) -> None:
                 raise LookupError(method)
             return {"meta": {"preBalances": [got], "postBalances": [0]}}
         return rpc
+    async def no_helius(client, pool):
+        return None
+    monkeypatch.setattr(open_buys, "_read_helius", no_helius)
     monkeypatch.setattr(open_buys, "_rpc", fake({"a": 1000, "b": None, "c": 70_000_000_000}))
     assert asyncio.run(open_buys.read_pool(None, "p")) == Decimal(70)      # skips the unread one, finds the buy
     monkeypatch.setattr(open_buys, "_rpc", fake({"a": 1000, "b": None, "c": 1000}))
     assert asyncio.run(open_buys.read_pool(None, "p")) is None             # a gap means unknown, not "no buy"
     monkeypatch.setattr(open_buys, "_rpc", fake({"a": 1000, "b": 1000, "c": 1000}))
     assert asyncio.run(open_buys.read_pool(None, "p")) == 0                # all read, none over the floor
+
+
+def test_open_buy_reads_helius_first(monkeypatch) -> None:
+    import asyncio
+    from decimal import Decimal
+
+    import httpx
+
+    from app.labs.graduation import open_buys
+    tx = lambda t, pre, err=None: {"blockTime": t, "meta": {"err": err, "preBalances": [pre], "postBalances": [0]}}  # noqa: E731
+    def client(body):
+        return httpx.AsyncClient(transport=httpx.MockTransport(lambda req: httpx.Response(200, json=body)))
+    monkeypatch.setattr(open_buys.settings, "HELIUS_API_KEY", open_buys.settings.HELIUS_API_KEY.__class__("k"))
+    read = lambda body: asyncio.run(open_buys._read_helius(client(body), "p"))  # noqa: E731
+    assert read({"result": {"data": [tx(100, 1000), tx(101, 70_000_000_000)]}}) == Decimal(70)
+    assert read({"result": {"data": [tx(100, 1000), tx(101, 70_000_000_000, err={"x": 1})]}}) == 0  # a failed tx is no buy
+    assert read({"result": {"data": []}}) is None
+    assert read({"error": {"code": 429}}) is None          # refused: fall back to the free node
