@@ -1058,6 +1058,8 @@ class Walk(NamedTuple):
     #: trade list renders these, so the rows and the wallet figure beside them
     #: come from one walk rather than two models that can disagree.
     pnl: tuple[float | None, ...]
+    #: Trades refused because a loss-streak pause was running (Boost Lab only).
+    paused: int = 0
 
 
 def _multiple(ret: float, impact: Sequence[float], k: float) -> float:
@@ -1093,6 +1095,8 @@ def _funded_walk(
     trades: Sequence[tuple], rate: Decimal | None = None,
     ticket: float | None = None, start: float | None = None,
     tickets: Sequence[float] | None = None,
+    loss_streak_limit: int = 0,
+    cooldown_minutes: int = 0,
 ) -> Walk:
     """What a real $100 account could have taken — equity, funded, skipped,
     and the lowest it stood.
@@ -1102,6 +1106,13 @@ def _funded_walk(
     scales with it (`wallet_floor`); `start` is the opening balance
     (`WALLET_DEMO_USD` unless given). `tickets`, aligned with `trades`, gives
     each trade its own stake instead (Karthik's Lab sizes by pool, 2026-10-16).
+
+    `loss_streak_limit` > 0 (Boost Lab, 2026-10-18): after that many funded
+    trades in a row close at a net loss, nothing is bought for
+    `cooldown_minutes` from the last one's close. Closes count in time order and
+    only once known — one at the very instant of a buy counts after it — so no
+    entry is decided by an outcome that had not happened yet. At 0 (every other
+    book) the walk is exactly what it always was.
 
     `_wallet_walk` walks the arm's returns one after another and never asks
     whether the account could have held them at the same time. That is right
@@ -1135,16 +1146,33 @@ def _funded_walk(
     took: list[tuple[datetime, float]] = []
     pnl: list[float | None] = []
     funded = skipped = 0
+    loss_streak = paused = 0
+    paused_until: datetime | None = None
     for i, (opened, closed, ret, *impact) in enumerate(trades):
         if tickets is not None:
             cap = tickets[i]
             floor = config.wallet_floor(cap)
-        due = [h for h in held if h[0] <= opened]
+        if not loss_streak_limit:
+            due = [h for h in held if h[0] <= opened]
+        else:
+            # A pause decides only from closes already known: a close at the
+            # buy's own instant is taken after the buy (the cautious order).
+            due = sorted((h for h in held if h[0] < opened), key=lambda h: h[0])
         if due:
-            held = [h for h in held if h[0] > opened]
+            held = [h for h in held if h not in due]
             low = min(low, _low_through(cash, held, due))
-            for _, r, size in due:
+            for ended, r, size in due:
                 cash += size * r
+                if loss_streak_limit:
+                    # A loss is the trade's own net dollars after costs.
+                    loss_streak = loss_streak + 1 if r < 1.0 else 0
+                    if loss_streak >= loss_streak_limit:
+                        paused_until = ended + timedelta(minutes=cooldown_minutes)
+                        loss_streak = 0
+        if paused_until is not None and opened < paused_until:
+            paused += 1
+            pnl.append(None)
+            continue
         # The wallet's own rule (`live_spec.fundable`), so this balance is the
         # one the real wallet would reach. Rounded to shed float dust that
         # would otherwise make a whole ticket read a hair short.
@@ -1164,7 +1192,7 @@ def _funded_walk(
     low = min(low, _low_through(cash, [], held))
     for _, r, size in held:
         cash += size * r
-    return Walk(cash, funded, skipped, took, low, tuple(pnl))
+    return Walk(cash, funded, skipped, took, low, tuple(pnl), paused)
 
 
 def _wallet_walk(returns: Iterable[float],
@@ -1526,13 +1554,15 @@ def _opened_order(row: Any) -> tuple[datetime, str]:
 
 def _karthik_line(rows: Sequence[Any], sol: Decimal | None, *, size: float,
                   capital: float, cents: Decimal,
-                  tickets: Sequence[float] | None = None) -> dict[str, Any]:
+                  tickets: Sequence[float] | None = None,
+                  loss_streak_limit: int = 0, cooldown_minutes: int = 0) -> dict[str, Any]:
     """One way of trading the book: the book's own walk (`_funded_walk`) over
     these rows, so skips, pool impact at that size and the cash limit are all
     the real book's."""
     w = _funded_walk([(r.opened_at, r.closed_at, float(r.net_return),
                        float(r.impact_open or 0), float(r.impact_close or 0))
-                      for r in rows], sol, ticket=size, start=capital, tickets=tickets)
+                      for r in rows], sol, ticket=size, start=capital, tickets=tickets,
+                     loss_streak_limit=loss_streak_limit, cooldown_minutes=cooldown_minutes)
     took = [(r, m) for r, m in zip(rows, w.pnl, strict=True) if m is not None]
     return {
         "balance_usd": Decimal(str(w.cash)).quantize(cents),
@@ -1541,6 +1571,7 @@ def _karthik_line(rows: Sequence[Any], sol: Decimal | None, *, size: float,
                     if capital else Decimal(0)),
         "trades": w.funded,
         "skipped": w.skipped,
+        "paused": w.paused,
         "wins": sum(1 for _, m in took if m > 0),
         "rugs": sum(1 for r, _ in took
                     if float(r.net_return) <= float(config.OPERATOR_RUG_MOVE)),
@@ -1622,7 +1653,9 @@ def _mcaps(row: Any) -> dict[str, int | None]:
 
 def _start_dates(rows: Sequence[Any], rate: Decimal | None, *, ticket: float, capital: float,
                  now: datetime, cents: Decimal,
-                 ticket_of: Callable[[Any], float] | None = None) -> list[dict[str, Any]]:
+                 ticket_of: Callable[[Any], float] | None = None,
+                 loss_streak_limit: int = 0,
+                 cooldown_minutes: int = 0) -> list[dict[str, Any]]:
     """The same book started fresh at each Dubai midnight since its first trade,
     newest start first (Karthik, 2026-10-14: "show me profit if we started on
     2nd oct, then 3rd oct ... and keep updating"): only the trades from that
@@ -1638,7 +1671,9 @@ def _start_dates(rows: Sequence[Any], rate: Decimal | None, *, ticket: float, ca
         w = _funded_walk([(r.opened_at, r.closed_at, float(r.net_return),
                            float(r.impact_open or 0), float(r.impact_close or 0)) for r in xs],
                          rate, ticket=ticket, start=capital,
-                         tickets=[ticket_of(r) for r in xs] if ticket_of else None)
+                         tickets=[ticket_of(r) for r in xs] if ticket_of else None,
+                         loss_streak_limit=loss_streak_limit,
+                         cooldown_minutes=cooldown_minutes)
         took = [r for r, m in zip(xs, w.pnl, strict=True) if m is not None]
         out.append({"start": day, "days": round((now - day).total_seconds() / 86400, 1),
                     "balance_usd": Decimal(str(w.cash)).quantize(cents),

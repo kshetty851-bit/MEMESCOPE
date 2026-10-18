@@ -52,10 +52,28 @@ describe("Boost Lab", () => {
     expect(screen.getByTestId("boost-rule-book")).toHaveTextContent("no cover picture (the wide banner). 8 skipped so far.");
   });
 
+  it("states the 18 Oct rules as a replay, not a live record", () => {
+    render(<BoostRuleBook d={{ ...d, rules_selected_on: "2026-10-18", max_mcap_pool_ratio: "3.1", ratio_skipped: 40,
+                               loss_streak_limit: 3, cooldown_minutes: 60, paused_skipped: 7 }} />);
+    const t = screen.getByTestId("boost-rule-book");
+    expect(t).toHaveTextContent("under 3.1 times its pool. A coin it cannot measure is skipped. 40 skipped so far.");
+    expect(t).toHaveTextContent("After 3 trades in a row lose money, it buys nothing for 60 minutes");
+    expect(t).toHaveTextContent("chosen on 18 October 2026");
+    expect(t).toHaveTextContent("not what the book did at the time");
+  });
+
+  it("leaves the new rules out when the API has none", () => {
+    render(<BoostRuleBook d={d} />);
+    const t = screen.getByTestId("boost-rule-book");
+    expect(t).not.toHaveTextContent("3.1 times");
+    expect(t).not.toHaveTextContent("Replayed");
+  });
+
   it("marks the book's own sell time in the minute table", () => {
     render(<MinuteTable capital={250} lines={[
       { minutes: 3, current: false, trades: 28, pnl_usd: "239.39", rugs: 1, lowest_usd: "248.15" },
       { minutes: 4, current: true, trades: 28, pnl_usd: "268.49", rugs: 1, lowest_usd: "250.00" }]} />);
     expect(screen.getByTestId("boost-minutes")).toHaveTextContent("4 min · the book");
+    expect(screen.getByText(/each book replayed/)).toBeInTheDocument();
   });
 });
