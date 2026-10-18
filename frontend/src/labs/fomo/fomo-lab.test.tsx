@@ -42,5 +42,13 @@ describe("FOMO Lab", () => {
     expect(screen.getByText(/Last complete swap poll/)).toBeInTheDocument();
     expect(screen.getByText("opened")).toBeInTheDocument();
     expect(screen.getByText("stale signal")).toBeInTheDocument();
+    // Every coin links to its chart, pump.fun page and explorer.
+    const mint = "Min1111111111111111111";
+    expect(screen.getByRole("link", { name: `Chart for ${mint}` })).toHaveAttribute(
+      "href", `https://dexscreener.com/solana/${mint}`);
+    expect(screen.getByRole("link", { name: `pump for ${mint}` })).toHaveAttribute(
+      "href", `https://pump.fun/coin/${mint}`);
+    expect(screen.getByRole("link", { name: `scan for ${mint}` })).toHaveAttribute(
+      "href", `https://solscan.io/token/${mint}`);
   });
 });
