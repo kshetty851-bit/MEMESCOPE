@@ -84,8 +84,8 @@ describe("SidebarContent", () => {
 
     for (const label of [
       "Karthik's Lab",
-      "Graduation Lab",
-      "BTC Range Lab",
+      "Pool Lab",
+      "Boost Lab",
       "Real wallet",
       "HQ",
     ]) {
@@ -101,7 +101,7 @@ describe("SidebarContent", () => {
     // left is what this must keep rendering.
     for (const [label, href] of [
       ["Karthik's Lab", "/karthik-lab"],
-      ["BTC Range Lab", "/btc-range-lab"],
+      ["Boost Lab", "/boost-lab"],
       ["Real wallet", "/real-wallet"],
       ["HQ", "/hq"],
     ] as const) {

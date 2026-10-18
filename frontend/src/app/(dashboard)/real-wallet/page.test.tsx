@@ -289,7 +289,7 @@ describe("RealWalletPage without signing in", () => {
     expect(card.textContent).toContain("Not proven yet");
     expect(within(card).getByRole("link", { name: /paper results/i })).toHaveAttribute(
       "href",
-      "/graduation-lab",
+      "/karthik-lab",
     );
   });
 

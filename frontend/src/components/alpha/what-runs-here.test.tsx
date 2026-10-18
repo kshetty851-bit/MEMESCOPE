@@ -41,7 +41,7 @@ describe("the homepage's lower half", () => {
   it("links the four places that are actually used, with the lab's live figure", async () => {
     render(<WhatRunsHere />);
     const links = screen.getAllByRole("link").map((a) => a.getAttribute("href"));
-    expect(links).toEqual(["/graduation-lab", "/karthik-lab", "/real-wallet", "/hq"]);
+    expect(links).toEqual(["/karthik-lab", "/real-wallet", "/hq"]);
     expect(await screen.findByText("$781.01")).toBeInTheDocument();
     expect(screen.getByText("+30.17%")).toBeInTheDocument();
     // The retired surfaces are gone from the homepage.

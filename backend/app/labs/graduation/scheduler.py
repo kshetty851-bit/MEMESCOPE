@@ -446,19 +446,6 @@ async def pool_lab_tick() -> dict[str, Any]:
         await redis.set(POOL_LAB_KEY, json.dumps(payload, default=str), ex=3600)
     finally:
         await redis.aclose()
-    # The Busy Pool Lab (2026-10-12): every tick, in its own session.
-    try:
-        from app.labs.graduation import busy_lab
-
-        async with SessionFactory() as session:
-            busy = await busy_lab.build(session)
-        redis = Redis.from_url(settings.REDIS_URI, decode_responses=True)
-        try:
-            await redis.set(busy_lab.KEY, json.dumps(busy, default=str), ex=3600)
-        finally:
-            await redis.aclose()
-    except Exception as exc:
-        logger.warning("busy_lab_build_failed", error=str(exc)[:300])
     # The Boost Lab rides on the same tick (2026-10-10), in its own session so
     # a failure there never touches the Pool Lab's write.
     from app.labs.graduation import boost_lab

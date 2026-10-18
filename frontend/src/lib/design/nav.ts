@@ -72,13 +72,6 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Advisory score review. Isolated from strategies and wallets.",
       },
-      {
-        href: "/graduation-lab",
-        label: "Graduation Lab",
-        icon: IconSpark,
-        status: "ready",
-        note: "Watch only. pump.fun curves into graduation; no book.",
-      },
       // Karthik's own book: his money on one rule, judged thirty days after it
       // started. Its own destination rather than a ninth panel on the
       // graduation board, so that his money's record and a pre-registered
@@ -99,22 +92,6 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Paper only. $10k pools at 10x sizes; $50k pools on ten wallets.",
       },
-      // Karthik, 2026-10-10: Arjun reads a company's screener.in page on request.
-      {
-        href: "/nse-lab",
-        label: "NSE Lab",
-        icon: IconSpark,
-        status: "ready",
-        note: "Private. Arjun reads a company's screener.in page when you ask.",
-      },
-      // Karthik, 2026-10-12: the busy pools the $10k book refuses, on paper.
-      {
-        href: "/busy-lab",
-        label: "Busy Pool Lab",
-        icon: IconSpark,
-        status: "ready",
-        note: "Paper only. The busy pools the $10k book refuses, $20 a trade on $200.",
-      },
       // Karthik, 2026-10-10: does paying DexScreener (profile, boosts) pay?
       {
         href: "/boost-lab",
@@ -130,14 +107,6 @@ export const NAV_GROUPS: NavGroup[] = [
         icon: IconSpark,
         status: "ready",
         note: "Paper only. Copies fomo.family's 24h top 20 traders; $50 a buy from $500.",
-      },
-      // BTC/USDT range strategy (2026-10-08). Paper only: no wallet, no orders.
-      {
-        href: "/btc-range-lab",
-        label: "BTC Range Lab",
-        icon: IconSpark,
-        status: "ready",
-        note: "Paper only. BTC/USDT support and resistance; the strategy's calls and a paper book.",
       },
     ],
   },
