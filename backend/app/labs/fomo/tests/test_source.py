@@ -190,3 +190,14 @@ def test_a_rate_limited_node_is_waited_out(monkeypatch) -> None:
     client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: next(replies)))
     assert asyncio.run(source._rpc(client, "http://node", "getSignaturesForAddress", [])) == []
     assert waits == [5.0, 4.0]                        # the node's hint, then 2 x 2^1
+
+
+def test_stablecoins_pay_for_coins_but_are_never_the_coin() -> None:
+    usdc = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    # SOL -> USDC and USDC -> SOL: no trade at all.
+    assert parse_transaction(rawtx(token=500, mint=usdc, sol=-10**9), WALLET, "in") is None
+    assert parse_transaction(rawtx(token=-500, mint=usdc, sol=10**9), WALLET, "out") is None
+    # A meme coin bought WITH USDC is still that coin's buy, even when the
+    # dollar amount moved is the bigger number.
+    bought = parse_transaction(rawtx(token=400, extra=[(usdc, -9_000_000)]), WALLET, "b")
+    assert (bought.side, bought.mint) == ("buy", MINT)

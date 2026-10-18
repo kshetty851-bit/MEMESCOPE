@@ -91,6 +91,11 @@ async def fetch_roster(client: httpx.AsyncClient, key: str) -> tuple[list[Leader
     return leaders, captured_at
 
 
+STABLECOINS = frozenset({
+    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",   # USDC
+    "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",   # USDT
+    "2b1kV6DkPAnxd5ixfnxCpjxmKwqjjaYmCZfHsFu24GXo",   # PYUSD
+})
 #: Below this the SOL leg is only fees and dust, not a payment.
 MIN_SOL_LEG_LAMPORTS = 100_000
 FIRST_LOOK = timedelta(minutes=10)      # a wallet's first poll reads back no further
@@ -130,6 +135,9 @@ def parse_transaction(tx: object, wallet: str, signature: str) -> LeaderTrade | 
         return None
     deltas = _token_deltas(meta, wallet)
     wsol = deltas.pop(WSOL, 0)
+    # Dollars are money, not a position: a stablecoin can pay for a coin but is
+    # never the coin copied (Karthik, 2026-10-18), so SOL<->USDC is no trade.
+    stable = {m: deltas.pop(m) for m in STABLECOINS if m in deltas}
     if not deltas:
         return None
     mint, amount = max(deltas.items(), key=lambda kv: abs(kv[1]))
@@ -144,7 +152,8 @@ def parse_transaction(tx: object, wallet: str, signature: str) -> LeaderTrade | 
     sol = native + wsol
     paid = (amount > 0 and sol <= -MIN_SOL_LEG_LAMPORTS) or (
         amount < 0 and sol >= MIN_SOL_LEG_LAMPORTS)
-    other = any((a < 0) != (amount < 0) for m, a in deltas.items() if m != mint)
+    other = any((a < 0) != (amount < 0)
+                for m, a in [*deltas.items(), *stable.items()] if m != mint)
     if not (paid or other):
         return None
     return LeaderTrade(
