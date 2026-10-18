@@ -49,6 +49,13 @@ export interface BoostLab {
   min_entry_age_s?: number;
   too_early_skipped?: number;
   cover_skipped?: number;
+  /** 18 Oct 2026 rules, replayed from the first trade. */
+  rules_selected_on?: string;
+  max_mcap_pool_ratio?: string | number;
+  ratio_skipped?: number;
+  loss_streak_limit?: number;
+  cooldown_minutes?: number;
+  paused_skipped?: number;
   boosted_coins?: number;
   days?: KarthikDay[];
   /** The same book started fresh at each Dubai midnight (2026-10-14). */
@@ -84,11 +91,14 @@ export function BoostRuleBook({ d }: { d: BoostLab }) {
     ...(d.max_sells_before ? [["Not into a selloff", `It skips coins with more than ${d.max_sells_before} sells in the 5 minutes before the buy.${d.sellers_skipped ? ` ${d.sellers_skipped} skipped so far.` : ""}`] as [string, string]] : []),
     ...(d.min_entry_age_s ? [["Not in the first seconds", `It skips coins bought within ${d.min_entry_age_s} seconds of graduating: about one in five of those rugged.${d.too_early_skipped ? ` ${d.too_early_skipped} skipped so far.` : ""}`] as [string, string]] : []),
     ...(d.cover_rule ? [["Cover picture", `It skips coins whose DexScreener page has no cover picture (the wide banner).${d.cover_skipped ? ` ${d.cover_skipped} skipped so far.` : ""}`] as [string, string]] : []),
+    ...(d.max_mcap_pool_ratio ? [["Market cap under 3.1x the pool", `It buys only when the coin's market cap at the buy is under ${Number(d.max_mcap_pool_ratio)} times its pool. A coin it cannot measure is skipped.${d.ratio_skipped ? ` ${d.ratio_skipped} skipped so far.` : ""}`] as [string, string]] : []),
+    ...(d.loss_streak_limit ? [["Pause after three losses", `After ${d.loss_streak_limit} trades in a row lose money, it buys nothing for ${d.cooldown_minutes ?? 60} minutes from the last one's sale. Coins it already holds still sell on time.${d.paused_skipped ? ` ${d.paused_skipped} skipped so far.` : ""}`] as [string, string]] : []),
     ["Always sells", `${d.hold_minutes ?? 4} minutes after buying. No stop-loss, no price targets.`],
     ["Why 4 minutes", "On the first 28 such coins (8–10 Oct), 4 minutes made the most; past 5 minutes they fell apart, with a quarter rugged by 8–10 minutes. The table below re-prices the same coins at other sell times."],
     ["Money", `${usd(d.ticket_usd)} per trade from ${usd(d.capital_usd)}, several at once while the cash allows.`],
     ["How it knows", `It checks DexScreener for a paid profile or boosts before each buy. From ${d.samples_since ? dubai(d.samples_since) : "10 Oct"} Dubai it reads every coin as it graduates; before that it only saw about one coin in five, and boost counts only from ${d.boosts_since ? dubai(d.boosts_since) : "10 Oct"}.`],
     ["The catch", `It was chosen after looking at those 28 coins, and three of them carried the profit.${d.skip_hours_dubai || d.max_sells_before ? " The morning, selloff and cover-picture skips were added on 13 Oct after looking at the trades and applied from the first trade, so the days before 14 Oct flatter them." : ""} This book is the test, not the proof.`],
+    ...(d.rules_selected_on ? [["Replayed, not live", `The market-cap and pause rules were chosen on ${new Date(`${d.rules_selected_on}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })} after looking at the trades, and replayed over every trade from the first. The results before then are a look back with them, not what the book did at the time.`] as [string, string]] : []),
     ["Paper money", "The books' own buys, re-priced with the same fees and price impact. No real wallet follows it."],
   ];
   return (
@@ -173,7 +183,7 @@ export function MinuteTable({ lines, capital }: { lines: MinuteLine[]; capital?:
   return (
     <Panel>
       <PanelHeader>
-        <PanelTitle>If it sold at another minute · same coins · {usd(capital)} each</PanelTitle>
+        <PanelTitle>If it sold at another minute · each book replayed · {usd(capital)} each</PanelTitle>
       </PanelHeader>
       <div className="overflow-x-auto p-3">
         <table className="w-full min-w-[28rem] text-[13px] tabular-nums" data-testid="boost-minutes">
@@ -198,6 +208,9 @@ export function MinuteTable({ lines, capital }: { lines: MinuteLine[]; capital?:
             ))}
           </tbody>
         </table>
+        <p className="mt-2 text-[11px] text-ink-dim">
+          Each sell time is its own book, with its own cash and its own pauses, so it can end up buying different coins.
+        </p>
       </div>
     </Panel>
   );

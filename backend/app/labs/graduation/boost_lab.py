@@ -23,7 +23,7 @@ beside it re-prices the same coins at other holds. Paper only.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy import select, text
@@ -34,7 +34,7 @@ from app.labs.graduation import pool_lab as pl
 from app.labs.graduation.models import GradPaperPosition, GradPostgradSample
 from app.labs.graduation.tournament import Mark, exit_mark, seen_at, settle, valued
 
-KEY = "graduation:boost_lab"
+KEY = "graduation:boost_lab:ratio31-cooldown60-v1"
 FROM = pl.FROM                                   # backtest from 1 Oct, 00:00 Dubai
 START = datetime(2026, 10, 10, 12, 0, tzinfo=UTC)  # live from 16:00 Dubai
 BOOSTS_SINCE = START
@@ -54,6 +54,33 @@ MAX_SELLS_BEFORE = 20           # sells in the pool's last 5 minutes before the 
 #: polls; picks from before 13 Oct were backfilled from DexScreener's profile
 #: as it stood on 13 Oct. Unknown is bought.
 CAPITAL = 250.0
+MAX_MCAP_POOL_RATIO = Decimal("3.1")
+#: Both rules chosen on 18 Oct 2026 after looking at the book's trades, and
+#: replayed over every trade from the first: the days before 18 Oct are a
+#: look back with them, not what the book did live.
+RULES_SELECTED_ON = "2026-10-18"
+#: Three funded losses in a row pause new buys for an hour (`api._funded_walk`).
+WALK_RULES = {"loss_streak_limit": 3, "cooldown_minutes": 60}
+
+
+def _entry_ratio_allowed(row: Any) -> bool:
+    """Market cap at the buy under `MAX_MCAP_POOL_RATIO` x the pool at the buy.
+
+    The same market cap as `api._mcaps` (entry price in SOL x SOL/USD at the buy
+    x pump.fun's supply), unrounded, and nothing known only later. A missing,
+    unreadable or non-positive input skips the coin. No ceiling on either side.
+    """
+    inputs = [getattr(row, k, None) for k in
+              ("open_quote", "sol_usd_at_open", "liq_open_usd")]
+    if any(v is None for v in inputs):
+        return False
+    try:
+        quote, sol, liquidity = (Decimal(str(v)) for v in inputs)
+    except InvalidOperation:
+        return False
+    if any(not v.is_finite() or v <= 0 for v in (quote, sol, liquidity)):
+        return False
+    return quote * sol * Decimal(str(config.PUMP_SUPPLY)) < liquidity * MAX_MCAP_POOL_RATIO
 
 _CARRIED = ("mint", "symbol", "opened_at", "open_quote", "open_fill", "notional_usd",
             "sol_usd_at_open", "notional_quote", "tokens", "liq_open_usd", "impact_open",
@@ -196,6 +223,8 @@ async def build(db: AsyncSession) -> dict[str, Any]:
             "ats": [r.opened_at for r in picked]})).all()
             if n is not None and n > MAX_SELLS_BEFORE}  # an unread count is kept
     picked = [r for r in picked if r.id not in sellers]
+    ratio_skipped = sum(not _entry_ratio_allowed(r) for r in picked)
+    picked = [r for r in picked if _entry_ratio_allowed(r)]
     sold: dict[int, list[GradPaperPosition]] = {m: [] for m in MINUTES}
     for row in picked:
         marks = await _marks(db, row)
@@ -205,13 +234,19 @@ async def build(db: AsyncSession) -> dict[str, Any]:
     book = sorted(sold[HOLD_MINUTES], key=api._opened_order)
     walk = api._funded_walk(
         [(c.opened_at, c.closed_at, float(c.net_return), float(c.impact_open or 0),
-          float(c.impact_close or 0)) for c in book], sol, ticket=TICKET, start=CAPITAL)
+          float(c.impact_close or 0)) for c in book], sol, ticket=TICKET, start=CAPITAL,
+        **WALK_RULES)
     took = [(c, m) for c, m in zip(book, walk.pnl, strict=True) if m is not None]
     rug = float(config.OPERATOR_RUG_MOVE)
     first = took[0][0].opened_at if took else None
     return {
         "started_at": START, "backtest_from": FROM, "boosts_since": BOOSTS_SINCE,
         "samples_since": SAMPLES_SINCE,
+        "rules_selected_on": RULES_SELECTED_ON,
+        "max_mcap_pool_ratio": MAX_MCAP_POOL_RATIO,
+        "ratio_skipped": ratio_skipped,
+        "paused_skipped": walk.paused,
+        **WALK_RULES,
         "computed_at": datetime.now(UTC), "hold_minutes": HOLD_MINUTES,
         "ticket_usd": TICKET, "capital_usd": CAPITAL,
         "balance_usd": Decimal(str(walk.cash)).quantize(cents),
@@ -225,9 +260,10 @@ async def build(db: AsyncSession) -> dict[str, Any]:
         # 8 Oct, so days from 1 Oct would open on a week of empty boxes.
         "first_trade_at": first,
         "days": api._karthik_days(took, first or FROM, CAPITAL, cents),
-        # "If you had started on…" (Karthik, 2026-10-14: "do the same table for boost lab too").
+        # "If you had started on…" (Karthik, 2026-10-14: "do the same table for
+        # boost lab too"). Each start walks with its own cash, streak and pause.
         "start_dates": api._start_dates(book, sol, ticket=TICKET, capital=CAPITAL,
-                                        now=datetime.now(UTC), cents=cents),
+                                        now=datetime.now(UTC), cents=cents, **WALK_RULES),
         "closed": [{"symbol": c.symbol, "mint": c.mint, "opened_at": c.opened_at,
                     "closed_at": c.closed_at, "pool_usd": c.liq_open_usd, **api._mcaps(c),
                     "pct": Decimal(str(100 * float(c.net_return))).quantize(cents),
@@ -236,10 +272,10 @@ async def build(db: AsyncSession) -> dict[str, Any]:
                     "profile": paid[c.mint][0], "boosts": paid[c.mint][1],
                     "live": c.opened_at >= START}
                    for c, m in reversed(took)],
-        "minutes": [{"minutes": m, "current": m == HOLD_MINUTES, "trades": len(sold[m]),
+        "minutes": [{"minutes": m, "current": m == HOLD_MINUTES,
                      **{k: v for k, v in api._karthik_line(
                          sorted(sold[m], key=api._opened_order), sol, size=TICKET,
-                         capital=CAPITAL, cents=cents).items()
-                        if k in ("pnl_usd", "rugs", "wins", "lowest_usd")}}
+                         capital=CAPITAL, cents=cents, **WALK_RULES).items()
+                        if k in ("trades", "pnl_usd", "rugs", "wins", "lowest_usd")}}
                     for m in MINUTES],
     }
