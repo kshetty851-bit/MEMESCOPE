@@ -51,3 +51,27 @@ def test_same_story_from_two_publishers_groups():
 def test_briefing_only_says_what_the_data_says():
     b = briefing.write({"market": None, "stories": [], "lead": None})
     assert b["what"] == [] and "not proof of cause" in b["note"]
+
+
+def test_unauthorized_mint_is_security():
+    item = news.classify(news.Item("x", "s", "https://x", "Cysic halts bridge after unauthorized mint of 10 million CYS", "", datetime.now(UTC)))
+    assert "security" in item.topics
+
+
+def test_general_technology_requires_crypto_connection():
+    feed = b"""<rss><channel><item><title>Iron battery lasts 16 years</title><category>Technology</category><link>https://example.com/battery</link><pubDate>Fri, 17 Oct 2026 10:00:00 +0000</pubDate></item></channel></rss>"""
+    assert news.parse("Example", feed) == []
+    assert len(news.parse("Example", feed.replace(b"Iron battery lasts 16 years", b"Bitcoin mining uses an iron battery"))) == 1
+
+
+def test_multiple_outlets_do_not_resolve_developing_story():
+    t = datetime(2026, 10, 17, tzinfo=UTC)
+    items = [news.classify(news.Item(str(i), str(i), f"https://example.com/{i}", "Reportedly Binance suffers major wallet exploit", "", t)) for i in range(2)]
+    assert refresh.stories_from(items, t)[0]["kind"] == "developing"
+
+
+def test_briefing_security_window_is_not_first_forty_stories():
+    stories = [{"topics": [], "kind": "report", "last_at": "2026-10-18T12:00:00+00:00"} for _ in range(41)]
+    stories += [{"topics": ["security"], "kind": "report", "last_at": "2026-10-18T10:00:00+00:00"}, {"topics": ["security"], "kind": "report", "last_at": "2026-10-16T10:00:00+00:00"}]
+    b = briefing.write({"stories": stories, "generated_at": "2026-10-18T13:00:00+00:00"})
+    assert b["why"] == ["1 security-related story new or updated in the last 24 hours."]

@@ -6,6 +6,7 @@ the news that ran alongside a move is offered as context, labelled as such.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from typing import Any
 
 
@@ -56,10 +57,13 @@ def write(bundle: dict[str, Any]) -> dict[str, Any]:
     if top:
         pubs = f"{top['sources']} publishers" if top["sources"] > 1 else top["source"]
         why.append(f"The most-covered story: “{top['title']}” ({pubs}).")
-    sec = [s for s in stories[:40] if "security" in s["topics"]]
+    generated = bundle.get("generated_at") or bundle.get("server_time")
+    cutoff = datetime.fromisoformat(generated) - timedelta(hours=24) if generated else None
+    sec = [s for s in stories if "security" in s["topics"]
+           and (cutoff is None or datetime.fromisoformat(s["last_at"]) >= cutoff)]
     if sec:
         why.append(
-            f"{len(sec)} security-related stor{'y' if len(sec) == 1 else 'ies'} in today's coverage."
+            f"{len(sec)} security-related stor{'y' if len(sec) == 1 else 'ies'} new or updated in the last 24 hours."
         )
     btcnet = bundle.get("bitcoin_network")
     if btcnet:
