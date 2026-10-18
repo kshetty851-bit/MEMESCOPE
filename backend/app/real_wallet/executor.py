@@ -352,10 +352,13 @@ class RealWalletExecutor:
         )
         if result.outcome is JupiterExecuteOutcome.SUCCESS:
             await self._repository.record_execution_success(at=now)
-        else:
+        elif _counts_toward_kill_switch(intent, result.outcome):
             await self._repository.record_execution_failure(
                 reason=f"execute:{result.outcome}", at=now
             )
+        else:
+            logger.warning("real_wallet_sell_refused_not_counted",
+                           intent_id=str(intent.id))
         logger.warning("real_wallet_submitted", intent_id=str(intent.id),
                        outcome=str(result.outcome))
         return AdvanceOutcome(ExecutionState.SUBMITTED, str(intent.id), True,
@@ -629,6 +632,18 @@ class RealWalletExecutor:
 def _is_sell(intent: RealWalletLiveIntent) -> bool:
     """Exactly "SELL". Anything else is treated as a buy and gets every check."""
     return intent.side == "SELL"
+
+
+def _counts_toward_kill_switch(intent: RealWalletLiveIntent, outcome: object) -> bool:
+    """Every failed reply counts, except a sell the chain refused.
+
+    A rugged pool fails the sell on slippage (0x1771) and spends nothing but
+    the fee; counting it froze the whole wallet — buys and the very sell that
+    could still recover something — for an hour on 18 Oct 2026 (Rockstar).
+    The exit driver already re-asks with backoff (15s doubling to 30 min), so
+    the fee spend is bounded. Unknown replies still count: those may be ours.
+    """
+    return not (_is_sell(intent) and outcome == JupiterExecuteOutcome.FAILED)
 
 
 __all__ = ["AdvanceOutcome", "RealWalletExecutor"]
