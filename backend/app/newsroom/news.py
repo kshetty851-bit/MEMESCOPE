@@ -34,7 +34,7 @@ TOPICS: dict[str, str] = {
     "adoption": r"\badopt|\bETFs?\b|\btreasur(?:y|ies)\b|\binstitution|\bbank\b|\bpayments?\b|\breserve\b",
     "nfts": r"\bNFTs?\b|\bcollectibles?\b|\bopensea\b",
     "gaming": r"\bgaming\b|\bgame\b|\bmetaverse\b|\bplay[- ]to[- ]earn\b",
-    "security": r"\bhack|\bexploit|\bdrain|\bstolen\b|\bphish|\bscam|\bbreach|\bvulnerab|\boutage\b|\bfraud",
+    "security": r"\bunauthori[sz]ed\s+mint|\bhack|\bexploit|\bdrain|\bstolen\b|\bphish|\bscam|\bbreach|\bvulnerab|\boutage\b|\bfraud",
     "memecoins": r"\bmeme ?coins?\b|\bpump\.fun\b|\bdoge\b|\bshib|\bpepe\b|\bbonk\b|\bmemes?\b",
     "stablecoins": r"\bstablecoins?\b|\bUSDT\b|\bUSDC\b|\btether\b|\bcircle\b",
     "solana": r"\bsolana\b|\bSOL\b",
@@ -198,6 +198,14 @@ def parse(source: str, body: bytes) -> list[Item]:
         summary = _clean(
             _text(e.find("description")) or _text(e.find("atom:summary", ns)), 260
         )
+        # General science/technology articles can appear in broad publisher feeds.
+        # Keep them only when their actual text names a crypto connection.
+        categories = " ".join(_text(c) for c in e.findall("category"))
+        if re.search(r"\b(technology|science)\b", categories, re.I) and not re.search(
+            r"\b(crypto\w*|bitcoin|blockchain|ethereum|solana|BTC|ETH|DeFi|NFTs?|stablecoins?|tokens?|mining)\b",
+            f"{title} {summary}", re.I,
+        ):
+            continue
         image = None
         for path in ("media:content", "media:thumbnail"):
             m = e.find(path, ns)

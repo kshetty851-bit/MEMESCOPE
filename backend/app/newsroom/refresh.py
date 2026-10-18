@@ -67,13 +67,13 @@ def stories_from(items: list[news.Item], now: datetime) -> list[dict[str, Any]]:
                 "publishers": pubs,
                 "topics": sorted({t for i in group for t in i.topics}),
                 "regions": sorted({r for i in group for r in i.regions}),
-                # Confirmed once several publishers carry it as a report; one developing
-                # headline keeps it "developing"; commentary stays commentary.
+                # Legacy "confirmed" means multi-outlet coverage, not verification.
+                # Developing coverage stays developing regardless of outlet count.
                 "kind": (
                     "commentary"
                     if kinds == {"commentary"}
                     else "developing"
-                    if "developing" in kinds and len(pubs) < 2
+                    if "developing" in kinds
                     else "confirmed"
                     if len(pubs) >= 2
                     else "report"
