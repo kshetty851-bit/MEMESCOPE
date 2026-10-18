@@ -274,3 +274,19 @@ def test_every_jupiter_order_request_carries_our_slippage():
         for d in requests:
             keys = {k.value for k in d.keys if isinstance(k, _ast.Constant)}
             assert "slippageBps" in keys, module.__name__
+
+
+def test_a_sell_the_chain_refused_does_not_freeze_the_wallet():
+    """Rockstar, 18 Oct: two slippage-failed sells on a rug armed the kill switch
+    and blocked every buy and the recovering sell for an hour."""
+    from types import SimpleNamespace
+
+    from app.real_wallet.live_transport import JupiterExecuteOutcome as O
+
+    sell, buy = SimpleNamespace(side="SELL"), SimpleNamespace(side="BUY")
+    assert not ex._counts_toward_kill_switch(sell, O.FAILED)
+    assert ex._counts_toward_kill_switch(sell, O.UNKNOWN)
+    assert ex._counts_toward_kill_switch(buy, O.FAILED)
+    assert ex._counts_toward_kill_switch(buy, O.UNKNOWN)
+    # And the submit path asks it before counting.
+    assert "_counts_toward_kill_switch" in ast.unparse(_fn("_sign_and_submit"))
