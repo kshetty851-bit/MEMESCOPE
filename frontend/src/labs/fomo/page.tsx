@@ -99,7 +99,7 @@ const OUTCOMES: Record<string, { cls: string; label?: string }> = {
 };
 
 function Outcome({ outcome }: { outcome: string }) {
-  const o = OUTCOMES[outcome] ?? { cls: "bg-ink-3/40 text-ink-dim ring-line" };
+  const o = OUTCOMES[outcome] ?? { cls: "bg-raised text-ink-dim ring-line" };
   return (
     <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${o.cls}`}>
       {o.label ?? outcome.replaceAll("_", " ")}
@@ -112,7 +112,7 @@ function Side({ side }: { side: string }) {
   return (
     <span
       className={`inline-flex rounded px-1.5 py-0.5 text-[11px] font-bold uppercase tracking-wider ${
-        buy ? "bg-up text-ink" : "bg-down text-ink"
+        buy ? "bg-up text-canvas" : "bg-down text-canvas"
       }`}
     >
       {side}
@@ -185,7 +185,7 @@ function Light({ label, at, okMinutes }: { label: string; at?: string | null; ok
   const age = ageMinutes(at);
   const ok = age !== null && age <= okMinutes;
   return (
-    <span className="inline-flex items-center gap-2 rounded-full border border-line bg-ink-2/60 px-3 py-1 text-xs text-ink-dim">
+    <span className="inline-flex items-center gap-2 rounded-full border border-line bg-sunken/80 px-3 py-1 text-xs text-ink-dim">
       <span className={`size-2 rounded-full ${ok ? "bg-up shadow-[0_0_8px_var(--color-up)]" : "bg-warn"}`} />
       <span>{label}</span>
       <span className="font-mono text-ink">{time(at)}</span>
@@ -207,7 +207,7 @@ function Section({ title, count, children }: { title: string; count?: number; ch
   );
 }
 
-const MEDALS = ["bg-warn text-ink", "bg-neutral text-ink", "bg-down/80 text-ink"];
+const MEDALS = ["bg-warn text-canvas", "bg-ink-2 text-canvas", "bg-down text-canvas"];
 
 export function FomoLabPage() {
   const { data, isLoading, error } = useQuery({
@@ -219,12 +219,12 @@ export function FomoLabPage() {
 
   return (
     <div className="space-y-5 pb-12">
-      <header className="relative overflow-hidden rounded-2xl border border-line bg-gradient-to-br from-plasma/20 via-ink-2 to-brand-bright/15 p-5 sm:p-6">
-        <div aria-hidden className="pointer-events-none absolute -right-16 -top-16 size-56 rounded-full bg-plasma/25 blur-3xl" />
+      <header className="relative overflow-hidden rounded-2xl border border-line bg-surface bg-gradient-to-br from-plasma/25 via-surface to-brand-bright/20 p-5 sm:p-6">
+        <div aria-hidden className="pointer-events-none absolute -right-16 -top-16 size-56 rounded-full bg-plasma/20 blur-3xl" />
         <div aria-hidden className="pointer-events-none absolute -bottom-20 left-1/3 size-56 rounded-full bg-brand-bright/20 blur-3xl" />
         <div className="relative space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-full bg-ink/60 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-dim">
+            <span className="rounded-full bg-sunken/80 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-ink-dim">
               Paper copy · research
             </span>
             {data?.running ? (
@@ -274,7 +274,7 @@ export function FomoLabPage() {
                   hint={
                     <span className="mt-1 flex gap-1" aria-hidden>
                       {Array.from({ length: MAX_LOTS }, (_, i) => (
-                        <span key={i} className={`h-1.5 flex-1 rounded-full ${i < open ? "bg-plasma" : "bg-ink-3"}`} />
+                        <span key={i} className={`h-1.5 flex-1 rounded-full ${i < open ? "bg-plasma" : "bg-raised"}`} />
                       ))}
                     </span>
                   } />
@@ -282,13 +282,13 @@ export function FomoLabPage() {
 
           <Panel>
             <div className="flex flex-wrap gap-2">
-              <span className="inline-flex items-center gap-2 rounded-full border border-line bg-ink-2/60 px-3 py-1 text-xs text-ink-dim">
+              <span className="inline-flex items-center gap-2 rounded-full border border-line bg-sunken/80 px-3 py-1 text-xs text-ink-dim">
                 Started <span className="font-mono text-ink">{time(data.started_at)}</span>
               </span>
               <Light label="Roster fetched" at={data.roster_at} okMinutes={40} />
               <Light label="Source snapshot" at={data.source_captured_at} okMinutes={120} />
               <Light label="Last complete swap poll" at={data.feed_at} okMinutes={6} />
-              <span className="inline-flex items-center rounded-full border border-line bg-ink-2/60 px-3 py-1 text-xs text-ink-dim">
+              <span className="inline-flex items-center rounded-full border border-line bg-sunken/80 px-3 py-1 text-xs text-ink-dim">
                 {data.stale_marks ?? 0} stale open marks
               </span>
             </div>
@@ -316,12 +316,12 @@ export function FomoLabPage() {
                 </thead>
                 <tbody>
                   {data.positions?.map((pos) => (
-                    <tr key={pos.id} className="border-t border-line/70 transition hover:bg-ink-2/60">
+                    <tr key={pos.id} className="border-t border-line/70 transition hover:bg-raised">
                       <td className="py-2.5"><Token mint={pos.mint} /></td>
                       <td><Wallet wallet={pos.wallet} /></td>
                       <td>
                         <span className={`rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${
-                          pos.status === "open" ? "bg-plasma/15 text-plasma ring-plasma/30" : "bg-ink-3/40 text-ink-dim ring-line"
+                          pos.status === "open" ? "bg-plasma/15 text-plasma ring-plasma/30" : "bg-raised text-ink-dim ring-line"
                         }`}>
                           {pos.status}
                         </span>
@@ -357,7 +357,7 @@ export function FomoLabPage() {
                   {data.signals?.map((signal) => (
                     <tr
                       key={`${signal.wallet}-${signal.signature}-${signal.mint}`}
-                      className="border-t border-line/70 transition hover:bg-ink-2/60"
+                      className="border-t border-line/70 transition hover:bg-raised"
                     >
                       <td className="py-2.5 text-ink-dim">{time(signal.traded_at)}</td>
                       <td><Wallet wallet={signal.wallet} /></td>
@@ -389,11 +389,11 @@ export function FomoLabPage() {
               {data.leaders?.map((leader) => (
                 <div
                   key={leader.user_id}
-                  className="flex items-center gap-3 rounded-xl border border-line bg-ink-2/40 p-3 transition hover:border-accent/50"
+                  className="flex items-center gap-3 rounded-xl border border-line bg-raised/60 p-3 transition hover:border-accent/50"
                 >
                   <span
                     className={`grid size-8 shrink-0 place-items-center rounded-full font-mono text-xs font-bold ${
-                      MEDALS[leader.rank - 1] ?? "bg-ink-3 text-ink-dim"
+                      MEDALS[leader.rank - 1] ?? "bg-raised text-ink-dim"
                     }`}
                   >
                     {leader.rank}
