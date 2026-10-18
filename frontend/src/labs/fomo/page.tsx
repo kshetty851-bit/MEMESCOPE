@@ -105,7 +105,7 @@ export function FomoLabPage() {
           <p className="font-medium text-ink">Lab is not running</p>
           <p className="mt-1 text-sm text-ink-dim">
             {data.reason === "feed_key_missing"
-              ? "FOMO API and Helius keys are required."
+              ? "The FOMO API key is required."
               : data.reason === "awaiting_first_roster"
                 ? "Waiting for the first valid 24-hour leaderboard."
                 : "The FOMO Lab feature flag is off."}

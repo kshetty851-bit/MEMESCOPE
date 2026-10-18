@@ -21,7 +21,7 @@ describe("FOMO Lab", () => {
   it("says plainly when a feed key is missing", async () => {
     show({ ...base, configured: false, running: false, reason: "feed_key_missing" });
     expect(await screen.findByText("Lab is not running")).toBeInTheDocument();
-    expect(screen.getByText("FOMO API and Helius keys are required.")).toBeInTheDocument();
+    expect(screen.getByText("The FOMO API key is required.")).toBeInTheDocument();
   });
 
   it("shows the feed times and every decision, copied or not", async () => {

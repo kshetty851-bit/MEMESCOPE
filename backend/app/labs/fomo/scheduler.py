@@ -15,6 +15,7 @@ from app.lab.scheduler import DRY_RUN_LOCK_NAMESPACE
 from app.labs.fomo.models import FomoBook
 from app.labs.fomo.service import ROSTER_REFRESH, STARTING_USD, FomoService
 from app.labs.fomo.source import fetch_roster, fetch_swaps
+from app.labs.graduation.sources import PUBLIC_RPC_URL
 from app.workers.celery_app import celery_app
 from app.workers.runtime import run_async
 
@@ -31,8 +32,7 @@ async def tick() -> dict[str, Any]:
     if not settings.FEATURE_FOMO_LAB_ENABLED:
         return {"skipped": "fomo_lab_disabled"}
     fomo_key = settings.FOMO_API_KEY.get_secret_value()
-    helius_key = settings.HELIUS_API_KEY.get_secret_value()
-    if not fomo_key or not helius_key:
+    if not fomo_key:
         return {"skipped": "feed_key_missing"}
     now = datetime.now(UTC)
     try:
@@ -69,10 +69,16 @@ async def tick() -> dict[str, Any]:
                         book.source_captured_at = source_captured_at
                         book.feed_error = None
                 wallets = await service.wallets_to_poll(book)
-                observations, errors = await fetch_swaps(client, helius_key, wallets)
+                cursors = await service.cursors(book)
+                # The free public node, not Helius (Karthik, 2026-10-18): Helius's
+                # free credits are kept for the open-buy check.
+                observations, errors, marks = await fetch_swaps(
+                    client, PUBLIC_RPC_URL, wallets, cursors, now=now)
             now = datetime.now(UTC)
             await service.retry_sells(book, now)
             counts = await service.apply(book, observations, now)
+            # Bookmarks move only after their swaps are in the ledger.
+            await service.set_cursors(book, marks)
             await service.mark(book, now)
             if errors:
                 book.feed_error = f"swap_feed_incomplete:{len(errors)}/{len(wallets)}"

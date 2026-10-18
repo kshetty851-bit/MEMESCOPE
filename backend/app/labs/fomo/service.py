@@ -99,6 +99,24 @@ class FomoService:
         )
         return sorted(set(active) | set(held))
 
+    async def cursors(self, book: FomoBook) -> dict[str, str | None]:
+        """Each polled wallet's bookmark: the newest one any of its rows holds."""
+        rows = (await self.session.execute(
+            select(FomoLeader.wallet, FomoLeader.last_signature, FomoLeader.ranked_at)
+            .where(FomoLeader.book_id == book.id)
+            .order_by(FomoLeader.ranked_at))).all()
+        out: dict[str, str | None] = {}
+        for wallet, sig, _ in rows:
+            out[wallet] = sig or out.get(wallet)
+        return out
+
+    async def set_cursors(self, book: FomoBook, marks: dict[str, str]) -> None:
+        for row in (await self.session.execute(
+                select(FomoLeader).where(FomoLeader.book_id == book.id,
+                                         FomoLeader.wallet.in_(list(marks))))).scalars():
+            row.last_signature = marks[row.wallet]
+        await self.session.flush()
+
     async def price(self, mint: str, now: datetime) -> TokenMarketSnapshot | None:
         snap = (
             await self.session.execute(

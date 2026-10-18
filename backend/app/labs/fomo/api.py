@@ -25,11 +25,8 @@ def money(value: Decimal | None) -> str | None:
 async def board(session: DbSession) -> dict[str, Any]:
     base: dict[str, Any] = {
         "enabled": settings.FEATURE_FOMO_LAB_ENABLED,
-        "configured": bool(
-            settings.FOMO_API_KEY.get_secret_value()
-            and settings.HELIUS_API_KEY.get_secret_value()
-        ),
-        "source": "fomo.family 24h P&L via FOMO API; Solana swaps via Helius",
+        "configured": bool(settings.FOMO_API_KEY.get_secret_value()),
+        "source": "fomo.family 24h P&L via FOMO API; Solana swaps from the public RPC node",
         "starting_usd": money(STARTING_USD),
         "trade_usd": money(TRADE_USD),
         "max_open_trades": 10,

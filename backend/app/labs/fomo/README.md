@@ -13,10 +13,13 @@ execution path.
   A new trader becomes actionable only at the time they first enter the roster.
   If the provider's roster capture becomes older than two hours, buys pause
   until a fresh roster arrives; sells of already held lots continue.
-- Helius enhanced `SWAP` transactions are polled every two minutes for the
-  current roster, plus any departed trader whose paper lot remains open.
-  Observations are processed in chain time order and deduplicated by wallet,
-  transaction signature, and mint.
+- Every two minutes each followed wallet (the current roster, plus any departed
+  trader whose paper lot remains open) is read from the free public Solana RPC
+  node, not Helius: its new transaction ids since a per-wallet bookmark, then
+  each transaction. A swap is the wallet's own largest token balance change with
+  SOL or another token moving the other way; transfers are ignored. A bookmark
+  moves only when every transaction after it was read. Observations are
+  processed in chain time order and deduplicated by wallet, signature and mint.
 - A new buy older than five minutes is recorded but skipped. A sell of a held
   lot is still attempted after an outage; missing fresh prices leave it pending
   until a later tick. One sell closes the oldest matching $50 lot, since the
@@ -34,14 +37,14 @@ execution path.
 The [FOMO API](https://fomoapi.io/docs) is an independent, unofficial provider
 for the fomo.family 24-hour leaderboard; it requires a paid or free API key.
 MEMESCOPE uses its leaderboard only for selection, and verifies activity from
-Helius transactions. Set `FOMO_API_KEY`, `HELIUS_API_KEY` and
+Solana transactions on the public node. Set `FOMO_API_KEY` and
 `FEATURE_FOMO_LAB_ENABLED=true` in the shared backend environment (not
 `FEATURE_LAB_ENABLED`, which would revive the retired labs), apply migration
 `0121_fomo_lab` and restart workers and beat. The book starts at the first valid roster after activation. Existing
 history is never opened retroactively. The flag defaults off because this
 repository has no FOMO API key configured.
 
-The worker logs and `/api/v1/labs/fomo/board` expose feed failures. A Helius
-page of 100 swaps is flagged as saturated: activity beyond that page cannot be
+The worker logs and `/api/v1/labs/fomo/board` expose feed failures. A full
+page of 100 new transactions is flagged as saturated: activity beyond that page cannot be
 claimed as fully covered. Source-reported 24-hour P/L is shown beside each
 rank but is not used to calculate MEMESCOPE paper returns.

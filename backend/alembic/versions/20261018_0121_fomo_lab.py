@@ -76,6 +76,7 @@ def upgrade() -> None:
         sa.Column("active", sa.Boolean, nullable=False),
         sa.Column("follow_from", at, nullable=False),
         sa.Column("ranked_at", at, nullable=False),
+        sa.Column("last_signature", sa.String(100)),
         *_timestamps(),
         sa.UniqueConstraint("book_id", "user_id", name="uq_fomo_leader_user"),
     )

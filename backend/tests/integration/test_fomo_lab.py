@@ -173,3 +173,13 @@ async def test_two_sells_cannot_close_one_lot_twice(db_session, prices):
     assert counts == {"closed": 1, "not_held": 1}
     proceeds = (await db_session.scalars(select(FomoPosition.proceeds_usd))).one()
     assert round(book.cash_usd, 4) == STARTING_USD - TRADE_USD + proceeds
+
+
+async def test_bookmarks_are_kept_per_wallet(db_session, prices):
+    book = await started(db_session)
+    s = FomoService(db_session)
+    assert await s.cursors(book) == {W1: None, W2: None}
+    await s.set_cursors(book, {W1: "sigA"})
+    assert await s.cursors(book) == {W1: "sigA", W2: None}
+    await s.set_cursors(book, {W1: "sigB", W2: "sigC"})
+    assert await s.cursors(book) == {W1: "sigB", W2: "sigC"}

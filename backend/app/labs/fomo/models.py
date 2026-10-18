@@ -51,6 +51,9 @@ class FomoLeader(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     follow_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     ranked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    #: The newest transaction already read for this wallet: the next poll asks
+    #: the node only for what came after it.
+    last_signature: Mapped[str | None] = mapped_column(String(100))
 
     __table_args__ = (
         UniqueConstraint("book_id", "user_id", name="uq_fomo_leader_user"),
