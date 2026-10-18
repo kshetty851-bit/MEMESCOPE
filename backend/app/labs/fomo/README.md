@@ -8,7 +8,7 @@ execution path.
 
 - One shared book starts with **$500**. Every copied buy spends **$50**; at most
   ten lots may be open. Proceeds return to the same cash book.
-- The source's top 20 ranks are refreshed every 30 minutes. A trader without a
+- The source's top 20 ranks are refreshed every 60 minutes (the free API plan allows about 1,000 calls a month). A trader without a
   valid Solana wallet cannot be followed; the board shows the actual roster.
   A new trader becomes actionable only at the time they first enter the roster.
   If the provider's roster capture becomes older than two hours, buys pause
