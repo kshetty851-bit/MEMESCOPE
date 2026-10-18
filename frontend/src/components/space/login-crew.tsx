@@ -342,7 +342,6 @@ const TOP_PAIR = DOCK.filter((m) => m.id !== "panda");
 const PAGE_LINES: ReadonlyArray<readonly [string, readonly string[]]> = [
   ["/karthik-lab", ["Welcome to your lab, captain!", "The checks live on the right →", "Quiet pools, five-minute holds.", "Judged on the 23rd — hang in there!"]],
   ["/real-wallet", ["Real money here — careful!", "Only you can press Start.", "I'm watching the wallet with you."]],
-  ["/graduation-lab", ["Every arm vs its control!", "So many graduations…", "Deep pools, short holds."]],
   ["/hq", ["Say hi to the office!", "Everyone's at their desk.", "Want to see them dance? 🎵"]],
 ];
 const DOCK_EVERY_MS = 9000;

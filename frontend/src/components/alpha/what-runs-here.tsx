@@ -82,12 +82,6 @@ function LiveLab() {
 
 const PLACES = [
   {
-    href: "/graduation-lab",
-    name: "Graduation Lab",
-    peek: "/crew/lion.webp",
-    what: "Every pump.fun graduation over the depth line is bought on paper by a set of rules at once, each beside a control it has to beat.",
-  },
-  {
     href: "/karthik-lab",
     name: "Karthik's Lab",
     peek: "/crew/koala.webp",

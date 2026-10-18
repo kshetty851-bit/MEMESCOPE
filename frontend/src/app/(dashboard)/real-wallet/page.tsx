@@ -678,8 +678,8 @@ function StrategyCard({
       </dl>
       {proven === false ? (
         <p className="mt-3 text-xs text-warn">
-          Not proven yet — the Graduation Lab has not called it an edge.{" "}
-          <Link className="text-accent underline" href="/graduation-lab">
+          Not proven yet — the paper lab has not called it an edge.{" "}
+          <Link className="text-accent underline" href="/karthik-lab">
             See its paper results
           </Link>
         </p>

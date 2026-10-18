@@ -2974,20 +2974,6 @@ async def _pool_lab_build(db: AsyncSession) -> dict[str, Any]:
     }
 
 
-@router.get("/busy-lab", summary="Busy Pool Lab: the $10k book's refused busy pools, $20 on $200")
-async def busy_lab_view() -> dict[str, Any]:
-    """What the job runner last built; "computing" until its first pass."""
-    import json
-
-    from app.core.redis import init_redis
-    from app.labs.graduation import busy_lab
-
-    raw = await (await init_redis()).get(busy_lab.KEY)
-    if not raw:
-        return {"computing": True, "started_at": busy_lab.START}
-    return json.loads(raw)
-
-
 @router.get("/boost-lab",
             summary="Boost Lab: coins with a paid DexScreener profile or boosts, sold at 4m")
 async def boost_lab_view() -> dict[str, Any]:
