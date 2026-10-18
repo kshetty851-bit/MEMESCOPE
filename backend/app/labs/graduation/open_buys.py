@@ -1,6 +1,8 @@
 """Was a coin's pool bought when it opened? (Karthik, 2026-10-17.)
 
-Read from the public Solana node: the pool's oldest signatures, then the
+Read from Helius first (one getTransactionsForAddress call, oldest first; the
+free node could not read about half the pools, Rockstar among them, 18 Oct),
+then the public Solana node: the pool's oldest signatures, then the
 transactions of its first `OPEN_WINDOW_S`, oldest first, stopping at the first
 fee payer who spent more than `MIN_BUY_SOL`. In 98% of coins that buy lands at
 second 0, so the answer is known before the book's 19-46 s entry.
@@ -17,6 +19,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.logging import get_logger
 from app.labs.graduation.models import GradOpenBuy, GradPaperPosition
 from app.labs.graduation.sources import PUBLIC_RPC_URL
@@ -65,8 +68,32 @@ async def _rpc(client: httpx.AsyncClient, method: str, params: list[Any]) -> Any
     raise LookupError(method)
 
 
+HELIUS_TXS = 50
+
+
+async def _read_helius(client: httpx.AsyncClient, pool: str) -> Decimal | None:
+    """The pool's first `HELIUS_TXS` landed transactions in one call, or None."""
+    if not settings.helius_configured:
+        return None
+    try:
+        got = (await client.post(settings.HELIUS_RPC_URL, json={
+            "jsonrpc": "2.0", "id": 1, "method": "getTransactionsForAddress",
+            "params": [pool, {"transactionDetails": "full", "sortOrder": "asc",
+                              "limit": HELIUS_TXS, "encoding": "json",
+                              "maxSupportedTransactionVersion": 1}]})).json()
+        txs = [t for t in got["result"]["data"] if not (t.get("meta") or {}).get("err")]
+    except (httpx.HTTPError, ValueError, KeyError, TypeError):
+        return None       # never logged: the URL carries the key
+    if not txs:
+        return None
+    return biggest_open_spend(txs, txs[0].get("blockTime") or 0)
+
+
 async def read_pool(client: httpx.AsyncClient, pool: str) -> Decimal | None:
     """The biggest open spend on `pool`, or None when it cannot be read."""
+    spent = await _read_helius(client, pool)
+    if spent is not None:
+        return spent
     try:
         before, page = None, []
         for _ in range(SIG_PAGES):
