@@ -123,6 +123,14 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Paper only. Coins with a paid DexScreener profile or boosts, sold at 4 minutes.",
       },
+      // fomo.family's 24h top 20 (2026-10-18). Paper only: no wallet, no orders.
+      {
+        href: "/fomo-lab",
+        label: "FOMO Lab",
+        icon: IconSpark,
+        status: "ready",
+        note: "Paper only. Copies fomo.family's 24h top 20 traders; $50 a buy from $500.",
+      },
       // BTC/USDT range strategy (2026-10-08). Paper only: no wallet, no orders.
       {
         href: "/btc-range-lab",

@@ -682,6 +682,11 @@ class Settings(BaseSettings):
     #: actionable. Off by default: a copy lab that began at deploy time would
     #: have no honest start date.
     FEATURE_PUMPFUN_LAB_ENABLED: bool = False
+    #: FOMO Lab: fomo.family's 24h top 20, one shared $500 paper book. Its own
+    #: flag only (not FEATURE_LAB_ENABLED, which revives the retired labs), and
+    #: it also needs FOMO_API_KEY and HELIUS_API_KEY.
+    FEATURE_FOMO_LAB_ENABLED: bool = False
+    FOMO_API_KEY: SecretStr = SecretStr("")
     #: Momentum V2: twenty $100 wallets on a 3x6 grid of momentum rule against
     #: liquidity floor, each banking at +10% and compounding from what it
     #: realised. Two of the twenty are random controls, without which the other
