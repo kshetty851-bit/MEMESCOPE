@@ -84,6 +84,10 @@ async def tick() -> dict[str, Any]:
                 book.feed_error = f"swap_feed_incomplete:{len(errors)}/{len(wallets)}"
             else:
                 book.feed_at = now
+                # A complete poll clears an old swap warning; a roster failure
+                # from this same tick stays until a roster read succeeds.
+                if (book.feed_error or "").startswith("swap_feed_incomplete"):
+                    book.feed_error = None
             await session.commit()
             return {
                 "signals": counts,
