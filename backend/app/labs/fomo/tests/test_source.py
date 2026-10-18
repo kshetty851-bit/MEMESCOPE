@@ -112,7 +112,7 @@ def node(sigs: list[dict], txs: dict[str, object], calls: list) -> httpx.MockTra
 
 
 def poll(sigs, txs, cursors, calls=None):
-    source.READ_PAUSE_S = 0
+    source.READ_PAUSE_S = source.WALLET_PAUSE_S = 0
     calls = [] if calls is None else calls
     client = httpx.AsyncClient(transport=node(sigs, txs, calls))
     return asyncio.run(fetch_swaps(client, "http://node", [WALLET], cursors, now=NOW))
@@ -176,3 +176,17 @@ def test_a_full_page_is_flagged_but_still_moves_on() -> None:
 
 async def _no_sleep(*_a, **_k) -> None:
     return None
+
+
+def test_a_rate_limited_node_is_waited_out(monkeypatch) -> None:
+    waits: list[float] = []
+
+    async def sleep(seconds: float) -> None:
+        waits.append(seconds)
+
+    monkeypatch.setattr(asyncio, "sleep", sleep)
+    replies = iter([httpx.Response(429, headers={"retry-after": "5"}), httpx.Response(429),
+                    httpx.Response(200, json={"result": []})])
+    client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: next(replies)))
+    assert asyncio.run(source._rpc(client, "http://node", "getSignaturesForAddress", [])) == []
+    assert waits == [5.0, 4.0]                        # the node's hint, then 2 x 2^1
