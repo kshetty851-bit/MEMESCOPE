@@ -113,6 +113,7 @@ x-backend-env: &backend-env
   LAB_BTC_MONTHLY_LIVE_START: ${LAB_BTC_MONTHLY_LIVE_START:-2026-10-01T00:00:00Z}
   SOLANA_WS_URL: ${SOLANA_WS_URL:-wss://api.mainnet-beta.solana.com}
   HELIUS_API_KEY: ${HELIUS_API_KEY:-}
+  FOMO_API_KEY: ${FOMO_API_KEY:-}
   FEATURE_SCANNER_ENABLED: ${FEATURE_SCANNER_ENABLED:-false}
   # pump.fun bonding-curve launches, direct PumpSwap pool launches, Meteora's
   # Dynamic Bonding Curve (dbci…, which Moonshot launches on) and Raydium's
@@ -295,6 +296,7 @@ x-backend-env: &backend-env
   # here before (fixed in 55feaa3) and it costs an hour every time.
   FEATURE_COMPOUND_LAB_ENABLED: ${FEATURE_COMPOUND_LAB_ENABLED:-false}
   FEATURE_PUMPFUN_LAB_ENABLED: ${FEATURE_PUMPFUN_LAB_ENABLED:-false}
+  FEATURE_FOMO_LAB_ENABLED: ${FEATURE_FOMO_LAB_ENABLED:-false}
   FEATURE_MOMENTUM_LAB_ENABLED: ${FEATURE_MOMENTUM_LAB_ENABLED:-false}
   FEATURE_DEPTH_LAB_ENABLED: ${FEATURE_DEPTH_LAB_ENABLED:-false}
   FEATURE_PUMPFUN_SOCIAL_ENABLED: ${FEATURE_PUMPFUN_SOCIAL_ENABLED:-false}
