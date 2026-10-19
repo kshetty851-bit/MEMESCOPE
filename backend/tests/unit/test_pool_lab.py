@@ -80,9 +80,11 @@ def test_name_key_matches_spacing_and_case():
 def test_karthik_stake_by_pool_and_quietness():
     from app.labs.graduation import config
 
-    assert config.karthik_ticket(60_000) == 75.0            # small pool, buys unknown
+    assert config.karthik_ticket(60_000) == 100.0           # small pool, buys unknown (19 Oct)
     assert config.karthik_ticket(60_000, 13) == 100.0       # small pool, quiet
-    assert config.karthik_ticket(60_000, 14) == 75.0        # small pool, busier
+    assert config.karthik_ticket(60_000, 14) == 100.0       # small pool, busier (19 Oct)
+    # The real wallets keep the 16 Oct table.
+    assert config.karthik_ticket(60_000, 14, config.WALLET_TICKETS_BY_POOL) == 75.0
     assert config.karthik_ticket(400_000, 3) == 25.0        # large pool, quiet or not
 
 
