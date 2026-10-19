@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta
 from decimal import Decimal
 
@@ -19,7 +20,13 @@ from app.services.market.providers.registry import get_provider
 from app.services.market.service import MarketEnrichmentService
 
 STARTING_USD = Decimal("500")
-TRADE_USD = Decimal("50")
+#: Karthik, 2026-10-19: 20 lots of $25 instead of 10 of $50 (177 buys in the
+#: first day were skipped for want of cash), and one lot per coin.
+TRADE_USD = Decimal("25")
+MAX_OPEN = 20
+#: The consensus book buys only when ANOTHER ranked trader bought the same coin
+#: in this window before (walk-forward lead, 19 Oct: 13 trades, unproven).
+CONSENSUS_WINDOW = timedelta(minutes=60)
 MAX_SIGNAL_AGE_SECONDS = 300
 #: Hourly, not every 30 minutes: the free FOMO API plan is 250,000 credits a
 #: month at 250 a call (1,000 calls); half-hourly reads would run it dry by
@@ -32,10 +39,32 @@ class FomoService:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def book(self) -> FomoBook | None:
+    async def book(self, kind: str = "main") -> FomoBook | None:
         return (
-            await self.session.execute(select(FomoBook).order_by(FomoBook.started_at).limit(1))
+            await self.session.execute(select(FomoBook).where(FomoBook.kind == kind)
+                                       .order_by(FomoBook.started_at).limit(1))
         ).scalar_one_or_none()
+
+    async def consensus_book(self, now: datetime) -> FomoBook:
+        """The second book, opened the first time it is asked for: its record
+        starts then, never earlier."""
+        book = await self.book("consensus")
+        if book is None:
+            book = FomoBook(started_at=now, cash_usd=STARTING_USD, kind="consensus")
+            self.session.add(book)
+            await self.session.flush()
+        return book
+
+    async def other_buyer_before(self, main: FomoBook, wallet: str,
+                                 trade: LeaderTrade) -> bool:
+        """Did a DIFFERENT followed trader buy this coin in the hour before?"""
+        return (await self.session.execute(
+            select(FomoSignal.id).where(
+                FomoSignal.book_id == main.id, FomoSignal.side == "buy",
+                FomoSignal.mint == trade.mint, FomoSignal.leader_wallet != wallet,
+                FomoSignal.outcome.not_in(("not_ranked_at_trade", "before_start")),
+                FomoSignal.traded_at >= trade.at - CONSENSUS_WINDOW,
+                FomoSignal.traded_at < trade.at).limit(1))).scalar_one_or_none() is not None
 
     async def roster(self, book: FomoBook, leaders: list[Leader], now: datetime) -> None:
         """Update membership, never rewrite the instant a wallet first became actionable."""
@@ -77,7 +106,7 @@ class FomoService:
         book.roster_at = now
         await self.session.flush()
 
-    async def wallets_to_poll(self, book: FomoBook) -> list[str]:
+    async def wallets_to_poll(self, book: FomoBook, *also: FomoBook) -> list[str]:
         active = (
             (
                 await self.session.execute(
@@ -93,7 +122,8 @@ class FomoService:
             (
                 await self.session.execute(
                     select(FomoPosition.leader_wallet).where(
-                        FomoPosition.book_id == book.id, FomoPosition.status == "open"
+                        FomoPosition.book_id.in_([book.id, *(b.id for b in also)]),
+                        FomoPosition.status == "open",
                     )
                 )
             )
@@ -202,8 +232,14 @@ class FomoService:
                 )
             ).all()
         )
-        if open_count >= 10:
+        if open_count >= MAX_OPEN:
             return "max_open_trades", None
+        held = (await self.session.execute(
+            select(FomoPosition.id).where(
+                FomoPosition.book_id == book.id, FomoPosition.mint == trade.mint,
+                FomoPosition.status == "open").limit(1))).scalar_one_or_none()
+        if held is not None:
+            return "already_held", None
         if book.cash_usd < TRADE_USD:
             return "insufficient_cash", None
         snap = await self.price(trade.mint, now)
@@ -314,13 +350,18 @@ class FomoService:
         return "closed", pos
 
     async def apply(
-        self, book: FomoBook, observations: list[tuple[str, LeaderTrade]], now: datetime
+        self, book: FomoBook, observations: list[tuple[str, LeaderTrade]], now: datetime,
+        *, roster_book: FomoBook | None = None,
+        gate: Callable[[str, LeaderTrade], Awaitable[bool]] | None = None,
     ) -> dict[str, int]:
+        """`roster_book` lends its roster to a book that keeps none (the
+        consensus book); `gate` is a further test a buy must pass."""
+        source = roster_book or book
         roster = (
             (
                 await self.session.execute(
                     select(FomoLeader).where(
-                        FomoLeader.book_id == book.id, FomoLeader.active.is_(True)
+                        FomoLeader.book_id == source.id, FomoLeader.active.is_(True)
                     )
                 )
             )
@@ -329,8 +370,8 @@ class FomoService:
         )
         active = {row.wallet: row for row in roster}
         roster_fresh = (
-            book.source_captured_at is not None
-            and now - book.source_captured_at <= MAX_ROSTER_AGE
+            source.source_captured_at is not None
+            and now - source.source_captured_at <= MAX_ROSTER_AGE
         )
         counts: dict[str, int] = {}
         seen_this_tick: set[tuple[str, str, str]] = set()
@@ -365,6 +406,8 @@ class FomoService:
                 and (now - trade.at).total_seconds() > MAX_SIGNAL_AGE_SECONDS
             ):
                 outcome, pos = "stale_signal", None
+            elif trade.side == "buy" and gate is not None and not await gate(wallet, trade):
+                outcome, pos = "no_consensus", None
             elif trade.side == "buy":
                 outcome, pos = await self._open(book, wallet, trade, now)
             else:

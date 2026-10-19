@@ -128,37 +128,81 @@ async def test_old_or_unranked_buys_are_recorded_not_copied(db_session, prices):
     assert book.cash_usd == STARTING_USD
 
 
-async def test_cash_and_the_ten_lot_cap_bound_the_book(db_session, prices):
-    prices[MINT] = Decimal("0.001")
-    book = await started(db_session, cash=Decimal("60"))
+def coin(i: int) -> str:
+    return f"Coin{i:02d}" + "1" * 36
+
+
+async def test_cash_and_the_twenty_lot_cap_bound_the_book(db_session, prices):
+    for i in range(25):
+        prices[coin(i)] = Decimal("0.001")
+    book = await started(db_session, cash=Decimal("30"))
     s = FomoService(db_session)
-    counts = await s.apply(book, [(W1, trade(f"c{i}", "buy", NOW - timedelta(seconds=i)))
-                                  for i in (2, 1)], NOW)
-    assert counts == {"opened": 1, "insufficient_cash": 1}
-    assert book.cash_usd == Decimal("10")
+    counts = await s.apply(book, [(W1, trade(f"c{i}", "buy", NOW - timedelta(seconds=9 - i),
+                                             coin(i))) for i in (1, 2)], NOW)
+    assert counts == {"opened": 1, "insufficient_cash": 1}          # $25 lots
+    assert book.cash_usd == Decimal("5")
 
     book.cash_usd = Decimal("1000")
-    counts = await s.apply(book, [(W2, trade(f"m{i}", "buy", NOW - timedelta(seconds=30 - i)))
-                                  for i in range(10)], NOW)
-    assert counts == {"opened": 9, "max_open_trades": 1}
-    assert len(await open_lots(db_session, book)) == 10
+    counts = await s.apply(book, [(W2, trade(f"m{i}", "buy", NOW - timedelta(seconds=30 - i),
+                                             coin(i + 3))) for i in range(20)], NOW)
+    assert counts == {"opened": 19, "max_open_trades": 1}
+    assert len(await open_lots(db_session, book)) == 20
 
 
-async def test_a_sell_closes_the_oldest_earlier_lot_of_that_wallet(db_session, prices):
+async def test_one_lot_per_coin_and_a_sell_closes_its_traders_lot(db_session, prices):
     prices[MINT] = Decimal("0.001")
     book = await started(db_session)
     s = FomoService(db_session)
     t1, t2 = NOW - timedelta(seconds=50), NOW - timedelta(seconds=40)
-    await s.apply(book, [(W1, trade("b1", "buy", t1)), (W1, trade("b2", "buy", t2))], NOW)
-    first, second = await open_lots(db_session, book)
+    both = [(W1, trade("b1", "buy", t1)), (W2, trade("b2", "buy", t2))]
+    counts = await s.apply(book, both, NOW)
+    assert counts == {"opened": 1, "already_held": 1}   # a repeat buy is no new lot
+    assert book.cash_usd == STARTING_USD - TRADE_USD
+    (lot,) = await open_lots(db_session, book)
     later = NOW + timedelta(minutes=2)
     counts = await s.apply(book, [
         (W2, trade("other", "sell", later - timedelta(seconds=9))),     # not W2's lot
-        (W1, trade("early", "sell", t1 - timedelta(seconds=1))),         # before any buy
+        (W1, trade("early", "sell", t1 - timedelta(seconds=1))),         # before the buy
         (W1, trade("s1", "sell", later - timedelta(seconds=5)))], later)
     assert counts == {"not_held": 1, "before_buy": 1, "closed": 1}
-    assert [p.id for p in await open_lots(db_session, book)] == [second.id]
-    assert first.status == "closed"
+    assert lot.status == "closed" and await open_lots(db_session, book) == []
+
+
+async def test_the_consensus_book_buys_only_a_second_traders_buy(db_session, prices):
+    from app.labs.fomo.service import CONSENSUS_WINDOW
+    prices[MINT] = Decimal("0.001")
+    prices[coin(1)] = Decimal("0.001")
+    main = await started(db_session)
+    s = FomoService(db_session)
+    con = await s.consensus_book(NOW - timedelta(minutes=30))
+    gate = lambda w, t: s.other_buyer_before(main, w, t)  # noqa: E731
+
+    async def tick(obs, at):
+        await s.apply(main, obs, at)
+        return await s.apply(con, obs, at, roster_book=main, gate=gate)
+
+    def at(minutes: float) -> datetime:
+        return NOW - timedelta(minutes=20) + timedelta(minutes=minutes)
+
+    seen = timedelta(seconds=30)
+    one = await tick([(W1, trade("a", "buy", at(0)))], at(0) + seen)
+    assert one == {"no_consensus": 1}
+    again = await tick([(W1, trade("a2", "buy", at(5)))], at(5) + seen)   # same trader again
+    assert again == {"no_consensus": 1}
+    second = await tick([(W2, trade("b", "buy", at(10)))], at(10) + seen)
+    assert second == {"opened": 1}
+    late = CONSENSUS_WINDOW.total_seconds() / 60 + 5
+    alone = await tick([(W2, trade("c", "buy", at(late), coin(1)))], at(late) + seen)
+    assert alone == {"no_consensus": 1}                          # nobody else bought that coin
+    # Its lot follows the trader it copied: W1 selling does not close it, W2 does.
+    out = at(22)
+    w1_sells = await s.apply(con, [(W1, trade("s1", "sell", out))], out + seen,
+                             roster_book=main, gate=gate)
+    assert w1_sells == {"not_held": 1}
+    w2_sells = await s.apply(con, [(W2, trade("s2", "sell", out))], out + seen,
+                             roster_book=main, gate=gate)
+    assert w2_sells == {"closed": 1}
+    assert con.cash_usd > 0 and main.kind == "main" and con.kind == "consensus"
 
 
 async def test_two_sells_cannot_close_one_lot_twice(db_session, prices):

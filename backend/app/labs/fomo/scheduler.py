@@ -68,7 +68,8 @@ async def tick() -> dict[str, Any]:
                         await service.roster(book, leaders, roster_at)
                         book.source_captured_at = source_captured_at
                         book.feed_error = None
-                wallets = await service.wallets_to_poll(book)
+                consensus = await service.consensus_book(datetime.now(UTC))
+                wallets = await service.wallets_to_poll(book, consensus)
                 cursors = await service.cursors(book)
                 # The free public node, not Helius (Karthik, 2026-10-18): Helius's
                 # free credits are kept for the open-buy check.
@@ -77,6 +78,13 @@ async def tick() -> dict[str, Any]:
             now = datetime.now(UTC)
             await service.retry_sells(book, now)
             counts = await service.apply(book, observations, now)
+            # The consensus book reads the same swaps after the main book has
+            # recorded them, so "another trader bought it" sees this tick's too.
+            await service.retry_sells(consensus, now)
+            consensus_counts = await service.apply(
+                consensus, observations, now, roster_book=book,
+                gate=lambda wallet, trade: service.other_buyer_before(book, wallet, trade))
+            await service.mark(consensus, now)
             # Bookmarks move only after their swaps are in the ledger.
             await service.set_cursors(book, marks)
             await service.mark(book, now)
@@ -91,6 +99,7 @@ async def tick() -> dict[str, Any]:
             await session.commit()
             return {
                 "signals": counts,
+                "consensus_signals": consensus_counts,
                 "wallets_polled": len(wallets),
                 "wallets_failed": len(errors),
                 "roster_at": book.roster_at.isoformat(),
