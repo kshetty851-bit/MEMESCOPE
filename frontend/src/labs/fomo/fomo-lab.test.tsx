@@ -51,4 +51,19 @@ describe("FOMO Lab", () => {
     expect(screen.getByRole("link", { name: `scan for ${mint}` })).toHaveAttribute(
       "href", `https://solscan.io/token/${mint}`);
   });
+
+  it("shows the multiple-traders book beside the main one", async () => {
+    show({
+      ...base, running: true, max_open_trades: 20, open_trades: 3, equity_usd: "520", pnl_usd: "20",
+      cash_usd: "445", leaders: [], positions: [],
+      signals: [{ signature: "Sig3333333333333333333333333333", wallet: "Wal11111111111111111111",
+                  mint: "Min3333333333333333333", side: "buy", traded_at: "2026-10-19T11:57:00Z", outcome: "already_held" }],
+      consensus: { started_at: "2026-10-19T10:00:00Z", cash_usd: "475", open_value_usd: "26", equity_usd: "501",
+                   pnl_usd: "1", open_trades: 1, positions: [], decisions: { opened: 1, no_consensus: 12 } },
+    });
+    expect(await screen.findByText("Multiple-traders book")).toBeInTheDocument();
+    expect(screen.getByText(/1 copied · 12 no 2nd trader/)).toBeInTheDocument();
+    expect(screen.getByText("already held")).toBeInTheDocument();
+    expect(screen.getByText("3 / 20")).toBeInTheDocument();
+  });
 });

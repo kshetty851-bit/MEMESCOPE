@@ -56,12 +56,25 @@ interface Board {
   pnl_usd?: string;
   open_trades?: number;
   stale_marks?: number;
+  max_open_trades?: number;
   leaders?: Leader[];
   positions?: Position[];
   signals?: Signal[];
+  /** The multiple-traders book (2026-10-19). */
+  consensus?: Consensus | null;
 }
 
-const MAX_LOTS = 10;
+interface Consensus {
+  started_at: string;
+  cash_usd: string;
+  open_value_usd: string;
+  equity_usd: string;
+  pnl_usd: string;
+  open_trades: number;
+  positions: Position[];
+  decisions: Record<string, number>;
+}
+
 
 function usd(value?: string | null, signed = false): string {
   if (value == null) return "—";
@@ -94,7 +107,9 @@ const OUTCOMES: Record<string, { cls: string; label?: string }> = {
   pending_price: { cls: "bg-warn/15 text-warn ring-warn/30", label: "waiting for price" },
   stale_signal: { cls: "bg-warn/15 text-warn ring-warn/30" },
   roster_stale: { cls: "bg-warn/15 text-warn ring-warn/30" },
-  max_open_trades: { cls: "bg-plasma/15 text-plasma ring-plasma/30", label: "10 lots open" },
+  max_open_trades: { cls: "bg-plasma/15 text-plasma ring-plasma/30", label: "all lots open" },
+  already_held: { cls: "bg-plasma/15 text-plasma ring-plasma/30", label: "already held" },
+  no_consensus: { cls: "bg-raised text-ink-dim ring-line", label: "no 2nd trader" },
   insufficient_cash: { cls: "bg-plasma/15 text-plasma ring-plasma/30", label: "out of cash" },
 };
 
@@ -207,6 +222,74 @@ function Section({ title, count, children }: { title: string; count?: number; ch
   );
 }
 
+function Lots({ positions }: { positions: Position[] }) {
+  return (
+    <>
+      <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] text-left text-sm">
+                <thead className="text-[11px] uppercase tracking-wider text-ink-dim">
+                  <tr>
+                    <th className="py-2">Token</th>
+                    <th>Trader</th>
+                    <th>Status</th>
+                    <th className="text-right">Spent</th>
+                    <th className="text-right">Value / proceeds</th>
+                    <th className="text-right">P/L</th>
+                    <th className="pl-4">Opened</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {positions.map((pos) => (
+                    <tr key={pos.id} className="border-t border-line/70 transition hover:bg-raised">
+                      <td className="py-2.5"><Token mint={pos.mint} /></td>
+                      <td><Wallet wallet={pos.wallet} /></td>
+                      <td>
+                        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${
+                          pos.status === "open" ? "bg-plasma/15 text-plasma ring-plasma/30" : "bg-raised text-ink-dim ring-line"
+                        }`}>
+                          {pos.status}
+                        </span>
+                      </td>
+                      <td className="text-right font-mono tabular-nums">{usd(pos.spent_usd)}</td>
+                      <td className="text-right font-mono tabular-nums">{usd(pos.value_usd)}</td>
+                      <td className={`text-right font-mono font-semibold tabular-nums ${tone(pos.pnl_usd)}`}>{usd(pos.pnl_usd, true)}</td>
+                      <td className="pl-4 text-ink-dim">{time(pos.opened_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {!positions.length && (
+              <p className="text-sm text-ink-dim">No copied trades yet.</p>
+            )}
+    </>
+  );
+}
+
+/** The second book: buys only what another followed trader bought in the hour before. */
+function ConsensusBook({ c, maxLots, trade }: { c: Consensus; maxLots: number; trade: string }) {
+  const skipped = Object.entries(c.decisions).filter(([k]) => k !== "opened");
+  return (
+    <Section title="Multiple-traders book" count={c.positions.length}>
+      <p className="mb-3 text-sm text-ink-dim">
+        A second $500 paper book on the same traders. It buys only when a different followed
+        trader bought the same coin in the hour before, then sells when the trader it copied
+        sells. Started {time(c.started_at)}. {usd(trade)} a lot, up to {maxLots} at once.
+      </p>
+      <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat label="Equity" value={usd(c.equity_usd)} cls="text-ink" bar="from-accent/15 to-transparent" />
+        <Stat label="P/L" value={usd(c.pnl_usd, true)} cls={tone(c.pnl_usd)}
+              bar={Number(c.pnl_usd) < 0 ? "from-down/15 to-transparent" : "from-up/15 to-transparent"} />
+        <Stat label="Cash" value={usd(c.cash_usd)} cls="text-brand-bright" bar="from-brand-bright/15 to-transparent" />
+        <Stat label="Open lots" value={`${c.open_trades} / ${maxLots}`} cls="text-plasma" bar="from-plasma/15 to-transparent"
+              hint={`${c.decisions.opened ?? 0} copied${skipped.length ? " · " : ""}${skipped
+                .map(([k, n]) => `${n} ${OUTCOMES[k]?.label ?? k.replaceAll("_", " ")}`).join(" · ")}`} />
+      </div>
+      <Lots positions={c.positions} />
+    </Section>
+  );
+}
+
 const MEDALS = ["bg-warn text-canvas", "bg-ink-2 text-canvas", "bg-down text-canvas"];
 
 export function FomoLabPage() {
@@ -216,6 +299,7 @@ export function FomoLabPage() {
     refetchInterval: 30_000,
   });
   const open = data?.open_trades ?? 0;
+  const maxLots = data?.max_open_trades ?? 20;
 
   return (
     <div className="space-y-5 pb-12">
@@ -269,11 +353,11 @@ export function FomoLabPage() {
                   bar={Number(data.pnl_usd) < 0 ? "from-down/15 to-transparent" : "from-up/15 to-transparent"} />
             <Stat label="Cash" value={usd(data.cash_usd)} cls="text-brand-bright"
                   bar="from-brand-bright/15 to-transparent" hint={`${usd(data.trade_usd)} a buy`} />
-            <Stat label="Open lots" value={`${open} / ${MAX_LOTS}`} cls="text-plasma"
+            <Stat label="Open lots" value={`${open} / ${maxLots}`} cls="text-plasma"
                   bar="from-plasma/15 to-transparent"
                   hint={
                     <span className="mt-1 flex gap-1" aria-hidden>
-                      {Array.from({ length: MAX_LOTS }, (_, i) => (
+                      {Array.from({ length: maxLots }, (_, i) => (
                         <span key={i} className={`h-1.5 flex-1 rounded-full ${i < open ? "bg-plasma" : "bg-raised"}`} />
                       ))}
                     </span>
@@ -301,44 +385,10 @@ export function FomoLabPage() {
           </Panel>
 
           <Section title="Paper lots" count={data.positions?.length ?? 0}>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] text-left text-sm">
-                <thead className="text-[11px] uppercase tracking-wider text-ink-dim">
-                  <tr>
-                    <th className="py-2">Token</th>
-                    <th>Trader</th>
-                    <th>Status</th>
-                    <th className="text-right">Spent</th>
-                    <th className="text-right">Value / proceeds</th>
-                    <th className="text-right">P/L</th>
-                    <th className="pl-4">Opened</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.positions?.map((pos) => (
-                    <tr key={pos.id} className="border-t border-line/70 transition hover:bg-raised">
-                      <td className="py-2.5"><Token mint={pos.mint} /></td>
-                      <td><Wallet wallet={pos.wallet} /></td>
-                      <td>
-                        <span className={`rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${
-                          pos.status === "open" ? "bg-plasma/15 text-plasma ring-plasma/30" : "bg-raised text-ink-dim ring-line"
-                        }`}>
-                          {pos.status}
-                        </span>
-                      </td>
-                      <td className="text-right font-mono tabular-nums">{usd(pos.spent_usd)}</td>
-                      <td className="text-right font-mono tabular-nums">{usd(pos.value_usd)}</td>
-                      <td className={`text-right font-mono font-semibold tabular-nums ${tone(pos.pnl_usd)}`}>{usd(pos.pnl_usd, true)}</td>
-                      <td className="pl-4 text-ink-dim">{time(pos.opened_at)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {!data.positions?.length && (
-              <p className="text-sm text-ink-dim">No copied trades yet.</p>
-            )}
+            <Lots positions={data.positions ?? []} />
           </Section>
+
+          {data.consensus ? <ConsensusBook c={data.consensus} maxLots={maxLots} trade={data.trade_usd} /> : null}
 
           <Section title="Observed swaps and decisions" count={data.signals?.length ?? 0}>
             <div className="max-h-[520px] overflow-auto">

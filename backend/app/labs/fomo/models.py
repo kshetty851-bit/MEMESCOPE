@@ -30,6 +30,10 @@ class FomoBook(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     __tablename__ = "fomo_books"
 
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    #: "main" copies every fresh buy; "consensus" (2026-10-19) only a buy a
+    #: different ranked trader made in the hour before. Same roster and feed.
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="main",
+                                      server_default="main")
     cash_usd: Mapped[Decimal] = mapped_column(MONEY, nullable=False)
     roster_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     source_captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
