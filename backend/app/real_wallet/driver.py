@@ -100,19 +100,25 @@ OWNER_SKIP_AI_POOL_USD: tuple[int, int] = (50_000, 60_000)
 #: buys what the lab's $75 buys, so a $50 ticket is $66.67 on a quiet small
 #: coin, $50 on a small one and $16.67 at $150k+.
 LAB_RULES_STRATEGY = "G-Q50"
+#: User wallets that size exactly like Karthik Lab today (Karthik, 2026-10-19:
+#: "make user1 same as karthik lab"): its current table, $100 under $150k and
+#: $25 above, scaled so a ticket buys what the lab's $75 used to. Every other
+#: wallet keeps the 16 Oct table (`WALLET_TICKETS_BY_POOL`).
+LAB_SIZED_MEMBERS = frozenset({"USER1"})
 
 
 def lab_sized(strategy_id: str, ticket: Decimal, pool_usd: Decimal | float | None,
-              buys_before: int | None) -> Decimal:
+              buys_before: int | None, member: str | None = None) -> Decimal:
     """`ticket` scaled by Karthik Lab's stake for this coin, for the lab's
     strategy only. An unread pool keeps the plain ticket."""
     from app.labs.graduation import config as grad_config
 
     if strategy_id.upper() != LAB_RULES_STRATEGY or pool_usd is None:
         return ticket
-    table = grad_config.WALLET_TICKETS_BY_POOL
+    table = (grad_config.KARTHIK_TICKETS_BY_POOL if (member or "").upper() in LAB_SIZED_MEMBERS
+             else grad_config.WALLET_TICKETS_BY_POOL)
     stake = Decimal(str(grad_config.karthik_ticket(pool_usd, buys_before, table)))
-    base = Decimal(str(table[0][1]))
+    base = Decimal(str(grad_config.WALLET_TICKETS_BY_POOL[0][1]))
     return (ticket * stake / base).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
 
 
@@ -228,7 +234,8 @@ class RealWalletDriver:
         open_positions = await repo.open_positions_count(wallet)
         # Their own ticket, never above the platform's per-trade ceiling. No
         # growth ladder: the member chose a size, and it is the size.
-        ticket = min(await self._lab_ticket(strategy_id, account.ticket_usd, candidate, now),
+        ticket = min(await self._lab_ticket(strategy_id, account.ticket_usd, candidate, now,
+                                            member=account.member),
                      settings.REAL_WALLET_MAX_TRADE_USD)
         entry_usd = self._fundable(strategy_id, ticket, balance_lamports=balance_lamports,
                                    sol_price=price, open_positions=open_positions)
@@ -678,7 +685,7 @@ class RealWalletDriver:
                 or grad_config.unnamed_evening(row.symbol, now))
 
     async def _lab_ticket(self, strategy_id: str, ticket: Decimal, mint: str,
-                          now: datetime) -> Decimal:
+                          now: datetime, member: str | None = None) -> Decimal:
         """`lab_sized` for this coin, read now: its pool and DexScreener's
         5-minute buy count, the readings Karthik Lab sizes on. Never above the
         arm's own cap."""
@@ -693,7 +700,7 @@ class RealWalletDriver:
                 GradPostgradSample.txns_m5_buys.is_not(None),
                 GradPostgradSample.ts <= now,
             ).order_by(GradPostgradSample.ts.desc()).limit(1))
-        sized = lab_sized(strategy_id, ticket, await self._pool_usd(mint, now), buys)
+        sized = lab_sized(strategy_id, ticket, await self._pool_usd(mint, now), buys, member)
         cap = live_spec.max_ticket(strategy_id)
         return sized if cap is None else min(sized, cap)
 
