@@ -572,7 +572,7 @@ function GridPanel({ data, title, rows, value = false, from, testId = "size-grid
         <p className="mt-2 text-[11px] leading-relaxed text-ink-dim">
           Each cell is its own book from {day(from ?? data.started_at)} at that size, buying every
           coin on pools at or above that floor while its balance has money free. Every size follows the book’s
-          rules — the same skips, and stakes in the book’s proportions ($100 quiet / $75 / $25 at $50), so the
+          rules — the same skips, and stakes in the book’s proportions ($100 under $150k / $25 above, at $50 = $100), so the
           “now” row in the “this book” column is the book itself. Hover a cell for its trades, rugs and lowest
           balance. A look back, not a test.
           {w.floors.some((f) => f.replayed_below)
@@ -610,7 +610,7 @@ export function RuleBook({ data }: { data: KarthikBook }) {
       ? ["Several at once", `It buys every coin that passes while at least ${usd(data.ticket_usd)} of the balance is free, so it can hold several at once.`]
       : ["One at a time", "While it holds a coin, the next one is skipped. It can never be caught in two bad coins at once."],
     ["Trade size", data.tickets_by_pool?.length
-      ? `${sizeWords(data.tickets_by_pool)}, from a ${usd(data.capital_usd)} balance: more where the profit is (small pools), less where it is thin.${data.quiet_stake ? ` A quiet small-pool coin (at most ${data.quiet_stake[0]} buys in the 5 minutes before) gets $${data.quiet_stake[1]}: those earned about five times more.` : ""}`
+      ? `${sizeWords(data.tickets_by_pool)}, from a ${usd(data.capital_usd)} balance: more where the profit is (small pools), less where it is thin.${data.quiet_stake && data.quiet_stake[1] !== data.tickets_by_pool[0]?.[1] ? ` A quiet small-pool coin (at most ${data.quiet_stake[0]} buys in the 5 minutes before) gets $${data.quiet_stake[1]}: those earned about five times more.` : ""}`
       : `${usd(data.ticket_usd)} per trade, from a ${usd(data.capital_usd)} balance.`],
     ["Always sells", `Exactly ${data.hold_minutes} minutes after buying. No price targets, no stop-loss — the clock decides.`],
     ["The risk", `If a coin's creator drains the pool (a “rug”), that trade loses almost all of it.${rugEvery ? ` So far about 1 in ${rugEvery} trades.` : ""}`],

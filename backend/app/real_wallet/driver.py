@@ -110,8 +110,9 @@ def lab_sized(strategy_id: str, ticket: Decimal, pool_usd: Decimal | float | Non
 
     if strategy_id.upper() != LAB_RULES_STRATEGY or pool_usd is None:
         return ticket
-    stake = Decimal(str(grad_config.karthik_ticket(pool_usd, buys_before)))
-    base = Decimal(str(grad_config.KARTHIK_TICKETS_BY_POOL[0][1]))
+    table = grad_config.WALLET_TICKETS_BY_POOL
+    stake = Decimal(str(grad_config.karthik_ticket(pool_usd, buys_before, table)))
+    base = Decimal(str(table[0][1]))
     return (ticket * stake / base).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
 
 

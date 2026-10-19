@@ -27,4 +27,14 @@ describe("Karthik's Lab rule book", () => {
     expect(screen.getByText(/Exactly 5 minutes after buying/)).toBeInTheDocument();
     expect(screen.getByText(/about 1 in 196 trades/)).toBeInTheDocument();
   });
+
+  it("drops the quiet-coin line once every small-pool coin gets the same $100", () => {
+    const book = {
+      tickets_by_pool: [[150000, 100], [null, 25]], quiet_stake: [13, 100], capital_usd: "300",
+      hold_minutes: 5, rugs: 14, trades: 897,
+    } as unknown as KarthikBook;
+    render(<RuleBook data={book} />);
+    expect(screen.getByText(/\$100 a trade in pools under \$150k, \$25 above/)).toBeInTheDocument();
+    expect(screen.queryByText(/quiet small-pool coin/)).not.toBeInTheDocument();
+  });
 });

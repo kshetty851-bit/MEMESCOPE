@@ -1170,7 +1170,15 @@ def unnamed_evening(symbol: str | None, at: datetime) -> bool:
         return False
     return hours[0] <= (at + timedelta(hours=4)).hour < hours[1]
 #: (pool below this, stake); the last row's limit is None (every larger pool).
-KARTHIK_TICKETS_BY_POOL: tuple[tuple[int | None, float], ...] = ((150_000, 75.0), (None, 25.0))
+#: Karthik, 2026-10-19 ("apply $100 under 150k to karthik lab since day 1"):
+#: every coin under $150k at $100, not $75 for the busier ones. Replayed from
+#: day 1: +$1,595 -> +$1,725 on $300, same 897 trades and 14 rugs.
+KARTHIK_TICKETS_BY_POOL: tuple[tuple[int | None, float], ...] = (
+    (150_000, 100.0), (None, 25.0))
+#: The real wallets keep the 16 Oct table (Karthik approved the change for the
+#: lab only): `real_wallet.driver.lab_sized` scales a ticket by it, $75 = 1x.
+WALLET_TICKETS_BY_POOL: tuple[tuple[int | None, float], ...] = (
+    (150_000, 75.0), (None, 25.0))
 
 
 #: Karthik, 2026-10-16 ("yes apply to karthik lab since day 1"): in the
@@ -1182,18 +1190,21 @@ KARTHIK_TICKETS_BY_POOL: tuple[tuple[int | None, float], ...] = ((150_000, 75.0)
 KARTHIK_QUIET_STAKE: tuple[int, float] = (13, 100.0)
 
 
-def karthik_ticket(pool_usd: Any, buys_before: int | None = None) -> float:
+def karthik_ticket(pool_usd: Any, buys_before: int | None = None,
+                   by_pool: tuple[tuple[int | None, float], ...] | None = None) -> float:
     """Karthik's book's stake for a coin with this pool (and, in the first
-    band, this many buys before the buy; unknown is not quiet)."""
+    band, this many buys before the buy; unknown is not quiet). `by_pool`
+    swaps in another table (the real wallets' own)."""
+    table = by_pool or KARTHIK_TICKETS_BY_POOL
     pool = float(pool_usd or 0)
-    first_limit = KARTHIK_TICKETS_BY_POOL[0][0]
+    first_limit = table[0][0]
     if (buys_before is not None and buys_before <= KARTHIK_QUIET_STAKE[0]
             and first_limit is not None and pool < first_limit):
         return KARTHIK_QUIET_STAKE[1]
-    for limit, stake in KARTHIK_TICKETS_BY_POOL:
+    for limit, stake in table:
         if limit is None or pool < limit:
             return stake
-    return KARTHIK_TICKETS_BY_POOL[-1][1]
+    return table[-1][1]
 
 #: Never buy a coin more than this long after it graduated (Karthik,
 #: 2026-09-27, after EVO). EVO was bought 186s after graduating, the slowest
