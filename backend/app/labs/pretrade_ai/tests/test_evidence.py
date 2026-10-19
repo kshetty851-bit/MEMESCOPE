@@ -33,19 +33,17 @@ def test_history_requires_creation_and_counts_events():
  with pytest.raises(ValueError): history_features(truncated,POOL,MINT,AT)
 def test_no_sells_does_not_invent_ratio():
  assert 'buy_sell_notional_ratio_30s' not in history_features(history()[:2],POOL,MINT,AT)
-def test_holder_coverage(monkeypatch):
- e=Evidence(); monkeypatch.setattr(e,'rpc',lambda *a:{'token_accounts':[{'address':'a','owner':'o','amount':90}]})
- with pytest.raises(ValueError): e.holders(MINT,100)
- assert e.holders(MINT,90)['top1_holder_share_pct'].value==100
 def test_adapter_can_buy_only_with_complete_evidence(monkeypatch,tmp_path):
  e=Evidence()
  monkeypatch.setattr(e,'authorities',lambda mint:({k:observation(True,'test SPL') for k in ['mint_authority_safe','freeze_authority_safe']},6,100))
- monkeypatch.setattr(e,'holders',lambda *a:{k:observation(v,'test holders') for k,v in [('top1_holder_share_pct',5),('top10_holder_share_pct',20)]})
  monkeypatch.setattr(e,'history',lambda *a:history_features(history(),POOL,MINT,AT))
  def quote(mi,mo,amount):
   return {'outAmount':'10000000' if mo==MINT else '9900000','priceImpactPct':'0.001','routePlan':[{'swapInfo':{'ammKey':POOL}}]}
  monkeypatch.setattr(e,'quote',quote)
- row={'mint':MINT,'migrated_at':AT,'symbol':'TEST','ts':AT,'pair_address':POOL,'price_usd':1,'liquidity_usd':60000}
+ # A known creator adds the identity facts a live coin carries; without holder
+ # shares (not on the public node) that is still 14 of 21, enough to judge.
+ row={'mint':MINT,'migrated_at':AT,'symbol':'TEST','ts':AT,'pair_address':POOL,'price_usd':1,'liquidity_usd':60000,
+      'creator':'C'*43,'token_seen_at':AT}
  snapshot=e.enrich(map_row(row,AT)); assert len(snapshot.opportunity.features)==14
  book=PaperBook(str(tmp_path/'test.db')); book.process(snapshot,datetime.now(timezone.utc))
  assert book.status(datetime.now(timezone.utc))['cash_usd']==90
@@ -61,6 +59,7 @@ def test_token2022_extensions_fail_closed(monkeypatch):
  monkeypatch.setattr(e,'rpc',lambda *a:{'value':{'owner':TOKEN_2022,'data':{'parsed':{'info':info}}}})
  assert e.authorities(MINT)[0]['mint_authority_safe'].value is True
  info['extensions'].append({'extension':'transferHook'})
+ e.authority_cache.clear()      # a mint's extensions are fixed at creation; the memory is per mint
  with pytest.raises(ValueError,match='extension'): e.authorities(MINT)
 
 def test_sell_uses_bid_not_buy_price(tmp_path):
@@ -133,3 +132,77 @@ def test_identity_from_creator_and_prior_pool_collapse():
  assert f['creator_prior_confirmed_rug_count_30d'].value==0 and 'malicious_link_recency_days' not in f
  assert identity_of({'creator':None,'token_seen_at':AT},AT,{})==(identity_of({},AT,{})[0],{})
  assert identity_of({'creator':'C1','token_seen_at':AT+timedelta(seconds=1)},AT,{})[1]=={}
+
+
+def test_pool_count_from_one_public_signatures_read(monkeypatch):
+ e=Evidence(); calls=[]
+ def rpc(method,params):
+  calls.append(method)
+  return [{'signature':'a','err':None},{'signature':'b','err':{'x':1}},{'signature':'c','err':None}]
+ monkeypatch.setattr(e,'rpc',rpc)
+ assert e.history(POOL,MINT)['pool_lifetime_swaps'].value==2      # failed transactions do not count
+ assert calls==['getSignaturesForAddress']
+ monkeypatch.setattr(e,'rpc',lambda *a:[{'signature':str(i),'err':None} for i in range(1000)])
+ with pytest.raises(ValueError,match='quiet-pool limit'): e.history(POOL,MINT)   # a full page proves nothing
+
+def test_public_node_calls_are_budgeted(monkeypatch):
+ from memescope_pretrade_ai import evidence
+ import io, json as j
+ monkeypatch.setattr(evidence,'RPC_PER_MINUTE',2)
+ monkeypatch.setattr(evidence,'urlopen',lambda *a,**k:io.BytesIO(j.dumps({'result':1}).encode()))
+ e=Evidence(); e.rpc_url='http://node'
+ assert e.rpc('getSlot',[])==1 and e.rpc('getSlot',[])==1
+ with pytest.raises(ValueError,match='budget'): e.rpc('getSlot',[])
+
+def test_chain_facts_are_reused_for_a_short_while(monkeypatch):
+ e=Evidence(); reads=[]
+ def auth(mint):
+  reads.append(mint)
+  return ({k:observation(True,'test SPL') for k in ['mint_authority_safe','freeze_authority_safe']},6,100)
+ monkeypatch.setattr(e,'authorities',auth)
+ monkeypatch.setattr(e,'history',lambda *a:{})
+ monkeypatch.setattr(e,'quote',lambda *a:(_ for _ in ()).throw(ValueError('no quotes in this test')))
+ class Op:
+  mint, pool, features, metadata, baseline_eligible = MINT, POOL, {}, {}, True
+  def model_copy(self, update): return self
+ from memescope_pretrade_ai.paper import Snapshot
+ s=Snapshot(Op(),None,AT,'T')
+ e.enrich(s); e.enrich(s)
+ assert reads==[MINT]                                   # second pass reused the first read
+
+
+def test_recent_trades_from_the_public_node_read_each_transaction_once(monkeypatch):
+ e=Evidence(); calls=[]
+ txs=history()[1:]                                    # a buy (200) and a sell (100) on POOL
+ t=int(AT.timestamp())
+ sigs=[{'signature':'s','err':None,'blockTime':t},{'signature':'b','err':None,'blockTime':t},
+       {'signature':'old','err':None,'blockTime':t-120}]
+ def rpc(method,params):
+  calls.append(method)
+  return sigs if method=='getSignaturesForAddress' else {'b':txs[0],'s':txs[1]}[params[0]]
+ monkeypatch.setattr(e,'rpc',rpc)
+ f=e.history(POOL,MINT)
+ assert f['pool_lifetime_swaps'].value==3
+ assert f['unique_buyers_30s'].value==1 and f['buy_sell_notional_ratio_30s'].value==2
+ assert calls.count('getTransaction')==2              # only the last 30 seconds
+ e.history(POOL,MINT)
+ assert calls.count('getTransaction')==2              # remembered: not read again
+
+def test_a_busy_window_leaves_the_recent_facts_unknown(monkeypatch):
+ from memescope_pretrade_ai import evidence
+ e=Evidence(); t=int(AT.timestamp())
+ sigs=[{'signature':str(i),'err':None,'blockTime':t} for i in range(evidence.RECENT_READS+1)]
+ monkeypatch.setattr(e,'rpc',lambda m,p: sigs if m=='getSignaturesForAddress' else 1/0)
+ f=e.history(POOL,MINT)
+ assert 'unique_buyers_30s' not in f and f['pool_lifetime_swaps'].value==evidence.RECENT_READS+1
+
+def test_coins_that_cannot_be_bought_cost_no_chain_reads(monkeypatch):
+ e=Evidence(); reads=[]
+ monkeypatch.setattr(e,'authorities',lambda mint: reads.append(mint))
+ monkeypatch.setattr(e,'history',lambda *a: reads.append('history'))
+ class Op:
+  mint, pool, features, metadata, baseline_eligible = MINT, POOL, {}, {}, False
+  def model_copy(self, update): return self
+ from memescope_pretrade_ai.paper import Snapshot
+ e.enrich(Snapshot(Op(),None,AT,'T'))
+ assert reads==[]

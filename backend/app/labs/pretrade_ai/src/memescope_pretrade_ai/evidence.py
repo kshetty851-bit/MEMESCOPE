@@ -28,6 +28,16 @@ USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'
 # eating the allowance live buys and sells need. A per-minute budget, and quotes
 # only for a held coin or a candidate whose chain evidence is already complete.
 JUPITER_PER_MINUTE = int(os.environ.get('PRETRADE_JUPITER_PER_MINUTE', '6'))
+# Chain reads go to the free public Solana node (Karthik, 2026-10-19), not
+# Helius: its free credits are kept for the lab's open-buy check. That node
+# also serves the graduation lab's quiet-pool count from the same server, so
+# this lab spends at most RPC_PER_MINUTE calls and reuses a coin's chain facts
+# for CHAIN_TTL_S instead of re-reading them on every pass.
+RPC_PER_MINUTE = int(os.environ.get('PRETRADE_RPC_PER_MINUTE', '60'))
+CHAIN_TTL_S = float(os.environ.get('PRETRADE_CHAIN_TTL_S', '20'))
+AUTHORITY_TTL_S = 600
+SIGNATURE_PAGE = 1000
+RECENT_READS = 20      # trades read for the 30-second window; more and it stays unknown
 NON_TRADE_INSTRUCTIONS = {'2d3da597680031bd': 'admin_cto_pool', 'd10b7357d5177ccc': 'admin_update_token_incentives', '694406af000723a2': 'boost_buy_and_burn', 'c2ab1c46684d5b2f': 'buy_exact_quote_in_v2', 'b817ee6167c5d33d': 'buy_v2', '253a237ebe35e4c5': 'claim_cashback', '1004471ccc01281b': 'claim_token_incentives', 'f945a4da9667548a': 'close_user_volume_accumulator', 'a039592ab58b2b42': 'collect_coin_creator_fee', 'c9cff3724b6f2fbd': 'create_config', 'f223c68952e1f2b6': 'deposit', 'b9adbb5ad80feee9': 'disable', 'ea66c2cb96483ee5': 'extend_account', '8ce9215e845ac28f': 'init_boost', '5e06ca73ff60e8b7': 'init_user_volume_accumulator', 'd0089f044aaf103a': 'migrate_pool_coin_creator', '2b644913e9f66f94': 'multi_hop_swap', '5df6823ce7e940b2': 'sell_v2', 'e3954c2a8227eacd': 'set_boost_authority', 'd295802dbc3a4eaf': 'set_coin_creator', '6faca2e87259d58e': 'set_reserved_fee_recipients', '20f6bf3408c949ba': 'sweep_creator_fee', '0830be07b644b7e5': 'sweep_protocol_fee', '561fc057a3574fee': 'sync_user_volume_accumulator', '75a1a04adf897663': 'toggle_boost', '7367e0ffbd5956c3': 'toggle_cashback_enabled', '01096fd0641fffa3': 'toggle_mayhem_mode', '8b348655e4e56cf1': 'transfer_creator_fees_to_pump', '01214eb921432c5c': 'transfer_creator_fees_to_pump_v2', 'a1b028d53cb8b3e4': 'update_admin', 'fbe0ab92a01a71e9': 'update_buyback_config', '3dafa0f9424288af': 'update_creator_fee_config', '68b867f258976b14': 'update_fee_config', 'b712469c946da122': 'withdraw'}
 ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 
@@ -107,7 +117,9 @@ def events(tx):
             result.append(base64.b64decode(line[14:], validate=True))
     return result
 
-def history_features(transactions, pool, mint, at):
+def pool_trades(transactions, pool, mint, at):
+    """(created, trades) from verified PumpSwap events; a trade is
+    (ts, is_buy, user, quote_amount)."""
     created, trades = False, []
     buy = hashlib.sha256(b'event:BuyEvent').digest()[:8]
     sell = hashlib.sha256(b'event:SellEvent').digest()[:8]
@@ -123,16 +135,25 @@ def history_features(transactions, pool, mint, at):
                     ts = struct.unpack_from('<q', data, 8)[0]
                     if ts > at.timestamp(): raise ValueError('future trade')
                     trades.append((ts, data[:8] == buy, b58(data[152:184]), struct.unpack_from('<Q',data,64)[0]))
+    return created, trades
+
+def recent_features(trades, at, source):
+    recent = [t for t in trades if 0 <= at.timestamp()-t[0] <= 30]
+    result = {'unique_buyers_30s':len({t[2] for t in recent if t[1]})}
+    bought = sum(t[3] for t in recent if t[1])
+    sold = sum(t[3] for t in recent if not t[1])
+    if sold: result['buy_sell_notional_ratio_30s'] = bought/sold
+    return {k:observation(v, source, at) for k,v in result.items()}
+
+def history_features(transactions, pool, mint, at):
+    created, trades = pool_trades(transactions, pool, mint, at)
     if not created:
         if len(trades)>99:
             raise ValueError(f'quiet-pool limit exceeded: at least {len(trades)} verified swaps; older history not fetched')
         raise ValueError('pool creation absent from bounded history')
-    recent = [t for t in trades if 0 <= at.timestamp()-t[0] <= 30]
-    result = {'pool_lifetime_swaps': len(trades), 'unique_buyers_30s':len({t[2] for t in recent if t[1]})}
-    bought = sum(t[3] for t in recent if t[1])
-    sold = sum(t[3] for t in recent if not t[1])
-    if sold: result['buy_sell_notional_ratio_30s'] = bought/sold
-    return {k:observation(v, 'confirmed PumpSwap events through pool creation',at) for k,v in result.items()}
+    result = {'pool_lifetime_swaps': observation(len(trades), 'confirmed PumpSwap events through pool creation', at)}
+    result.update(recent_features(trades, at, 'confirmed PumpSwap events through pool creation'))
+    return result
 
 class Evidence:
     def __init__(self):
@@ -140,6 +161,10 @@ class Evidence:
         self.key = os.environ.get('PRETRADE_QUOTE_KEY')
         self.cooldowns = {}
         self.jupiter_calls = deque()
+        self.rpc_calls = deque()
+        self.chain_cache = {}
+        self.authority_cache = {}
+        self.tx_cache = {}
 
     def feed_error(self):
         active = [reason for until,reason in self.cooldowns.values() if until>time.monotonic()]
@@ -162,14 +187,31 @@ class Evidence:
                 raise ValueError(reason) from None
             raise ValueError(f'{provider} HTTP {error.code}') from None
 
+    def rpc_left(self):
+        cutoff = time.monotonic() - 60
+        while self.rpc_calls and self.rpc_calls[0] < cutoff:
+            self.rpc_calls.popleft()
+        return RPC_PER_MINUTE - len(self.rpc_calls)
+
     def rpc(self, method, params):
         if not self.rpc_url: raise ValueError('read-only RPC not configured')
+        if self.rpc_left() <= 0: raise ValueError('RPC budget for this minute used; waiting')
+        self.rpc_calls.append(time.monotonic())
         request = Request(self.rpc_url, data=json.dumps({'jsonrpc':'2.0','id':1,'method':method,'params':params}).encode(),headers={'Content-Type':'application/json'})
-        value = self.read_json('Helius',request,8)
+        value = self.read_json('RPC',request,8)
         if 'error' in value: raise ValueError('RPC rejected read')
         return value['result']
 
     def authorities(self, mint):
+        hit = self.authority_cache.get(mint)
+        if hit and time.monotonic() - hit[0] < AUTHORITY_TTL_S:
+            return hit[1]
+        value = self._authorities(mint)
+        if len(self.authority_cache) > 2000: self.authority_cache.clear()
+        self.authority_cache[mint] = (time.monotonic(), value)
+        return value
+
+    def _authorities(self, mint):
         account = self.rpc('getAccountInfo',[mint,{'encoding':'jsonParsed','commitment':'confirmed'}])['value']
         # Extensions require their own policy; do not mark Token-2022 safe by omission.
         if not account or account['owner'] not in (TOKEN,TOKEN_2022): raise ValueError('unsupported token program')
@@ -181,43 +223,32 @@ class Evidence:
                 'freeze_authority_safe':observation(info['freezeAuthority'] is None,'confirmed SPL mint account')}, int(info['decimals']), int(info['supply'])
 
     def history(self, pool, mint):
-        options = {'transactionDetails':'full','encoding':'jsonParsed','maxSupportedTransactionVersion':1,'sortOrder':'desc','limit':100,'filters':{'status':'succeeded'},'commitment':'confirmed'}
-        transactions = []
-        for _ in range(3):
-            result = self.rpc('getTransactionsForAddress',[pool,options])
-            txs = result.get('data')
-            if not isinstance(txs,list): raise ValueError('unexpected history format')
-            transactions.extend(txs)
-            try:
-                return history_features(transactions,pool,mint,now())
-            except ValueError as error:
-                if str(error) != 'pool creation absent from bounded history': raise
-            token = result.get('paginationToken')
-            if not token: break
-            options = {**options,'paginationToken':token}
-        raise ValueError('pool creation absent from bounded history')
+        """The pool's lifetime transaction count from ONE signatures read.
 
-    def holders(self, mint, supply):
-        owners, cursor, seen = {}, None, set()
-        for _ in range(3):
-            params = {'mint':mint,'limit':1000,'displayOptions':{'showZeroBalance':False}}
-            if cursor: params['cursor'] = cursor
-            result = self.rpc('getTokenAccounts',params)
-            accounts = result['token_accounts']
-            for account in accounts:
-                if account['address'] in seen: raise ValueError('duplicate holder page')
-                seen.add(account['address'])
-                owner = account['owner']
-                owners[owner] = owners.get(owner,0)+int(account['amount'])
-            cursor = result.get('cursor')
-            if not cursor or len(accounts)<1000: break
-        else: raise ValueError('holder pagination incomplete')
-        # Includes vault owners, conservatively. Refuse partial/stale indexed supply.
-        total = sum(owners.values())
-        if supply <= 0 or total != supply: raise ValueError('holder supply coverage incomplete')
-        amounts = sorted(owners.values(),reverse=True)
-        return {'top1_holder_share_pct':observation(100*amounts[0]/supply,'complete indexed owner balances, including vaults'),
-                'top10_holder_share_pct':observation(100*sum(amounts[:10])/supply,'complete indexed owner balances, including vaults')}
+        A page shorter than SIGNATURE_PAGE reaches the pool's first transaction,
+        so the count is complete. It counts every succeeded transaction that
+        touched the pool, set-up included, so it can only overstate the swaps:
+        the cautious side for a quiet-pool rule. A full page proves nothing.
+        """
+        sigs = self.rpc('getSignaturesForAddress',[pool,{'limit':SIGNATURE_PAGE,'commitment':'confirmed'}])
+        if not isinstance(sigs,list): raise ValueError('unexpected signatures format')
+        if len(sigs) >= SIGNATURE_PAGE:
+            raise ValueError(f'quiet-pool limit exceeded: at least {SIGNATURE_PAGE} transactions; older history not fetched')
+        at = now()
+        ok = [x for x in sigs if x.get('err') is None]
+        result = {'pool_lifetime_swaps':observation(len(ok),'succeeded pool transactions through creation (public RPC signatures; an upper bound on swaps)',at)}
+        window = [x for x in ok if (x.get('blockTime') or 0) >= at.timestamp()-30]
+        if len(window) <= RECENT_READS:
+            # A transaction never changes: each is read once, then remembered.
+            txs = []
+            for x in window:
+                if x['signature'] not in self.tx_cache:
+                    if len(self.tx_cache) > 5000: self.tx_cache.clear()
+                    self.tx_cache[x['signature']] = self.rpc('getTransaction',[x['signature'],{'encoding':'jsonParsed','maxSupportedTransactionVersion':1,'commitment':'confirmed'}])
+                if self.tx_cache[x['signature']]: txs.append(self.tx_cache[x['signature']])
+            _, trades = pool_trades(txs, pool, mint, at)
+            result.update(recent_features(trades, at, 'verified PumpSwap events of the last 30 seconds (public RPC)'))
+        return result
 
     def jupiter_left(self):
         cutoff = time.monotonic() - 60
@@ -246,15 +277,30 @@ class Evidence:
         features = dict(op.features)
         errors = []
         decimals = None
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            history = executor.submit(self.history,op.pool,op.mint)
-            try:
-                authority, decimals, supply = self.authorities(op.mint)
-                features.update(authority)
-                features.update(self.holders(op.mint,supply))
-            except Exception as error: errors.append('mint/holders: '+(str(error) if isinstance(error,ValueError) else type(error).__name__))
-            try: features.update(history.result())
-            except Exception as error: errors.append('pool history: '+(str(error) if isinstance(error,ValueError) else type(error).__name__))
+        cached = self.chain_cache.get(op.mint)
+        if not held and not op.baseline_eligible:
+            # Never buyable: no chain reads spent on it (the quotes below skip it too).
+            cached = (time.monotonic(), {}, None, ['not baseline eligible: no chain reads'])
+        if cached and time.monotonic() - cached[0] < CHAIN_TTL_S:
+            _, chain, decimals, chain_errors = cached
+        else:
+            chain, chain_errors = {}, []
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                history = executor.submit(self.history,op.pool,op.mint)
+                try:
+                    # No holder shares: the public node refuses getTokenLargestAccounts
+                    # outright ("too many requests for a specific RPC call", 19 Oct)
+                    # and they are not a required feature, so they stay unknown.
+                    authority, decimals, _supply = self.authorities(op.mint)
+                    chain.update(authority)
+                except Exception as error: chain_errors.append('mint: '+(str(error) if isinstance(error,ValueError) else type(error).__name__))
+                try: chain.update(history.result())
+                except Exception as error: chain_errors.append('pool history: '+(str(error) if isinstance(error,ValueError) else type(error).__name__))
+            if len(self.chain_cache) > 2000:
+                self.chain_cache.clear()
+            self.chain_cache[op.mint] = (time.monotonic(), chain, decimals, chain_errors)
+        features.update(chain)
+        errors.extend(chain_errors)
         price, sell_price, quoted_at = None, None, snapshot.quote_at
         # Last operation: both matched quotes must still be younger than five seconds.
         try:
