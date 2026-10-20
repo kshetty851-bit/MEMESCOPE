@@ -25,6 +25,7 @@ export interface FamilyMonths {
   /** As SOL, valued at SOL's price now (2026-10-20). */
   pnl_sol?: number;
   balance_sol?: number;
+  sol_usd_now?: number;
   worth_usd_now?: number;
   pnl_usd_now?: number;
 }

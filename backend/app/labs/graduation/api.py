@@ -1645,7 +1645,7 @@ def _family_in_sol(rows: Sequence[Any], months: dict[str, dict[str, Any]],
     pnl_sol = sum(m["pnl_sol"] for m in months.values())
     worth = (start_sol + pnl_sol) * sol_now
     return {"pnl_sol": round(pnl_sol, 4), "balance_sol": round(start_sol + pnl_sol, 4),
-            "worth_usd_now": round(worth, 2),
+            "sol_usd_now": round(sol_now, 2), "worth_usd_now": round(worth, 2),
             "pnl_usd_now": round(worth - FAMILY_START * FAMILY_WALLETS, 2)}
 
 

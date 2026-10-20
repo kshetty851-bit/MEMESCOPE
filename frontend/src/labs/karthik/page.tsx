@@ -859,15 +859,18 @@ function short(value: string | number): string {
 export function FamilyBox({ f }: { f: FamilyMonths }) {
   const tone = (v: number) => (v > 0 ? "text-up" : v < 0 ? "text-down" : "text-ink-dim");
   const signed = (v: number) => `${v >= 0 ? "+" : "-"}${usd(Math.abs(v))}`;
+  const atSol = (m: FamilyMonths["months"][number]) =>
+    m.pnl_sol != null && f.sol_usd_now != null ? m.pnl_sol * f.sol_usd_now : m.pnl_usd;
   return (
     <div className="mt-2 rounded-lg border border-line bg-surface px-3 py-2 text-right" data-testid="family-box">
       <div className="text-[11px] uppercase tracking-wider text-ink-dim">
         If {f.wallets} user wallets × {usd(f.start_usd)} had traded it
       </div>
-      <div className={`text-lg font-semibold tabular-nums ${tone(f.pnl_usd)}`}>{signed(f.pnl_usd)}</div>
-      {f.pnl_sol != null && f.pnl_usd_now != null ? (
+      {/* At SOL's price now (2026-10-20), the fixed-dollar figure underneath. */}
+      <div className={`text-lg font-semibold tabular-nums ${tone(f.pnl_usd_now ?? f.pnl_usd)}`}>{signed(f.pnl_usd_now ?? f.pnl_usd)}</div>
+      {f.pnl_sol != null && f.sol_usd_now != null ? (
         <div className="text-[11px] tabular-nums text-ink-dim" data-testid="family-sol">
-          kept in SOL: {sol(f.pnl_sol)} · worth <span className={tone(f.pnl_usd_now)}>{signed(f.pnl_usd_now)}</span> today
+          {sol(f.pnl_sol)} at SOL {usd(f.sol_usd_now)} · fixed-dollar {signed(f.pnl_usd)}
         </div>
       ) : null}
       <table className="ml-auto text-[12px] tabular-nums">
@@ -877,7 +880,7 @@ export function FamilyBox({ f }: { f: FamilyMonths }) {
               <td className="pr-3 text-left text-ink-dim">
                 {new Date(`${m.month}-01T00:00:00`).toLocaleDateString("en-GB", { month: "short", year: "numeric" })}
               </td>
-              <td className={`text-right font-medium ${tone(m.pnl_usd)}`}>{signed(m.pnl_usd)}</td>
+              <td className={`text-right font-medium ${tone(atSol(m))}`}>{signed(atSol(m))}</td>
               {m.pnl_sol != null ? <td className="pl-3 text-right text-ink-2">{sol(m.pnl_sol)}</td> : null}
             </tr>
           ))}
@@ -1042,7 +1045,14 @@ export function KarthikLabPage() {
     );
   }
 
-  const up = Number(data.pnl_usd) >= 0;
+  // Profits move with SOL (Karthik, 2026-10-20: "the profit shud flactuate as
+  // per Sol value"): each figure is its SOL at SOL's price now. The fixed-dollar
+  // figure stays in the hint.
+  const s = data.in_sol;
+  const pnlNow = s ? s.pnl_usd_now : Number(data.pnl_usd);
+  const up = pnlNow >= 0;
+  const solDays = s ? data.days.map((d) => d.pnl_sol != null
+    ? { ...d, pnl_usd: String(d.pnl_sol * s.sol_usd_now) } : d) : data.days;
   const days = Math.max(
     0,
     Math.ceil(
@@ -1127,7 +1137,7 @@ export function KarthikLabPage() {
         <div className="mb-1 text-[11px] uppercase tracking-wider text-ink-dim">
           Every 24 hours · profit that day
         </div>
-        <Days days={data.days} judgeAt={data.judge_at} trades={data.trades_list} />
+        <Days days={solDays} judgeAt={data.judge_at} trades={data.trades_list} />
       </div>
       {data.start_dates?.length ? (
         <StartDates book="$50k book" lines={data.start_dates} capital={Number(data.capital_usd)} ticket={Number(data.ticket_usd)}
@@ -1136,19 +1146,13 @@ export function KarthikLabPage() {
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
         <Figure
-          label="Balance"
-          value={`${usd(data.balance_usd)}  ${pctOfCapital(data.pnl_usd, data.capital_usd)}`}
+          label={s ? "Balance · at today's SOL price" : "Balance"}
+          value={`${usd(s ? s.worth_usd_now : data.balance_usd)}  ${pctOfCapital(pnlNow, data.capital_usd)}`}
           tone={up ? "up" : "down"}
-          hint={`${up ? "+" : ""}${usd(data.pnl_usd)} on ${usd(data.capital_usd)}`}
+          hint={s
+            ? `${up ? "+" : "−"}${usd(Math.abs(pnlNow))} on ${usd(data.capital_usd)} · ${sol(s.balance_sol, false)} (${sol(s.pnl_sol)}) at SOL ${usd(s.sol_usd_now)}, was ${usd(s.sol_usd_at_start)} · fixed-dollar ${usd(data.pnl_usd)}`
+            : `${up ? "+" : ""}${usd(data.pnl_usd)} on ${usd(data.capital_usd)}`}
         />
-        {data.in_sol ? (
-          <Figure
-            label="Kept in SOL · at today's price"
-            value={`${sol(data.in_sol.balance_sol, false)}  ${usd(data.in_sol.worth_usd_now)}`}
-            tone={data.in_sol.pnl_usd_now >= 0 ? "up" : "down"}
-            hint={`${sol(data.in_sol.pnl_sol)} profit, worth ${data.in_sol.pnl_usd_now >= 0 ? "+" : "−"}${usd(Math.abs(data.in_sol.pnl_usd_now))} at SOL ${usd(data.in_sol.sol_usd_now)} (was ${usd(data.in_sol.sol_usd_at_start)} at the start)`}
-          />
-        ) : null}
         <Figure
           label="Lowest it has been"
           value={`${usd(data.lowest_usd)}  ${pctOfCapital(
