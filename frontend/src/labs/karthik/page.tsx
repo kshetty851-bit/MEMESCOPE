@@ -867,7 +867,7 @@ export function PumpfunMoneyTable({ days, graduationSol }: {
               <th className="px-2 text-right font-normal">Graduated</th>
               <th className="px-2 text-right font-normal">Paid into graduated coins</th>
               <th className="px-2 text-right font-normal">In new pools at 2 min</th>
-              <th className="pl-2 text-right font-normal">$75k+ pools</th>
+              <th className="pl-2 text-right font-normal">$50k+ pools</th>
             </tr>
           </thead>
           <tbody>
@@ -883,7 +883,7 @@ export function PumpfunMoneyTable({ days, graduationSol }: {
                 <td className="px-2 text-right text-ink-2">{d.graduations.toLocaleString()}</td>
                 <td className="px-2 text-right text-ink">{d.into_curves_usd ? short(d.into_curves_usd) : "—"}</td>
                 <td className="px-2 text-right text-ink">{short(d.pools_usd)}</td>
-                <td className="pl-2 text-right text-accent">{d.pools_75k}</td>
+                <td className="pl-2 text-right text-accent">{d.pools_50k}</td>
               </tr>
             ))}
           </tbody>
