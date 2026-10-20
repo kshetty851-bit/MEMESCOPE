@@ -77,6 +77,11 @@ function useElapsed(startIso: string | undefined): string {
   return formatElapsed(now - new Date(startIso).getTime());
 }
 
+/** "+1.23 SOL" (Karthik, 2026-10-20: profits "as per the SOL value"). */
+export function sol(v: number, signed = true): string {
+  return `${signed && v >= 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(Math.abs(v) >= 100 ? 1 : 2)} SOL`;
+}
+
 function usd(value: string | number | null | undefined): string {
   const n = Number(value);
   if (!Number.isFinite(n)) return "—";
@@ -335,6 +340,9 @@ export function Days({ days, judgeAt, trades, real = true }: {
               {pnl >= 0 ? "+" : ""}
               {usd(d.pnl_usd)}
             </div>
+            {d.pnl_sol != null ? (
+              <div className="text-[11px] tabular-nums text-ink-2">{sol(d.pnl_sol)}</div>
+            ) : null}
             <div className="text-[11px] tabular-nums text-ink-dim">
               {d.trades} trades
               {d.rugs != null ? (
@@ -857,6 +865,11 @@ export function FamilyBox({ f }: { f: FamilyMonths }) {
         If {f.wallets} user wallets × {usd(f.start_usd)} had traded it
       </div>
       <div className={`text-lg font-semibold tabular-nums ${tone(f.pnl_usd)}`}>{signed(f.pnl_usd)}</div>
+      {f.pnl_sol != null && f.pnl_usd_now != null ? (
+        <div className="text-[11px] tabular-nums text-ink-dim" data-testid="family-sol">
+          kept in SOL: {sol(f.pnl_sol)} · worth <span className={tone(f.pnl_usd_now)}>{signed(f.pnl_usd_now)}</span> today
+        </div>
+      ) : null}
       <table className="ml-auto text-[12px] tabular-nums">
         <tbody>
           {f.months.map((m) => (
@@ -865,6 +878,7 @@ export function FamilyBox({ f }: { f: FamilyMonths }) {
                 {new Date(`${m.month}-01T00:00:00`).toLocaleDateString("en-GB", { month: "short", year: "numeric" })}
               </td>
               <td className={`text-right font-medium ${tone(m.pnl_usd)}`}>{signed(m.pnl_usd)}</td>
+              {m.pnl_sol != null ? <td className="pl-3 text-right text-ink-2">{sol(m.pnl_sol)}</td> : null}
             </tr>
           ))}
         </tbody>
@@ -1127,6 +1141,14 @@ export function KarthikLabPage() {
           tone={up ? "up" : "down"}
           hint={`${up ? "+" : ""}${usd(data.pnl_usd)} on ${usd(data.capital_usd)}`}
         />
+        {data.in_sol ? (
+          <Figure
+            label="Kept in SOL · at today's price"
+            value={`${sol(data.in_sol.balance_sol, false)}  ${usd(data.in_sol.worth_usd_now)}`}
+            tone={data.in_sol.pnl_usd_now >= 0 ? "up" : "down"}
+            hint={`${sol(data.in_sol.pnl_sol)} profit, worth ${data.in_sol.pnl_usd_now >= 0 ? "+" : "−"}${usd(Math.abs(data.in_sol.pnl_usd_now))} at SOL ${usd(data.in_sol.sol_usd_now)} (was ${usd(data.in_sol.sol_usd_at_start)} at the start)`}
+          />
+        ) : null}
         <Figure
           label="Lowest it has been"
           value={`${usd(data.lowest_usd)}  ${pctOfCapital(

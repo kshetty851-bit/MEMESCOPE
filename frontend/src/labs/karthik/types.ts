@@ -21,12 +21,29 @@ export interface FamilyMonths {
   tickets_by_pool: [number | null, number][];
   balance_usd: number;
   pnl_usd: number;
-  months: { month: string; trades: number; rugs: number; pnl_usd: number }[];
+  months: { month: string; trades: number; rugs: number; pnl_usd: number; pnl_sol?: number }[];
+  /** As SOL, valued at SOL's price now (2026-10-20). */
+  pnl_sol?: number;
+  balance_sol?: number;
+  worth_usd_now?: number;
+  pnl_usd_now?: number;
+}
+
+/** The book as if its money had stayed in SOL (Karthik, 2026-10-20). */
+export interface InSol {
+  sol_usd_now: number;
+  sol_usd_at_start: number;
+  capital_sol: number;
+  pnl_sol: number;
+  balance_sol: number;
+  worth_usd_now: number;
+  pnl_usd_now: number;
 }
 
 export interface KarthikBook {
   /** The book's trades on three $500 user wallets, month by month (2026-10-20). */
   family?: FamilyMonths;
+  in_sol?: InSol | null;
   /** The floor test (2026-10-11): the book's trades from `since`, re-weighted per variant. */
   /** The same book started fresh at each Dubai midnight, newest start first. */
   start_dates?: StartDate[];
@@ -112,6 +129,8 @@ export interface KarthikDay {
    *  of the starting $500 like the figures above it. */
   pct: string;
   balance_usd: string;
+  /** That day's profit in SOL, each trade at SOL's price when bought. */
+  pnl_sol?: number;
 }
 
 /** One way of trading the same book: its balance and record on those terms. */
