@@ -72,7 +72,11 @@ export function MarketPulse({ market, fearGreed, watch }: { market: Market | nul
           <div><dt>24 h volume, top 100</dt><dd><Live value={market.top100_volume}>{usd(market.top100_volume)}</Live></dd></div>
           <div><dt>Bitcoin dominance</dt><dd className="np-mono">{pct(market.btc_dominance).replace("+", "")}</dd></div>
           <div><dt>Ether dominance</dt><dd className="np-mono">{pct(market.eth_dominance).replace("+", "")}</dd></div>
-          {fearGreed ? <div><dt>Fear &amp; Greed</dt><dd><span className="np-mono">{fearGreed.value}</span> {fearGreed.label}{fearGreed.yesterday != null ? <span className="np-dim np-mono"> · was {fearGreed.yesterday}</span> : null}</dd></div> : null}
+          {fearGreed ? (
+            <div><dt>Fear &amp; Greed</dt><dd><span className="np-mono">{fearGreed.value}</span> {fearGreed.label}{fearGreed.yesterday != null ? <span className="np-dim np-mono"> · was {fearGreed.yesterday}</span> : null}
+              <span className="np-fg" role="img" aria-label={`${fearGreed.value} out of 100`}><i style={{ ["--v" as string]: `${fearGreed.value}%` }} /></span>
+            </dd></div>
+          ) : null}
         </dl>
       </div>
       <div className="np-movers">
@@ -146,6 +150,23 @@ function coinName(c: { mint: string; symbol: string | null; name: string | null 
   );
 }
 
+/** Graduations per clock hour, last 24; the hour in progress pulses. */
+function HourBars({ hours }: { hours: { hour: string; graduations: number }[] }) {
+  const max = Math.max(1, ...hours.map((h) => h.graduations));
+  return (
+    <figure className="np-pf__hours" aria-label="Graduations per hour, last 24 hours">
+      <span className="np-pf__hours-bars">
+        {hours.map((h, i) => (
+          <i key={h.hour} className={cn(i === hours.length - 1 && "is-now")}
+             style={{ ["--h" as string]: `${Math.max(4, (100 * h.graduations) / max)}%`, ["--i" as string]: i }}
+             title={`${new Date(h.hour).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}: ${h.graduations}`} />
+        ))}
+      </span>
+      <figcaption className="np-fine">Graduations per hour, last 24 h · this hour so far, pulsing</figcaption>
+    </figure>
+  );
+}
+
 const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 /** MEMESCOPE's own pump.fun numbers, first on the page (Karthik, 2026-10-20):
@@ -161,20 +182,36 @@ export function PumpfunToday({ ours, now }: { ours: Ours | null; now: number }) 
     <Section id="pumpfun" title="Today on pump.fun" className="np-pf"
              aside={<span className="np-fine">Measured by MEMESCOPE on-chain, not reported</span>}>
       <dl className="np-figs np-pf__figs">
-        <div><dt>Graduated · 24 h</dt><dd className="np-mono">{ours.graduations_24h.toLocaleString()} <span className="np-dim">· {ours.graduations_1h} in the last hour</span></dd></div>
-        <div><dt>Lost 80%+ in hour one</dt><dd className="np-mono t-down">{ours.rug_rate_24h != null ? `${ours.rug_rate_24h}%` : "—"} <span className="np-dim">of {ours.rug_measured_24h.toLocaleString()} measured</span></dd></div>
-        <div><dt>Survived hour one</dt><dd className="np-mono t-up">{survived.toLocaleString()}</dd></div>
+        <div><dt>Graduated · 24 h</dt><dd><Live value={ours.graduations_24h}>{ours.graduations_24h.toLocaleString()}</Live> <span className="np-dim">· {ours.graduations_1h} in the last hour</span></dd></div>
+        <div><dt>Lost 80%+ in hour one</dt><dd><Live value={ours.rug_rate_24h} className="t-down">{ours.rug_rate_24h != null ? `${ours.rug_rate_24h}%` : "—"}</Live> <span className="np-dim">of {ours.rug_measured_24h.toLocaleString()} measured</span></dd></div>
+        <div><dt>Survived hour one</dt><dd><Live value={survived} className="t-up">{survived.toLocaleString()}</Live></dd></div>
         {lab ? (
-          <div><dt>Karthik&apos;s Lab · paper</dt><dd className={cn("np-mono", `t-${trend(labPnl)}`)}>{labPnl >= 0 ? "+" : "−"}{usd(Math.abs(labPnl))} <span className="np-dim">· {lab.trades} trades · {lab.rugs} rugs</span></dd></div>
+          <div><dt>Karthik&apos;s Lab · paper</dt><dd><Live value={lab.pnl_usd} className={`t-${trend(labPnl)}`}>{labPnl >= 0 ? "+" : "−"}{usd(Math.abs(labPnl))}</Live> <span className="np-dim">· {lab.trades} trades · {lab.rugs} rugs</span></dd></div>
         ) : null}
       </dl>
+      <div className="np-pf__visuals">
+        {ours.rug_measured_24h ? (
+          <div className="np-pf__fate" role="img"
+               aria-label={`${survived} of ${ours.rug_measured_24h} survived their first hour; ${ours.rugged_24h} lost 80% or more`}>
+            <span className="np-pf__fate-bar">
+              <i className="is-up" style={{ ["--w" as string]: `${(100 * survived) / ours.rug_measured_24h}%` }} />
+              <i className="is-down" style={{ ["--w" as string]: `${(100 * ours.rugged_24h) / ours.rug_measured_24h}%` }} />
+            </span>
+            <span className="np-pf__fate-key np-fine">
+              <span className="t-up">■ survived {survived}</span> <span className="t-down">■ drained {ours.rugged_24h}</span>
+            </span>
+          </div>
+        ) : null}
+        {ours.hourly?.length ? <HourBars hours={ours.hourly} /> : null}
+      </div>
       <div className="np-pf__cols">
         <div>
           <h3 className="np-pf__sub">Survivors · best first hours</h3>
           {survivors.length ? (
             <ol className="np-drains">
               {survivors.slice(0, 6).map((c) => (
-                <li key={c.mint}>
+                <li key={c.mint} className="np-pf__gain"
+                    style={{ ["--g" as string]: `${Math.min(100, (100 * Math.max(0, c.change_1h_pct ?? 0)) / Math.max(1, ...survivors.slice(0, 6).map((x) => x.change_1h_pct ?? 0)))}%` }}>
                   <span className="np-mono" title={ago(c.graduated_at, now)}>{clock(c.graduated_at)}</span>
                   {coinName(c)}
                   <span className="np-pf__val">

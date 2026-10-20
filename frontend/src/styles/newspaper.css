@@ -126,8 +126,12 @@
 .np-lead__body > .np-lead__fig { grid-column: 1 / -1; }
 .np-lead__body:not(:has(figure)) { grid-template-columns: 1fr; max-width: 70ch; }
 .np-lead__fig { margin: 0; }
-.np-lead__fig img { display: block; width: 100%; aspect-ratio: 21 / 7; object-fit: cover; filter: grayscale(1) contrast(1.15) brightness(0.92); transition: filter 0.6s var(--np-ease); }
-.np-lead__fig:hover img { filter: grayscale(0.15) contrast(1.05); }
+.np-lead__fig img { display: block; width: 100%; aspect-ratio: 21 / 7; object-fit: cover; filter: url(#np-duo) contrast(1.1); transition: filter 0.6s var(--np-ease); }
+.np-lead__fig:hover img { filter: none; }
+.np-lead__stand { aspect-ratio: 21 / 7; display: flex; flex-direction: column; justify-content: flex-end; padding: clamp(14px, 2vw, 24px); border: 1px solid var(--np-rule);
+  background: repeating-linear-gradient(-45deg, transparent 0 9px, rgb(239 232 216 / 0.04) 9px 10px); }
+.np-lead__stand-topic { font-family: var(--np-head), sans-serif; font-weight: 800; text-transform: uppercase; letter-spacing: -0.01em; line-height: 0.85; font-size: clamp(2.6rem, 8vw, 6rem); color: var(--np-paper); opacity: 0.9; }
+.np-lead__stand-src { margin-top: 8px; color: var(--np-paper-3); }
 .np-lead__fig figcaption { margin-top: 6px; color: var(--np-paper-3); }
 .np-lead__dek { margin: 0 0 14px; font-size: 1.18rem; line-height: 1.5; color: var(--np-paper); max-width: 60ch; }
 .np-lead__dek::first-letter { float: left; font-family: var(--np-head), sans-serif; font-weight: 900; font-size: 3.6em; line-height: 0.8; padding: 4px 8px 0 0; color: var(--np-lime); }
@@ -264,6 +268,25 @@
 .np-drains li { display: grid; grid-template-columns: 70px minmax(0, 1fr) auto; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--np-rule); font-size: 0.95rem; }
 .np-drains li a { color: var(--np-cyan); }
 /* Today on pump.fun (2026-10-20): MEMESCOPE's own day, first on the page. */
+/* Our own data gets a faint cyan wash: cyan already means "ours" on this page (2026-10-20). */
+.np-pf { background: rgb(73 216 255 / 0.045); border-top: 2px solid var(--np-cyan); padding-inline: clamp(12px, 2vw, 24px); }
+.np-pf__visuals { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px clamp(24px, 3vw, 44px); align-items: end; padding-bottom: 16px; }
+.np-pf__fate-bar { display: flex; height: 14px; background: var(--np-rule); overflow: hidden; }
+.np-pf__fate-bar i { width: var(--w); transform-origin: left; animation: np-grow 1.1s var(--np-ease) both; }
+.np-pf__fate-bar .is-up { background: var(--np-lime); }
+.np-pf__fate-bar .is-down { background: var(--np-orange); animation-delay: 0.25s; }
+.np-pf__fate-key { display: flex; gap: 14px; margin-top: 6px; }
+@keyframes np-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.np-pf__hours { margin: 0; }
+.np-pf__hours-bars { display: flex; align-items: flex-end; gap: 2px; height: 44px; }
+.np-pf__hours-bars i { flex: 1; height: var(--h); background: var(--np-paper-3); opacity: 0.55; transform-origin: bottom; animation: np-rise 0.6s var(--np-ease) both; animation-delay: calc(var(--i) * 25ms); }
+.np-pf__hours-bars i.is-now { background: var(--np-lime); opacity: 1; animation: np-rise 0.6s var(--np-ease) both, np-glow 1.8s ease-in-out 0.9s infinite; }
+.np-pf__hours figcaption { margin-top: 6px; }
+@keyframes np-rise { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes np-glow { 50% { opacity: 0.35; } }
+.np-pf__gain { background: linear-gradient(90deg, rgb(198 255 58 / 0.12) var(--g), transparent var(--g)); }
+.np-fg { display: block; position: relative; height: 6px; margin-top: 6px; max-width: 160px; background: linear-gradient(90deg, var(--np-orange), var(--np-paper-3) 50%, var(--np-lime)); }
+.np-fg i { position: absolute; left: var(--v); top: -3px; width: 2px; height: 12px; background: var(--np-paper); transform: translateX(-1px); }
 .np-pf__figs { grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 0 0 14px; }
 .np-pf__cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 clamp(24px, 3vw, 44px); }
 .np-pf__cols > div + div { padding-left: clamp(20px, 3vw, 40px); border-left: 1px solid var(--np-rule); }
@@ -326,7 +349,7 @@
   .np-secwire { margin-top: 12px; }
   .np-pulse { grid-template-columns: 1fr 1fr; }
   .np-pf__figs { grid-template-columns: 1fr 1fr; }
-  .np-pf__cols { grid-template-columns: 1fr; }
+  .np-pf__cols, .np-pf__visuals { grid-template-columns: 1fr; }
   .np-pf__cols > div + div { padding-left: 0; border-left: 0; border-top: 1px solid var(--np-rule); margin-top: 10px; }
   .np-figs { grid-column: 1 / -1; border-top: 1px solid var(--np-rule); }
   .np-quote:nth-child(2) { border-right: 0; }
@@ -342,7 +365,7 @@
   .np-lead__head { font-size: clamp(2.2rem, 11vw, 3.2rem); }
   .np-pulse { grid-template-columns: 1fr 1fr; }
   .np-pf__figs { grid-template-columns: 1fr 1fr; }
-  .np-pf__cols { grid-template-columns: 1fr; }
+  .np-pf__cols, .np-pf__visuals { grid-template-columns: 1fr; }
   .np-pf__cols > div + div { padding-left: 0; border-left: 0; border-top: 1px solid var(--np-rule); margin-top: 10px; }
   .np-quote { padding: 14px; }
   .np-quote:nth-child(2) { border-right: 0; }

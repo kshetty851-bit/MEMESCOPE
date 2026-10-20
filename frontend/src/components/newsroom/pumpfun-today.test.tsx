@@ -8,6 +8,7 @@ const ours = {
   recent_drains: [{ mint: "Drain1111111111111111111111111111111pump", symbol: "RUG", name: "Rug Coin", graduated_at: "2026-10-20T09:00:00Z" }],
   survivors: [{ mint: "Surv11111111111111111111111111111111pump", symbol: "Mii", name: null, graduated_at: "2026-10-20T08:00:00Z",
                 liquidity_usd: 50869, change_1h_pct: 787.9 }],
+  hourly: Array.from({ length: 24 }, (_, i) => ({ hour: new Date(Date.UTC(2026, 9, 19, 13 + i)).toISOString(), graduations: i === 23 ? 9 : 40 })),
   karthik_lab: { started_at: "", judge_at: "", balance_usd: "2034", pnl_usd: "1734.57", pnl_pct: "578", capital_usd: "300", trades: 932, wins: 800, rugs: 14 },
 };
 
@@ -24,6 +25,15 @@ describe("Today on pump.fun", () => {
     expect(s).toHaveTextContent("RUG");
     expect(screen.getByRole("link", { name: "chart" })).toHaveAttribute(
       "href", "https://dexscreener.com/solana/Surv11111111111111111111111111111111pump");
+  });
+
+  it("draws the survival split and 24 hour bars, newest marked", () => {
+    const { container } = render(<PumpfunToday ours={ours} now={Date.parse("2026-10-20T12:00:00Z")} />);
+    expect(screen.getByRole("img", { name: /285 of 835 survived.*550 lost/ })).toBeInTheDocument();
+    const bars = container.querySelectorAll(".np-pf__hours-bars i");
+    expect(bars).toHaveLength(24);
+    expect(bars[23]).toHaveClass("is-now");
+    expect(container.querySelectorAll(".is-now")).toHaveLength(1);
   });
 
   it("shows nothing when our data is unavailable", () => {
