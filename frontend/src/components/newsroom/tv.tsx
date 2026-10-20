@@ -34,7 +34,7 @@ function deviceVoice(): SpeechSynthesisVoice | null {
     - (/compact|eloquence|novelty|zira|david|fred|albert|bahh|bells|boing|bubbles|cellos|jester|organ|trinoids|whisper|zarvox/i.test(v.name) ? 10 : 0);
   return [...all].sort((a, b) => score(b) - score(a))[0] ?? null;
 }
-type State = "idle" | "tuning" | "live" | "ended" | "off";
+type State = "idle" | "tuning" | "live" | "blocked" | "ended" | "off";
 
 /** A tenth of a second of silence, played inside the tap so iPhones let the
     same audio element play the bulletin once it arrives. */
@@ -109,18 +109,31 @@ export function NewsTV({ data }: { data?: Newsroom }) {
     if (got.mode === "device") { speak(c, got.segments); return; }
     const el = audio.current;        // made and unlocked inside the tap
     if (!el) { setState("off"); return; }
-    el.src = `${env.NEXT_PUBLIC_API_URL}${got.audio}`;
-    const an = c.createAnalyser();
-    an.fftSize = 512;
-    c.createMediaElementSource(el).connect(an).connect(c.destination);
-    const buf = new Uint8Array(an.fftSize);
+    const url = `${env.NEXT_PUBLIC_API_URL}${got.audio}`;
+    // The voice plays as a plain audio element: routed through Web Audio it is
+    // muted by an iPhone's silent switch. The mouth reads a loudness envelope
+    // decoded from a second copy of the file instead of a live analyser.
+    const STEP = 0.05;
+    let loud: Float32Array | null = null;
+    void fetch(url).then((r) => r.arrayBuffer()).then((ab) => c.decodeAudioData(ab)).then((buf) => {
+      const d = buf.getChannelData(0), n = Math.max(1, Math.floor(buf.duration / STEP));
+      const per = Math.floor(d.length / n), out = new Float32Array(n);
+      let top = 1e-6;
+      for (let i = 0; i < n; i += 1) {
+        let sum = 0;
+        for (let j = i * per; j < (i + 1) * per; j += 1) sum += (d[j] ?? 0) ** 2;
+        out[i] = Math.sqrt(sum / per);
+        top = Math.max(top, out[i] ?? 0);
+      }
+      loud = out.map((v) => Math.min(1, (v / top) * 1.4));
+    }).catch(() => undefined);
+    el.src = url;
     const lengths = got.segments.map((s) => s.text.length);
     const total = lengths.reduce((a, n) => a + n, 0);
-    const tick = () => {
-      an.getByteTimeDomainData(buf);
-      let sum = 0;
-      for (const v of buf) sum += (v - 128) ** 2;
-      const level = Math.min(1, Math.sqrt(sum / buf.length) / 28);
+    const tick = (t: number) => {
+      const level = el.paused ? 0
+        : loud ? (loud[Math.floor(el.currentTime / STEP)] ?? 0)
+        : 0.2 + 0.6 * Math.abs(Math.sin(t / 70));          // until the envelope is ready
       face.current?.style.setProperty("--open", level.toFixed(3));
       if (el.duration) {
         let at = (el.currentTime / el.duration) * total, i = 0;
@@ -138,7 +151,10 @@ export function NewsTV({ data }: { data?: Newsroom }) {
       setState("ended");
     };
     setState("live");
-    window.setTimeout(() => { void el.play(); tick(); }, 1300);   // after the sting
+    raf.current = requestAnimationFrame(tick);
+    window.setTimeout(() => {                                       // after the sting
+      el.play().catch(() => setState("blocked"));                   // the phone wants a tap
+    }, 1300);
   }, []);
 
   /** Free voice: one utterance per segment, so the lower third is exact; the
@@ -283,15 +299,24 @@ export function NewsTV({ data }: { data?: Newsroom }) {
           {state !== "live" ? (
             <div className={cn("np-tv__cover", state === "tuning" && "is-static")}>
               {state === "tuning" ? <span className="np-mono">Tuning in…</span>
+                : state === "blocked" ? (
+                  <button type="button" className="np-tv__play" onClick={() => {
+                    void audio.current?.play();
+                    setState("live");
+                  }}>🔊 Tap to listen</button>
+                )
                 : state === "off" ? <span className="np-mono">Off air — back soon</span>
                 : (
                   <button type="button" className="np-tv__play" onClick={() => {
                     // iPhones only allow sound started inside the tap: unlock speech and a
                     // fresh audio element now (one element feeds one analyser), play later.
                     window.speechSynthesis?.speak(new SpeechSynthesisUtterance(""));
+                    // Safari 17+: play through the silent switch, like a video would.
+                    const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession;
+                    if (session) session.type = "playback";
                     audio.current?.pause();
                     const el = new Audio(silence());
-                    el.crossOrigin = "anonymous";
+                    el.setAttribute("playsinline", "");
                     void el.play().catch(() => undefined);
                     audio.current = el;
                     void watch();
