@@ -1583,6 +1583,54 @@ def _karthik_line(rows: Sequence[Any], sol: Decimal | None, *, size: float,
     }
 
 
+#: Karthik, 2026-10-20: "if we used 3 user wallets with 500$ each ... month
+#: wise". Each on a $50 ticket sized like USER1 (lab stake x 50/75), all three
+#: in every coin one after another, the later ones paying the queue's impact.
+FAMILY_WALLETS, FAMILY_START, FAMILY_TICKET = 3, 500.0, 50.0
+
+
+def _family_months(rows: Sequence[Any], buys_before: dict,
+                   sol: Decimal | None) -> dict[str, Any]:
+    """Karthik Lab's own trades on three $500 user wallets, profit by Dubai month."""
+    from app.labs.graduation import pool_lab as pl
+
+    wallets = [pl.Wallet(f"USER {i}", cash=FAMILY_START, low=FAMILY_START)
+               for i in range(1, FAMILY_WALLETS + 1)]
+    months: dict[str, dict[str, Any]] = {}
+    base = float(config.PAPER_NOTIONAL_USD)
+    for r in sorted(rows, key=_opened_order):
+        lab_stake = config.karthik_ticket(r.liq_open_usd, buys_before.get(r.id))
+        stake = lab_stake * FAMILY_TICKET / 75
+        for w in wallets:
+            w.settle_until(r.opened_at)
+        ready = sorted((w for w in wallets if w.cash >= stake),
+                       key=lambda w: (w.last_buy, w.name))
+        month = (r.closed_at + DUBAI).strftime("%Y-%m")
+        m = months.setdefault(month, {"month": month, "trades": 0, "rugs": 0, "pnl_usd": 0.0})
+        for place, w in enumerate(ready):
+            k = pl.queue_k(place, stake)
+            multiple = (pl.legs_multiple(float(r.net_return), (float(r.impact_open or 0),
+                                         float(r.impact_close or 0)), k, k)
+                        - _size_penalty(stake, base, sol))
+            w.cash -= stake
+            w.held.append((r.closed_at, multiple, stake))
+            w.trades += 1
+            w.last_buy = r.opened_at
+            m["trades"] += 1
+            m["rugs"] += float(r.net_return) <= float(config.OPERATOR_RUG_MOVE)
+            m["pnl_usd"] += stake * (multiple - 1)
+    for w in wallets:
+        w.settle_until(datetime.max.replace(tzinfo=UTC))
+    total = sum(w.cash for w in wallets)
+    return {
+        "wallets": FAMILY_WALLETS, "start_usd": FAMILY_START, "ticket_usd": FAMILY_TICKET,
+        "balance_usd": round(total, 2),
+        "pnl_usd": round(total - FAMILY_START * FAMILY_WALLETS, 2),
+        "months": [{**m, "pnl_usd": round(m["pnl_usd"], 2)}
+                   for m in sorted(months.values(), key=lambda m: m["month"])],
+    }
+
+
 def _fresh_entry(row: Any) -> bool:
     """Bought within `config.MAX_ENTRY_AGE_S` of the coin graduating."""
     graduated = getattr(row, "graduated_at", None)
@@ -2139,6 +2187,8 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         "quiet_max_txs": config.QUIET_MAX_POOL_TXS,
         "pools_since": config.KARTHIK_BOOK_POOLS_AT,
         "floor_test": _floor_test(rows),
+        # Three $500 user wallets on the same trades, month by month (2026-10-20).
+        "family": _family_months(rows, buys_before, sol),
         "start_dates": _start_dates(rows, sol, ticket=float(spec.ticket_usd),
                                     capital=float(spec.capital_usd),
                                     now=datetime.now(UTC), cents=Decimal("0.01"),

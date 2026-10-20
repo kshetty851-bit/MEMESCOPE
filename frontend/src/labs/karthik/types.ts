@@ -14,7 +14,18 @@ export interface KarthikTrade {
   real?: { status: "bought" | "skipped"; why: string | null } | null;
 }
 
+export interface FamilyMonths {
+  wallets: number;
+  start_usd: number;
+  ticket_usd: number;
+  balance_usd: number;
+  pnl_usd: number;
+  months: { month: string; trades: number; rugs: number; pnl_usd: number }[];
+}
+
 export interface KarthikBook {
+  /** The book's trades on three $500 user wallets, month by month (2026-10-20). */
+  family?: FamilyMonths;
   /** The floor test (2026-10-11): the book's trades from `since`, re-weighted per variant. */
   /** The same book started fresh at each Dubai midnight, newest start first. */
   start_dates?: StartDate[];
