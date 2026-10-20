@@ -19,16 +19,20 @@ type Bulletin = { on_air: true; mode: "openai"; id: string; made_at: string; aud
   | { on_air: true; mode: "device"; segments: Segment[] }
   | { on_air: false; reason: string };
 
-/** The device's own voice: a natural female English one where the device has it. */
+/** The device's best English voice. Devices ship robotic ones next to good
+    ones: the neural "Natural"/"Online" voices (Edge), the downloaded
+    "Enhanced"/"Premium" ones (Apple) and Google's own come first. */
 function deviceVoice(): SpeechSynthesisVoice | null {
   const all = window.speechSynthesis.getVoices().filter((v) => v.lang.startsWith("en"));
-  const like = ["Samantha", "Ava", "Allison", "Susan", "Serena", "Karen", "Moira", "Tessa",
-                "Google UK English Female", "Google US English", "Microsoft Aria", "Microsoft Jenny", "Microsoft Zira"];
-  for (const name of like) {
-    const v = all.find((x) => x.name.includes(name));
-    if (v) return v;
-  }
-  return all.find((v) => /female|woman/i.test(v.name)) ?? all[0] ?? null;
+  const female = /aria|jenny|ava|emma|michelle|sonia|libby|natasha|samantha|allison|susan|serena|karen|moira|tessa|zoe|female/i;
+  const score = (v: SpeechSynthesisVoice) =>
+    (/natural|neural|online/i.test(v.name) ? 8 : 0)
+    + (/enhanced|premium/i.test(v.name) ? 6 : 0)
+    + (/^google/i.test(v.name) ? 4 : 0)
+    + (female.test(v.name) ? 3 : 0)
+    + (/en[-_](US|GB)/i.test(v.lang) ? 1 : 0)
+    - (/compact|eloquence|novelty|zira|david|fred|albert|bahh|bells|boing|bubbles|cellos|jester|organ|trinoids|whisper|zarvox/i.test(v.name) ? 10 : 0);
+  return [...all].sort((a, b) => score(b) - score(a))[0] ?? null;
 }
 type State = "idle" | "tuning" | "live" | "ended" | "off";
 
@@ -133,13 +137,21 @@ export function NewsTV({ data }: { data?: Newsroom }) {
   const speak = (c: AudioContext, segments: Segment[]) => {
     const synth = window.speechSynthesis;
     const voice = deviceVoice();
-    let speaking = false;
+    // The mouth follows the synthesiser itself, not its start/boundary events:
+    // some phones never send them.
+    let heard = false;
     const flap = (t: number) => {
-      const open = speaking ? 0.2 + 0.6 * Math.abs(Math.sin(t / 70)) * (0.6 + 0.4 * Math.sin(t / 230)) : 0;
+      const on = synth.speaking && !synth.paused;
+      heard ||= on;
+      if (heard && !synth.speaking && !synth.pending) { done(); return; }   // end events can go missing too
+      const open = on ? 0.2 + 0.6 * Math.abs(Math.sin(t / 70)) * (0.6 + 0.4 * Math.sin(t / 230)) : 0;
       face.current?.style.setProperty("--open", open.toFixed(3));
       raf.current = requestAnimationFrame(flap);
     };
+    let over = false;
     const done = () => {
+      if (over) return;
+      over = true;
       cancelAnimationFrame(raf.current);
       face.current?.style.setProperty("--open", "0");
       bed.current?.stop();
@@ -150,11 +162,9 @@ export function NewsTV({ data }: { data?: Newsroom }) {
       const u = new SpeechSynthesisUtterance(s.text);
       if (voice) u.voice = voice;
       u.lang = voice?.lang ?? "en-US";
-      u.rate = 0.98;
-      u.pitch = 1.05;
-      u.onstart = () => { speaking = true; setSeg(i); };
-      u.onboundary = () => { speaking = true; };
-      u.onend = () => { speaking = false; if (i === segments.length - 1) done(); };
+      u.rate = 0.97;
+      u.onstart = () => setSeg(i);
+      u.onend = () => { if (i === segments.length - 1) done(); };
       u.onerror = () => { if (i === segments.length - 1) done(); };
       window.setTimeout(() => synth.speak(u), 1300);
     });
