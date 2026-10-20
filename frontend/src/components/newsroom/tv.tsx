@@ -52,7 +52,6 @@ function sting(ctx: AudioContext): { stop: () => void } {
 
 export function NewsTV({ data }: { data?: Newsroom }) {
   const [state, setState] = useState<State>("idle");
-  const [open, setOpen] = useState(true);
   const [seg, setSeg] = useState(0);
   const [b, setB] = useState<Extract<Bulletin, { on_air: true }> | null>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
@@ -61,8 +60,6 @@ export function NewsTV({ data }: { data?: Newsroom }) {
   const face = useRef<SVGGElement | null>(null);
   const raf = useRef(0);
 
-  // Phones start folded into a small "LIVE TV" pill.
-  useEffect(() => { if (window.matchMedia("(max-width: 767px)").matches) setOpen(false); }, []);
   useEffect(() => () => { cancelAnimationFrame(raf.current); audio.current?.pause(); void ctx.current?.close(); }, []);
 
   const watch = useCallback(async () => {
@@ -134,14 +131,6 @@ export function NewsTV({ data }: { data?: Newsroom }) {
   ].filter(Boolean).join("   •   ");
   const label = b && state === "live" ? b.segments[seg]?.label : "MemeScope News";
   const talking = state === "live";
-
-  if (!open) {
-    return (
-      <button type="button" className="np-tv-pill" onClick={() => setOpen(true)} aria-label="Open MemeScope News TV">
-        <i aria-hidden /> LIVE TV
-      </button>
-    );
-  }
 
   return (
     <aside className={cn("np-tv", talking && "is-live")} aria-label="MemeScope News TV, AI presenter">
@@ -238,7 +227,6 @@ export function NewsTV({ data }: { data?: Newsroom }) {
       </div>
       <div className="np-tv__controls">
         {talking ? <button type="button" onClick={stop}>■ Stop</button> : <span className="np-mono np-dim">News, read aloud by an AI presenter</span>}
-        <button type="button" onClick={() => { stop(); setOpen(false); }} aria-label="Fold the TV away">–</button>
       </div>
     </aside>
   );
