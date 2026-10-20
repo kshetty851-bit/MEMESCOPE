@@ -85,7 +85,8 @@ def test_karthik_stake_by_pool_and_quietness():
     assert config.karthik_ticket(60_000, 14) == 100.0       # small pool, busier (19 Oct)
     # The real wallets keep the 16 Oct table.
     assert config.karthik_ticket(60_000, 14, config.WALLET_TICKETS_BY_POOL) == 75.0
-    assert config.karthik_ticket(400_000, 3) == 25.0        # large pool, quiet or not
+    assert config.karthik_ticket(400_000, 3) == 100.0       # flat $100 since 20 Oct
+    assert config.karthik_ticket(400_000, 3, config.USER1_TICKETS_BY_POOL) == 25.0
 
 
 def test_unnamed_evening_is_dubai_17_to_midnight() -> None:

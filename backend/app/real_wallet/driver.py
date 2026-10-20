@@ -115,7 +115,7 @@ def lab_sized(strategy_id: str, ticket: Decimal, pool_usd: Decimal | float | Non
 
     if strategy_id.upper() != LAB_RULES_STRATEGY or pool_usd is None:
         return ticket
-    table = (grad_config.KARTHIK_TICKETS_BY_POOL if (member or "").upper() in LAB_SIZED_MEMBERS
+    table = (grad_config.USER1_TICKETS_BY_POOL if (member or "").upper() in LAB_SIZED_MEMBERS
              else grad_config.WALLET_TICKETS_BY_POOL)
     stake = Decimal(str(grad_config.karthik_ticket(pool_usd, buys_before, table)))
     base = Decimal(str(grad_config.WALLET_TICKETS_BY_POOL[0][1]))
