@@ -17,7 +17,8 @@ export interface KarthikTrade {
 export interface FamilyMonths {
   wallets: number;
   start_usd: number;
-  ticket_usd: number;
+  /** The lab's own stake table, (pool below, stake); last limit null. */
+  tickets_by_pool: [number | null, number][];
   balance_usd: number;
   pnl_usd: number;
   months: { month: string; trades: number; rugs: number; pnl_usd: number }[];

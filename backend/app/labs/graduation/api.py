@@ -1584,9 +1584,11 @@ def _karthik_line(rows: Sequence[Any], sol: Decimal | None, *, size: float,
 
 
 #: Karthik, 2026-10-20: "if we used 3 user wallets with 500$ each ... month
-#: wise". Each on a $50 ticket sized like USER1 (lab stake x 50/75), all three
-#: in every coin one after another, the later ones paying the queue's impact.
-FAMILY_WALLETS, FAMILY_START, FAMILY_TICKET = 3, 500.0, 50.0
+#: wise". Karthik, same day: "shud show profit based on the karthik lab rule" -
+#: so each stakes exactly what the lab stakes ($100 under $150k, $25 above),
+#: all three in every coin one after another, the later ones paying the
+#: queue's impact.
+FAMILY_WALLETS, FAMILY_START = 3, 500.0
 
 
 def _family_months(rows: Sequence[Any], buys_before: dict,
@@ -1599,8 +1601,7 @@ def _family_months(rows: Sequence[Any], buys_before: dict,
     months: dict[str, dict[str, Any]] = {}
     base = float(config.PAPER_NOTIONAL_USD)
     for r in sorted(rows, key=_opened_order):
-        lab_stake = config.karthik_ticket(r.liq_open_usd, buys_before.get(r.id))
-        stake = lab_stake * FAMILY_TICKET / 75
+        stake = config.karthik_ticket(r.liq_open_usd, buys_before.get(r.id))
         for w in wallets:
             w.settle_until(r.opened_at)
         ready = sorted((w for w in wallets if w.cash >= stake),
@@ -1623,7 +1624,8 @@ def _family_months(rows: Sequence[Any], buys_before: dict,
         w.settle_until(datetime.max.replace(tzinfo=UTC))
     total = sum(w.cash for w in wallets)
     return {
-        "wallets": FAMILY_WALLETS, "start_usd": FAMILY_START, "ticket_usd": FAMILY_TICKET,
+        "wallets": FAMILY_WALLETS, "start_usd": FAMILY_START,
+        "tickets_by_pool": [list(t) for t in config.KARTHIK_TICKETS_BY_POOL],
         "balance_usd": round(total, 2),
         "pnl_usd": round(total - FAMILY_START * FAMILY_WALLETS, 2),
         "months": [{**m, "pnl_usd": round(m["pnl_usd"], 2)}
