@@ -388,8 +388,19 @@
 }
 
 
-/* ---- Newsroom TV (2026-10-20): an AI anchor in a small set, top right ---- */
-.np-tv { position: fixed; top: 76px; right: 18px; z-index: 40; width: 340px; font-family: var(--np-body), sans-serif; animation: np-tv-in 0.7s var(--np-ease) both; }
+/* ---- Newsroom TV (2026-10-20): an AI anchor in a small set, in the masthead ----
+   Wide: flag centred, TV in the right-hand column. Narrow: TV under the motto. */
+.np { container: np / inline-size; }
+.np-mast { display: grid; grid-template-columns: 1fr auto 1fr; column-gap: 28px; }
+.np-mast__rail { grid-column: 1 / -1; }
+.np-flag, .np-motto { grid-column: 2; }
+.np-tv { grid-column: 3; grid-row: 2 / span 2; justify-self: end; align-self: center; position: relative; width: min(100%, 300px); margin-top: 26px;
+  font-family: var(--np-body), sans-serif; animation: np-tv-in 0.7s 0.5s var(--np-ease) both; }
+@container np (max-width: 1180px) {
+  .np-mast { grid-template-columns: 1fr; }
+  .np-flag, .np-motto { grid-column: 1; }
+  .np-tv { grid-column: 1; grid-row: auto; justify-self: center; width: min(100%, 400px); margin: 40px 0 16px; }
+}
 @keyframes np-tv-in { from { opacity: 0; transform: translateY(-10px) scale(0.96); } to { opacity: 1; transform: none; } }
 .np-tv__antenna { position: absolute; left: 50%; top: -26px; width: 70px; height: 28px; transform: translateX(-50%); }
 .np-tv__antenna::before, .np-tv__antenna::after { content: ""; position: absolute; bottom: 0; width: 2px; height: 32px; background: var(--np-paper-3); transform-origin: bottom; }
@@ -422,7 +433,7 @@
 @keyframes np-tv-static { to { background-position: 7px 3px; } }
 .np-tv__play { font: 800 0.7rem var(--np-head), sans-serif; letter-spacing: 0.06em; text-transform: uppercase; color: var(--np-ink); background: var(--np-lime); border: 0; padding: 6px 11px; cursor: pointer; transition: transform 0.2s var(--np-ease); }
 .np-tv__play:hover { transform: scale(1.05); }
-.np-tv__play:focus-visible, .np-tv__controls button:focus-visible, .np-tv-pill:focus-visible { outline: 2px solid var(--np-cyan); outline-offset: 2px; }
+.np-tv__play:focus-visible, .np-tv__controls button:focus-visible { outline: 2px solid var(--np-cyan); outline-offset: 2px; }
 .np-tv__controls { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 6px; font-size: 0.72rem; }
 .np-tv__controls button { font: 700 0.72rem var(--np-head), sans-serif; color: var(--np-paper); background: var(--np-ink-2); border: 1px solid var(--np-rule-strong); padding: 3px 9px; cursor: pointer; }
 .np-tv__wall { font: 800 11px var(--np-head), sans-serif; letter-spacing: 0.16em; fill: var(--np-paper); opacity: 0.85; }
@@ -431,15 +442,10 @@
 .np-tv__mouth { transform: scaleY(calc(1 + var(--open) * 3.4)); transition: transform 60ms linear; }
 .np-tv__eyes { transform-origin: 160px 91px; animation: np-tv-blink 4.6s infinite; }
 @keyframes np-tv-blink { 0%, 95%, 100% { transform: scaleY(1); } 97% { transform: scaleY(0.1); } }
-.np-tv__anchor { transform-origin: 160px 200px; }
+.np-tv__anchor { transform-origin: 160px 200px; animation: np-tv-sway 9s ease-in-out infinite; }
 .np-tv.is-live .np-tv__anchor { animation: np-tv-sway 6s ease-in-out infinite; }
 @keyframes np-tv-sway { 0%, 100% { transform: rotate(0); } 30% { transform: rotate(-1.4deg); } 65% { transform: rotate(1.1deg); } }
 .np-tv__windows { animation: np-glow 5s ease-in-out infinite; }
-.np-tv-pill { position: fixed; right: 16px; bottom: 16px; z-index: 40; display: inline-flex; align-items: center; gap: 7px; padding: 9px 14px;
-  font: 800 0.78rem var(--np-head), sans-serif; letter-spacing: 0.08em; color: var(--np-ink); background: var(--np-lime); border: 0; border-radius: 999px; cursor: pointer; }
-.np-tv-pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--np-ink); animation: np-glow 1.6s ease-in-out infinite; }
-@media (max-width: 1200px) { .np-tv { width: 290px; } }
-@media (max-width: 767px) { .np-tv { top: auto; bottom: 16px; right: 16px; left: 16px; width: auto; max-width: 340px; margin-left: auto; } .np-tv__antenna { display: none; } }
 
 @media (prefers-reduced-motion: reduce) {
   .np *, .np *::before, .np *::after { animation: none !important; transition: none !important; }

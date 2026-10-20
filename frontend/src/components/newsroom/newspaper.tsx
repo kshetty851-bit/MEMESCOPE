@@ -70,7 +70,6 @@ export function Newspaper() {
         </filter>
       </svg>
       <Masthead data={data} now={now} failed={nr.isError} />
-      <NewsTV data={data} />
       <Ticker coins={coins} />
       {!ready ? (
         <Press state={nr.isError ? "error" : data?.warming_up ? "warming" : "loading"} />
@@ -120,6 +119,7 @@ function Masthead({ data, now, failed }: { data?: Newsroom; now: number; failed:
       </div>
       <h1 className="np-flag"><span className="np-flag__ink">Memescope</span></h1>
       <p className="np-motto">All the crypto that moved today — sourced, timed, and checked against our own on-chain lab.</p>
+      <NewsTV data={data} />
     </header>
   );
 }
