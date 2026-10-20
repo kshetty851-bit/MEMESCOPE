@@ -73,6 +73,16 @@ async def pulse(session: AsyncSession, now: datetime | None = None) -> dict[str,
         }
         for r in (await session.execute(_DRAINS, {"since": now - timedelta(hours=12)})).all()
     ]
+    # Graduations in each of the last 24 clock hours, oldest first; the newest
+    # is the hour in progress (the front page's hour bars, 2026-10-20).
+    top = now.replace(minute=0, second=0, microsecond=0)
+    by_hour = dict((await session.execute(
+        select(func.date_trunc("hour", GradMigration.ts), func.count())
+        .where(GradMigration.ts >= top - timedelta(hours=23))
+        .group_by(func.date_trunc("hour", GradMigration.ts)))).all())
+    hourly = [{"hour": (top - timedelta(hours=23 - i)).isoformat(),
+               "graduations": int(by_hour.get(top - timedelta(hours=23 - i), 0))}
+              for i in range(24)]
     survivors = [
         {
             "mint": r.mint,
@@ -102,5 +112,6 @@ async def pulse(session: AsyncSession, now: datetime | None = None) -> dict[str,
         "rug_rate_24h": (round(100 * rugged / measured, 1) if measured else None),
         "recent_drains": drains,
         "survivors": survivors,
+        "hourly": hourly,
         "karthik_lab": lab,
     }

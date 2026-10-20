@@ -31,6 +31,8 @@ export interface Ours {
   rug_rate_24h: number | null; recent_drains: { mint: string; symbol: string | null; name: string | null; graduated_at: string }[];
   /** Graduated in the last day and not drained in hour one, best first hour first (2026-10-20). */
   survivors?: { mint: string; symbol: string | null; name: string | null; graduated_at: string; liquidity_usd: number; change_1h_pct: number | null }[];
+  /** Graduations in each of the last 24 clock hours, oldest first (2026-10-20). */
+  hourly?: { hour: string; graduations: number }[];
   karthik_lab: { started_at: string; judge_at: string; balance_usd: string; pnl_usd: string; pnl_pct: string; capital_usd: string; trades: number; wins: number; rugs: number } | null;
 }
 export interface MapPoint { code: string; name: string; lat: number; lon: number; count: number; stories: { id: string; title: string; url: string; source: string; at: string }[] }

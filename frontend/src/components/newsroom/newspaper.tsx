@@ -57,6 +57,17 @@ export function Newspaper() {
   return (
     <div className={cn("np", js && "np-js", nameplate.variable, headline.variable, body.variable, figures.variable)}>
       <div className="np-grain" aria-hidden />
+      {/* Duotone for photographs: dark ink to warm paper (2026-10-20), full colour on hover. */}
+      <svg width="0" height="0" aria-hidden style={{ position: "absolute" }}>
+        <filter id="np-duo" colorInterpolationFilters="sRGB">
+          <feColorMatrix type="saturate" values="0" />
+          <feComponentTransfer>
+            <feFuncR type="table" tableValues="0.051 0.937" />
+            <feFuncG type="table" tableValues="0.051 0.910" />
+            <feFuncB type="table" tableValues="0.043 0.847" />
+          </feComponentTransfer>
+        </filter>
+      </svg>
       <Masthead data={data} now={now} failed={nr.isError} />
       <Ticker coins={coins} />
       {!ready ? (
@@ -175,7 +186,13 @@ function Lead({ story, now }: { story: Story | null; now: number }) {
             <img src={story.image} alt="" loading="eager" referrerPolicy="no-referrer" />
             <figcaption className="np-mono">Image: {story.source}</figcaption>
           </figure>
-        ) : null}
+        ) : (
+          /* No picture from the publisher: a printed stand-in, not an empty hole (2026-10-20). */
+          <figure className="np-lead__fig np-lead__stand" aria-hidden>
+            <span className="np-lead__stand-topic">{story.topics[0] ?? "crypto"}</span>
+            <span className="np-lead__stand-src np-mono">{story.publishers.length} {story.publishers.length === 1 ? "source" : "sources"} · {story.source}</span>
+          </figure>
+        )}
         <div>
           {story.summary ? <p className="np-lead__dek">{story.summary}</p> : null}
           <p className="np-src">
