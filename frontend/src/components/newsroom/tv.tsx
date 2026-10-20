@@ -14,8 +14,22 @@ import { API_V1, env } from "@/lib/env";
 
 import type { Newsroom } from "./types";
 
-type Bulletin = { on_air: true; id: string; made_at: string; audio: string;
-                  segments: { label: string; text: string }[] } | { on_air: false; reason: string };
+type Segment = { label: string; text: string };
+type Bulletin = { on_air: true; mode: "openai"; id: string; made_at: string; audio: string; segments: Segment[] }
+  | { on_air: true; mode: "device"; segments: Segment[] }
+  | { on_air: false; reason: string };
+
+/** The device's own voice: a natural female English one where the device has it. */
+function deviceVoice(): SpeechSynthesisVoice | null {
+  const all = window.speechSynthesis.getVoices().filter((v) => v.lang.startsWith("en"));
+  const like = ["Samantha", "Ava", "Allison", "Susan", "Serena", "Karen", "Moira", "Tessa",
+                "Google UK English Female", "Google US English", "Microsoft Aria", "Microsoft Jenny", "Microsoft Zira"];
+  for (const name of like) {
+    const v = all.find((x) => x.name.includes(name));
+    if (v) return v;
+  }
+  return all.find((v) => /female|woman/i.test(v.name)) ?? all[0] ?? null;
+}
 type State = "idle" | "tuning" | "live" | "ended" | "off";
 
 /** A three-note studio sting and a soft pad under the voice, made here: no licensed music. */
@@ -53,14 +67,16 @@ function sting(ctx: AudioContext): { stop: () => void } {
 export function NewsTV({ data }: { data?: Newsroom }) {
   const [state, setState] = useState<State>("idle");
   const [seg, setSeg] = useState(0);
-  const [b, setB] = useState<Extract<Bulletin, { on_air: true }> | null>(null);
+  const [b, setB] = useState<{ segments: Segment[] } | null>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
   const ctx = useRef<AudioContext | null>(null);
   const bed = useRef<{ stop: () => void } | null>(null);
   const face = useRef<SVGGElement | null>(null);
   const raf = useRef(0);
 
-  useEffect(() => () => { cancelAnimationFrame(raf.current); audio.current?.pause(); void ctx.current?.close(); }, []);
+  // Some browsers load their voice list lazily: ask early so it is ready by the tap.
+  useEffect(() => { window.speechSynthesis?.getVoices(); }, []);
+  useEffect(() => () => { window.speechSynthesis?.cancel(); cancelAnimationFrame(raf.current); audio.current?.pause(); void ctx.current?.close(); }, []);
 
   const watch = useCallback(async () => {
     setState("tuning");
@@ -75,6 +91,7 @@ export function NewsTV({ data }: { data?: Newsroom }) {
     }
     if (!got.on_air) { setState("off"); return; }
     setB(got);
+    if (got.mode === "device") { speak(c, got.segments); return; }
     audio.current?.pause();
     const el = new Audio();          // a media element can feed only one analyser source
     audio.current = el;
@@ -111,7 +128,43 @@ export function NewsTV({ data }: { data?: Newsroom }) {
     window.setTimeout(() => { void el.play(); tick(); }, 1300);   // after the sting
   }, []);
 
+  /** Free voice: one utterance per segment, so the lower third is exact; the
+      mouth flaps while the device is speaking (no audio stream to measure). */
+  const speak = (c: AudioContext, segments: Segment[]) => {
+    const synth = window.speechSynthesis;
+    const voice = deviceVoice();
+    let speaking = false;
+    const flap = (t: number) => {
+      const open = speaking ? 0.2 + 0.6 * Math.abs(Math.sin(t / 70)) * (0.6 + 0.4 * Math.sin(t / 230)) : 0;
+      face.current?.style.setProperty("--open", open.toFixed(3));
+      raf.current = requestAnimationFrame(flap);
+    };
+    const done = () => {
+      cancelAnimationFrame(raf.current);
+      face.current?.style.setProperty("--open", "0");
+      bed.current?.stop();
+      bed.current = null;
+      setState("ended");
+    };
+    segments.forEach((s, i) => {
+      const u = new SpeechSynthesisUtterance(s.text);
+      if (voice) u.voice = voice;
+      u.lang = voice?.lang ?? "en-US";
+      u.rate = 0.98;
+      u.pitch = 1.05;
+      u.onstart = () => { speaking = true; setSeg(i); };
+      u.onboundary = () => { speaking = true; };
+      u.onend = () => { speaking = false; if (i === segments.length - 1) done(); };
+      u.onerror = () => { if (i === segments.length - 1) done(); };
+      window.setTimeout(() => synth.speak(u), 1300);
+    });
+    bed.current = sting(c);
+    setState("live");
+    raf.current = requestAnimationFrame(flap);
+  };
+
   const stop = () => {
+    window.speechSynthesis?.cancel();
     audio.current?.pause();
     cancelAnimationFrame(raf.current);
     face.current?.style.setProperty("--open", "0");
@@ -213,7 +266,11 @@ export function NewsTV({ data }: { data?: Newsroom }) {
               {state === "tuning" ? <span className="np-mono">Tuning in…</span>
                 : state === "off" ? <span className="np-mono">Off air — back soon</span>
                 : (
-                  <button type="button" className="np-tv__play" onClick={() => void watch()}>
+                  <button type="button" className="np-tv__play" onClick={() => {
+                    // iPhones only allow speech started inside the tap: unlock it now, speak later.
+                    window.speechSynthesis?.speak(new SpeechSynthesisUtterance(""));
+                    void watch();
+                  }}>
                     ▶ {state === "ended" ? "Watch again" : "Watch live"}
                   </button>
                 )}
