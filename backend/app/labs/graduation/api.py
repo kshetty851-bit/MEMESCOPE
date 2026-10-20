@@ -1801,7 +1801,7 @@ _PUMPFUN_DAY_SQL = text("""
         where first_seen_at >= :a and first_seen_at < :b) as launches,
       count(m.mint) as graduations,
       coalesce(sum(p.liq), 0) as pools_usd,
-      count(*) filter (where p.liq >= 75000) as pools_75k,
+      count(*) filter (where p.liq >= 50000) as pools_50k,
       (select avg(sol_usd_at_open) from grad_paper_positions
         where book = 'KARTHIK_QUIET_5M' and opened_at >= :a and opened_at < :b) as sol_usd
     from grad_migrations m
@@ -1825,7 +1825,7 @@ async def _pumpfun_day(db: AsyncSession, day: date, sol_now: Decimal | None) -> 
                             str((Decimal(row.graduations * GRADUATION_SOL) * Decimal(sol))
                                 .quantize(Decimal(1)))),
         "pools_usd": str(Decimal(row.pools_usd).quantize(Decimal(1))),
-        "pools_75k": int(row.pools_75k),
+        "pools_50k": int(row.pools_50k),
     }
 
 
