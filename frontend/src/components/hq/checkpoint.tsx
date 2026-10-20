@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 
 import { api } from "@/lib/api-client";
+import { cleanName } from "@/lib/clean-name";
 import { Character, RigDefs, portraitViewBox } from "@/components/hq/character-rig";
 import type { CharacterDefinition, Emotion, Pose } from "@/lib/hq/characters";
 import {
@@ -54,7 +55,11 @@ interface Track {
 function useCheckpoint() {
   return useQuery({
     queryKey: ["hq", "checkpoint"],
-    queryFn: () => api.get<Checkpoint>("/real-wallet/checkpoint"),
+    queryFn: () => api.get<Checkpoint>("/real-wallet/checkpoint").then((c) => ({
+      ...c,
+      feed: c.feed.map((e) => ({ ...e, symbol: cleanName(e.symbol) ?? null })),
+      rugged_buys: c.rugged_buys?.map((r) => ({ ...r, symbol: cleanName(r.symbol) ?? null })),
+    })),
     // Every 15s (2026-10-04): the homepage shows these counts "in real time".
     refetchInterval: 15_000,
     staleTime: 10_000,
@@ -64,7 +69,9 @@ function useCheckpoint() {
 function useLive(pool?: "10k") {
   return useQuery({
     queryKey: ["hq", "checkpoint", "live", pool ?? "real"],
-    queryFn: () => api.get<LiveBelt>(`/real-wallet/checkpoint/live${pool ? `?pool=${pool}` : ""}`),
+    // Coin names are cleaned on the way in: this runs on the public homepage.
+    queryFn: () => api.get<LiveBelt>(`/real-wallet/checkpoint/live${pool ? `?pool=${pool}` : ""}`)
+      .then((b) => ({ ...b, coins: b.coins?.map((c) => ({ ...c, symbol: cleanName(c.symbol) ?? null })) })),
     refetchInterval: POLL_MS,
     staleTime: POLL_MS / 2,
   });

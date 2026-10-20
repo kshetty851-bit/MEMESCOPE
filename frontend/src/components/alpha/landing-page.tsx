@@ -121,9 +121,6 @@ export function LandingPage() {
               for part of the launch sequence. */}
           <SpaceAudioToggle className="ml-auto" />
         </header>
-        {/* Space knowledge (Karthik, 2026-09-27). Under the header below lg,
-            where the frog is not shown; bottom left, beside the frog, above. */}
-        <SpaceFacts className="relative z-10 mt-3 lg:hidden" />
 
         {/* The mascot lives behind the grid, not beside it. Below `lg` it is out
             of the idle composition — a figure behind a login form on a 375px
@@ -140,7 +137,7 @@ export function LandingPage() {
           // launch station stands (see home-universe.css, 2026-09-24).
           className="relative z-10 grid flex-1 items-center gap-10 py-10 lg:grid-cols-[minmax(0,1fr)_23rem] lg:items-start lg:gap-16 lg:pt-14"
         >
-          <div className="max-w-xl">
+          <div className="hero-copy max-w-xl">
             {/* The wordmark *is* the headline, at hero scale. It used to be the
                 product name set as an ordinary `<h1>`, which meant the brand
                 appeared twice on the page in two different shapes — once in
@@ -167,7 +164,7 @@ export function LandingPage() {
               <span className="hero-tagline__em">tested before it&apos;s traded.</span>
             </p>
             <p className="hero-lede">
-              MEMESCOPE watches around <b>1,500 graduations a day</b>, runs each strategy{" "}
+              MEMESCOPE watches <b>over 1,000 graduations a day</b>, runs each strategy{" "}
               <b>on paper</b> against a fair comparison, and lets <b>real money</b> follow
               only what earns it.
             </p>
@@ -178,6 +175,10 @@ export function LandingPage() {
           />
         </div>
 
+        {/* Space knowledge (Karthik, 2026-09-27). Below lg it sits under the
+            sign-in (2026-10-20: above the logo it was the first thing a phone
+            showed); on wide screens bottom left, beside the frog. */}
+        <SpaceFacts className="relative z-10 mb-6 lg:hidden" />
         <SpaceFacts toFrog className="space-facts--by-frog hidden lg:block" />
       </section>
 

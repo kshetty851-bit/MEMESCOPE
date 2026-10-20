@@ -30,6 +30,8 @@ interface LabSummary {
   pnl_pct: string;
   trades: number;
   rugs: number;
+  /** SOL's price the figures are valued at (2026-10-20). */
+  sol_usd?: number;
 }
 
 const DAY_MS = 86_400_000;
@@ -61,20 +63,21 @@ function LiveLab() {
       live = false;
     };
   }, []);
-  if (!lab) return <p className="mt-3 text-sm text-ink-3">A $400 paper book, judged after 30 days.</p>;
+  if (!lab) return <p className="mt-3 text-sm text-ink-3">A $300 paper book, $100 a trade, judged after 30 days.</p>;
   const up = Number(lab.pnl_usd) >= 0;
   return (
     <div className="mt-3">
       <p className="text-label text-ink-3">{dayOf(lab.started_at, lab.judge_at)} · live</p>
+      {/* Dollars, not a percentage (2026-10-20): "+605%" read like an advert. */}
       <p className="mt-1 text-2xl font-medium tabular-nums text-ink">
         {usd(lab.balance_usd)}{" "}
         <span className={up ? "text-up" : "text-down"}>
-          {up ? "+" : ""}
-          {Number(lab.pnl_pct).toFixed(2)}%
+          {up ? "+" : "−"}{usd(String(Math.abs(Number(lab.pnl_usd))))}
         </span>
       </p>
       <p className="mt-1 text-xs text-ink-3">
         {lab.trades} trades · {lab.rugs} rugs · started with {usd(lab.capital_usd)} of paper money
+        {lab.sol_usd ? ` · valued at today's SOL price ($${Math.round(lab.sol_usd)})` : ""}
       </p>
     </div>
   );

@@ -888,3 +888,13 @@
 @media (max-width: 767px) {
   .sky-craft { width: calc(var(--size) * 0.75); height: calc(var(--size) * 0.75); }
 }
+
+/* Phones (2026-10-20): planets drift behind the hero copy and broke up the
+   sentence; a soft dark scrim keeps it readable without hiding the sky. */
+@media (max-width: 1023px) {
+  .hero-copy { position: relative; }
+  .hero-copy::before {
+    content: ""; position: absolute; inset: -14px -18px; z-index: -1; border-radius: 28px;
+    background: radial-gradient(ellipse at 40% 55%, rgb(5 7 14 / 0.8), rgb(5 7 14 / 0.5) 65%, transparent 100%);
+  }
+}
