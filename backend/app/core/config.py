@@ -687,6 +687,9 @@ class Settings(BaseSettings):
     #: it also needs FOMO_API_KEY. Swaps come from the free public node.
     FEATURE_FOMO_LAB_ENABLED: bool = False
     FOMO_API_KEY: SecretStr = SecretStr("")
+    #: OpenAI text-to-speech for the newsroom TV's anchor (2026-10-20). Empty
+    #: means the TV shows "off air" and nothing is called.
+    OPENAI_API_KEY: SecretStr = SecretStr("")
     #: Momentum V2: twenty $100 wallets on a 3x6 grid of momentum rule against
     #: liquidity floor, each banking at +10% and compounding from what it
     #: realised. Two of the twenty are random controls, without which the other

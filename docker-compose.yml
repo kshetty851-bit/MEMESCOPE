@@ -102,6 +102,8 @@ x-backend-env: &backend-env
   SOLANA_WS_URL: ${SOLANA_WS_URL:-wss://api.mainnet-beta.solana.com}
   HELIUS_API_KEY: ${HELIUS_API_KEY:-}
   FOMO_API_KEY: ${FOMO_API_KEY:-}
+  # The newsroom TV anchor's voice (OpenAI text-to-speech, 2026-10-20).
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   FEATURE_SCANNER_ENABLED: ${FEATURE_SCANNER_ENABLED:-false}
   # pump.fun bonding-curve launches, direct PumpSwap pool launches, Meteora's
   # Dynamic Bonding Curve (dbci…, which Moonshot launches on) and Raydium's
