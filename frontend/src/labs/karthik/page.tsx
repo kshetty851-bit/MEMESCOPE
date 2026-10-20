@@ -576,7 +576,7 @@ function GridPanel({ data, title, rows, value = false, from, testId = "size-grid
           “now” row in the “this book” column is the book itself. Hover a cell for its trades, rugs and lowest
           balance. A look back, not a test.
           {w.floors.some((f) => f.replayed_below)
-            ? " * real-time trades only: the $50k–$75k pools count from 26 Sep and the $25k–$50k pools from 3 Oct, when their paper arms went live. Before that these columns hold only the $75k+ trades."
+            ? " * real-time trades only: the $50k–$75k pools count from 26 Sep, when their paper arm went live. Before that this column holds only the $75k+ trades."
             : null}
         </p>
       </div>
