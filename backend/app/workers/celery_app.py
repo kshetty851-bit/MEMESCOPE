@@ -243,6 +243,13 @@ celery_app.conf.beat_schedule = {
         "task": "app.labs.fomo.scheduler.fomo_tick",
         "schedule": crontab(minute="*/2"),
     },
+    # FOMO Crowd book (2026-10-20): listens ~90s to fomo's app feed, then buys a
+    # fresh graduation on its second fomo buyer and sells 5 min later.
+    "fomo-crowd-tick": {
+        "task": "app.labs.fomo.scheduler.fomo_crowd_tick",
+        "schedule": crontab(minute="*/2"),
+        "options": {"expires": 110},
+    },
     # Momentum V2: twenty wallets on a 3x6 entry grid, each ratcheting at +10%.
     # Same cadence as the tournaments it shares an engine with — the cycle
     # target has to be tested on the same marks `settle` produced.

@@ -107,3 +107,47 @@ async def tick() -> dict[str, Any]:
     except Exception:
         logger.exception("fomo_tick_failed")
         return {"failed": True}
+
+
+CROWD_LOCK_KEY = 0x464F4D43
+
+
+@celery_app.task(name="app.labs.fomo.scheduler.fomo_crowd_tick", soft_time_limit=170, time_limit=180)
+def fomo_crowd_tick() -> dict[str, Any]:
+    return run_async(crowd_tick())
+
+
+async def crowd_tick() -> dict[str, Any]:
+    """The Crowd book (2026-10-20): listen to fomo's app feed, then trade on it."""
+    from app.labs.fomo import crowd
+
+    if not settings.FEATURE_FOMO_LAB_ENABLED:
+        return {"skipped": "fomo_lab_disabled"}
+    fomo_key = settings.FOMO_API_KEY.get_secret_value()
+    if not fomo_key:
+        return {"skipped": "feed_key_missing"}
+    try:
+        alerts = await crowd.read_alerts(fomo_key)       # no DB transaction held while listening
+    except Exception as exc:  # the feed being down must not stop the sells below
+        logger.warning("fomo_crowd_feed_failed", error=type(exc).__name__)
+        alerts = []
+    try:
+        async with SessionFactory() as session:
+            if not await session.scalar(
+                    select(func.pg_try_advisory_xact_lock(DRY_RUN_LOCK_NAMESPACE, CROWD_LOCK_KEY))):
+                return {"skipped": "already_running"}
+            service = FomoService(session)
+            now = datetime.now(UTC)
+            book = await crowd.book(service, now)
+            counts = await crowd.apply(service, book, alerts, now)
+            closed = await crowd.close_due(service, book, now)
+            await service.mark(book, now)
+            if alerts:
+                book.feed_at, book.feed_error = now, None
+            else:
+                book.feed_error = "no_alerts_heard"
+            await session.commit()
+            return {"alerts": len(alerts), "signals": dict(counts), "closed": closed}
+    except Exception:
+        logger.exception("fomo_crowd_tick_failed")
+        return {"failed": True}

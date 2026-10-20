@@ -61,6 +61,7 @@ async def board(session: DbSession) -> dict[str, Any]:
         )
     ).scalars().all()
     consensus = await service.book("consensus")
+    crowd = await service.book("crowd")
     return {
         **base,
         "running": True,
@@ -105,6 +106,20 @@ async def board(session: DbSession) -> dict[str, Any]:
                 select(FomoSignal.outcome, func.count()).where(
                     FomoSignal.book_id == consensus.id, FomoSignal.side == "buy")
                 .group_by(FomoSignal.outcome))).all()),
+        },
+        # The Crowd book (2026-10-20): a fresh pump.fun graduation, bought on
+        # its second fomo buyer from the app feed, sold 5 minutes later.
+        "crowd": None if crowd is None else {
+            "started_at": crowd.started_at.isoformat(),
+            "feed_at": crowd.feed_at.isoformat() if crowd.feed_at else None,
+            "feed_error": crowd.feed_error,
+            **await _book_view(session, crowd),
+            "decisions": dict((await session.execute(
+                select(FomoSignal.outcome, func.count()).where(
+                    FomoSignal.book_id == crowd.id, FomoSignal.side == "buy")
+                .group_by(FomoSignal.outcome))).all()),
+            "coins_seen": await session.scalar(select(func.count(func.distinct(FomoSignal.mint))).where(
+                FomoSignal.book_id == crowd.id)),
         },
     }
 
