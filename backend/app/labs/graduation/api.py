@@ -1607,7 +1607,8 @@ def _family_months(rows: Sequence[Any], buys_before: dict,
         ready = sorted((w for w in wallets if w.cash >= stake),
                        key=lambda w: (w.last_buy, w.name))
         month = (r.closed_at + DUBAI).strftime("%Y-%m")
-        m = months.setdefault(month, {"month": month, "trades": 0, "rugs": 0, "pnl_usd": 0.0})
+        m = months.setdefault(month, {"month": month, "trades": 0, "rugs": 0, "pnl_usd": 0.0,
+                                      "pnl_sol": 0.0})
         for place, w in enumerate(ready):
             k = pl.queue_k(place, stake)
             multiple = (pl.legs_multiple(float(r.net_return), (float(r.impact_open or 0),
@@ -1620,6 +1621,8 @@ def _family_months(rows: Sequence[Any], buys_before: dict,
             m["trades"] += 1
             m["rugs"] += float(r.net_return) <= float(config.OPERATOR_RUG_MOVE)
             m["pnl_usd"] += stake * (multiple - 1)
+            if sol:
+                m["pnl_sol"] += stake * (multiple - 1) / _sol_of(r, float(sol))
     for w in wallets:
         w.settle_until(datetime.max.replace(tzinfo=UTC))
     total = sum(w.cash for w in wallets)
@@ -1628,9 +1631,22 @@ def _family_months(rows: Sequence[Any], buys_before: dict,
         "tickets_by_pool": [list(t) for t in config.KARTHIK_TICKETS_BY_POOL],
         "balance_usd": round(total, 2),
         "pnl_usd": round(total - FAMILY_START * FAMILY_WALLETS, 2),
-        "months": [{**m, "pnl_usd": round(m["pnl_usd"], 2)}
+        "months": [{**m, "pnl_usd": round(m["pnl_usd"], 2), "pnl_sol": round(m["pnl_sol"], 4)}
                    for m in sorted(months.values(), key=lambda m: m["month"])],
+        **(_family_in_sol(rows, months, float(sol)) if sol and rows else {}),
     }
+
+
+def _family_in_sol(rows: Sequence[Any], months: dict[str, dict[str, Any]],
+                   sol_now: float) -> dict[str, Any]:
+    """The wallets' total as SOL, valued at SOL's price now (see `_in_sol`)."""
+    first = _sol_of(min(rows, key=_opened_order), sol_now)
+    start_sol = FAMILY_START * FAMILY_WALLETS / first
+    pnl_sol = sum(m["pnl_sol"] for m in months.values())
+    worth = (start_sol + pnl_sol) * sol_now
+    return {"pnl_sol": round(pnl_sol, 4), "balance_sol": round(start_sol + pnl_sol, 4),
+            "worth_usd_now": round(worth, 2),
+            "pnl_usd_now": round(worth - FAMILY_START * FAMILY_WALLETS, 2)}
 
 
 def _fresh_entry(row: Any) -> bool:
@@ -1736,8 +1752,31 @@ def _start_dates(rows: Sequence[Any], rate: Decimal | None, *, ticket: float, ca
     return list(reversed(out))
 
 
+def _sol_of(row: Any, fallback: float) -> float:
+    """SOL's dollar price when this trade was bought (the latest known if unrecorded)."""
+    return float(getattr(row, "sol_usd_at_open", None) or 0) or fallback
+
+
+def _in_sol(took: Sequence[tuple[Any, float]], capital: float,
+            sol_now: float | None) -> dict[str, Any] | None:
+    """The book as if its money had stayed in SOL (a real wallet's does): the
+    start bought SOL at the first trade's price, each trade's profit landed in
+    SOL at its own price, and the lot is valued at SOL's price now. So it rises
+    and falls with SOL, which the dollar figures do not."""
+    if not sol_now or not took:
+        return None
+    first = _sol_of(took[0][0], sol_now)
+    start_sol = capital / first
+    pnl_sol = sum(m / _sol_of(row, sol_now) for row, m in took)
+    worth = (start_sol + pnl_sol) * sol_now
+    return {"sol_usd_now": round(sol_now, 2), "sol_usd_at_start": round(first, 2),
+            "capital_sol": round(start_sol, 4), "pnl_sol": round(pnl_sol, 4),
+            "balance_sol": round(start_sol + pnl_sol, 4),
+            "worth_usd_now": round(worth, 2), "pnl_usd_now": round(worth - capital, 2)}
+
+
 def _karthik_days(took: Sequence[tuple[Any, float]], start: datetime,
-                  capital: float, cents: Decimal) -> list[dict[str, Any]]:
+                  capital: float, cents: Decimal, sol_now: float | None = None) -> list[dict[str, Any]]:
     """One row per 24 hours since the book opened, newest first.
 
     A trade counts on the day it CLOSED, because that is when its money landed:
@@ -1775,6 +1814,10 @@ def _karthik_days(took: Sequence[tuple[Any, float]], start: datetime,
             "pct": (Decimal(str(100 * sum(money) / opened)).quantize(cents)
                     if opened else Decimal(0)),
             "balance_usd": Decimal(str(balance)).quantize(cents),
+            # The day's profit in SOL, each trade at SOL's price when it was
+            # bought (Karthik, 2026-10-20: "show ... profits as per the SOL value").
+            **({"pnl_sol": round(sum(m / _sol_of(row, sol_now) for row, m in closed), 4)}
+               if sol_now else {}),
         })
     return list(reversed(out))
 
@@ -2244,7 +2287,9 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         # which is what a day's return means. The figures above are percentages
         # of the starting $500, a different denominator for a different
         # question, so this one carries its own label on the page.
-        "days": _karthik_days(took, spec.start, float(spec.capital_usd), cents),
+        "days": _karthik_days(took, spec.start, float(spec.capital_usd), cents,
+                              float(sol) if sol else None),
+        "in_sol": _in_sol(took, float(spec.capital_usd), float(sol) if sol else None),
         # The same trades at other sizes, and on $150k+ pools only. A check,
         # shown beside the book; the book itself stays on its own rule.
         "whatif": _karthik_whatif(grid, sol, capital=float(spec.capital_usd),
