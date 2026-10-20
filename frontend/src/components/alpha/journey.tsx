@@ -382,11 +382,12 @@ export function Journey() {
             {[
               [`Only ${lab && now !== null ? halfDays(lab.started_at, now) : "a few"} days`,
                 "The current rule is still very young."],
-              ["The $75k threshold was discovered from the results",
+              ["The $50k pool floor was chosen from the results",
                 "It wasn't a completely blind hypothesis. Future trades provide the cleaner test."],
-              ["Zero rugs ≠ zero risk", "A single rug can materially affect a small sample."],
-              ["Larger positions are unproven",
-                "$50 trades working does not automatically mean $200 trades will execute equally well."],
+              [`${lab ? lab.rugs : "Some"} rugs so far`,
+                "Rugs are rare, but each one takes most of a trade. One bad day can undo several good ones."],
+              ["Real fills at $100 are unproven",
+                "Paper trades at $100 working does not mean real $100 trades fill the same way in thin pools."],
               ["Earlier strategies also looked good at first",
                 "Some previous strategies later failed. That is why the current one remains under validation."],
             ].map(([head, body], i) => (

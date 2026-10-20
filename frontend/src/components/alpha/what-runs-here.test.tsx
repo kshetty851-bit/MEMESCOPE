@@ -43,7 +43,7 @@ describe("the homepage's lower half", () => {
     const links = screen.getAllByRole("link").map((a) => a.getAttribute("href"));
     expect(links).toEqual(["/karthik-lab", "/real-wallet", "/hq"]);
     expect(await screen.findByText("$781.01")).toBeInTheDocument();
-    expect(screen.getByText("+30.17%")).toBeInTheDocument();
+    expect(screen.getByText("+$181.01")).toBeInTheDocument();   // dollars, not a percentage
     // The retired surfaces are gone from the homepage.
     expect(screen.queryByText(/radar/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/track record/i)).not.toBeInTheDocument();

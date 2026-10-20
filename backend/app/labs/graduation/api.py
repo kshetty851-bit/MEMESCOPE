@@ -1845,6 +1845,12 @@ async def karthik_summary(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     capital = float(book["capital_usd"])
     out = {k: book[k] for k in ("started_at", "judge_at", "capital_usd", "ticket_usd",
                                 "balance_usd", "pnl_usd", "trades", "wins", "rugs")}
+    # The same figure the lab page leads with (2026-10-20): the book's SOL at
+    # SOL's price now, so the homepage and the lab never disagree.
+    if s := book.get("in_sol"):
+        out["balance_usd"] = Decimal(str(s["worth_usd_now"])).quantize(Decimal("0.01"))
+        out["pnl_usd"] = Decimal(str(s["pnl_usd_now"])).quantize(Decimal("0.01"))
+        out["sol_usd"] = s["sol_usd_now"]
     out["pnl_pct"] = (Decimal(str(100 * float(book["pnl_usd"]) / capital))
                       .quantize(Decimal("0.01")) if capital else Decimal(0))
     _KARTHIK_PUBLIC = (now, out)
