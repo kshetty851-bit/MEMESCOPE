@@ -36,6 +36,17 @@ function deviceVoice(): SpeechSynthesisVoice | null {
 }
 type State = "idle" | "tuning" | "live" | "ended" | "off";
 
+/** A tenth of a second of silence, played inside the tap so iPhones let the
+    same audio element play the bulletin once it arrives. */
+function silence(): string {
+  const n = 800, b = new DataView(new ArrayBuffer(44 + n * 2));
+  const w = (o: number, t: string) => [...t].forEach((ch, i) => b.setUint8(o + i, ch.charCodeAt(0)));
+  w(0, "RIFF"); b.setUint32(4, 36 + n * 2, true); w(8, "WAVEfmt "); b.setUint32(16, 16, true);
+  b.setUint16(20, 1, true); b.setUint16(22, 1, true); b.setUint32(24, 8000, true); b.setUint32(28, 16000, true);
+  b.setUint16(32, 2, true); b.setUint16(34, 16, true); w(36, "data"); b.setUint32(40, n * 2, true);
+  return URL.createObjectURL(new Blob([b.buffer], { type: "audio/wav" }));
+}
+
 /** A three-note studio sting and a soft pad under the voice, made here: no licensed music. */
 function sting(ctx: AudioContext): { stop: () => void } {
   const master = ctx.createGain();
@@ -96,10 +107,8 @@ export function NewsTV({ data }: { data?: Newsroom }) {
     if (!got.on_air) { setState("off"); return; }
     setB(got);
     if (got.mode === "device") { speak(c, got.segments); return; }
-    audio.current?.pause();
-    const el = new Audio();          // a media element can feed only one analyser source
-    audio.current = el;
-    el.crossOrigin = "anonymous";
+    const el = audio.current;        // made and unlocked inside the tap
+    if (!el) { setState("off"); return; }
     el.src = `${env.NEXT_PUBLIC_API_URL}${got.audio}`;
     const an = c.createAnalyser();
     an.fftSize = 512;
@@ -277,8 +286,14 @@ export function NewsTV({ data }: { data?: Newsroom }) {
                 : state === "off" ? <span className="np-mono">Off air — back soon</span>
                 : (
                   <button type="button" className="np-tv__play" onClick={() => {
-                    // iPhones only allow speech started inside the tap: unlock it now, speak later.
+                    // iPhones only allow sound started inside the tap: unlock speech and a
+                    // fresh audio element now (one element feeds one analyser), play later.
                     window.speechSynthesis?.speak(new SpeechSynthesisUtterance(""));
+                    audio.current?.pause();
+                    const el = new Audio(silence());
+                    el.crossOrigin = "anonymous";
+                    void el.play().catch(() => undefined);
+                    audio.current = el;
                     void watch();
                   }}>
                     ▶ {state === "ended" ? "Watch again" : "Watch live"}

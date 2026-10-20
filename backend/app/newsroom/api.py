@@ -36,14 +36,13 @@ async def bulletin() -> dict[str, Any]:
     redis = await init_redis()
     key = settings.OPENAI_API_KEY.get_secret_value()
     bundle = json.loads(await redis.get(KEY) or "{}")
-    if not key and bundle.get("stories"):
-        # No paid voice (Karthik, 2026-10-20: "use free voice now"): the words
-        # only, read aloud by the viewer's own device.
-        return {"on_air": True, "mode": "device", "segments": anchor.script(bundle)}
     meta = await anchor.bulletin(redis, bundle, key)
     if not meta:
-        return {"on_air": False, "reason": "no_key" if not key else "warming_up"}
-    return {"on_air": True, "mode": "openai", **meta,
+        if bundle.get("stories"):
+            # No voice could be made: the words only, read by the viewer's device.
+            return {"on_air": True, "mode": "device", "segments": anchor.script(bundle)}
+        return {"on_air": False, "reason": "warming_up"}
+    return {"on_air": True, "mode": meta.get("engine", "openai"), **meta,
             "audio": f"/api/v1/newsroom/bulletin/{meta['id']}.mp3"}
 
 

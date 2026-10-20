@@ -3,7 +3,9 @@
 Karthik, 2026-10-20: "a live TV female news reporter ... narrate the News
 posted in our page ... should sound real voice". The words come only from the
 bundle on the page (headlines, our pump.fun numbers, the market); the voice is
-OpenAI text-to-speech. A bulletin is made when someone presses play and the
+OpenAI text-to-speech with a key, otherwise Microsoft Edge's free neural voice
+(`edge-tts`, unofficial: if it breaks the TV falls back to the device's own
+voice). A bulletin is made when someone presses play and the
 last one is older than `MAX_AGE`, at most `DAILY_CAP` a day, so the bill
 follows viewers and has a ceiling (~1 minute of speech each, about 1.5 cents).
 """
@@ -28,6 +30,7 @@ DAY_KEY = "newsroom:tv:day:"
 MAX_AGE = timedelta(minutes=60)
 DAILY_CAP = 24
 MODEL, VOICE = "gpt-4o-mini-tts", "coral"
+EDGE_VOICE, EDGE_RATE = "en-US-AriaNeural", "-4%"
 STYLE = ("You are a warm, confident television news anchor reading a short bulletin "
          "live in a studio. Clear, measured pace, natural pauses between stories, "
          "a light smile in the voice. Never rushed.")
@@ -111,16 +114,29 @@ async def _speak(api_key: str, text: str) -> bytes:
         return r.content
 
 
+async def _speak_edge(text: str) -> bytes:
+    import edge_tts
+
+    out = bytearray()
+    async for chunk in edge_tts.Communicate(text, EDGE_VOICE, rate=EDGE_RATE).stream():
+        if chunk["type"] == "audio":
+            out += chunk["data"]
+    if not out:
+        raise LookupError("edge_tts returned no audio")
+    return bytes(out)
+
+
 async def bulletin(redis, bundle: dict[str, Any], api_key: str,
                    now: datetime | None = None) -> dict[str, Any] | None:
     """The newest bulletin, making a new one first if the last is stale.
 
-    Returns None when there is none yet and none can be made (no key, the
-    daily cap, or another request already making it)."""
+    `api_key` empty means the free Edge voice. Returns None when there is none
+    yet and none can be made (the daily cap, a failed voice, or another
+    request already making it)."""
     now = now or datetime.now(UTC)
     meta = json.loads(await redis.get(META_KEY) or "null")
     fresh = meta and now - datetime.fromisoformat(meta["made_at"]) < MAX_AGE
-    if fresh or not api_key or not bundle.get("stories"):
+    if fresh or not bundle.get("stories"):
         return meta
     day = DAY_KEY + f"{now:%Y%m%d}"
     if int(await redis.get(day) or 0) >= DAILY_CAP:
@@ -130,17 +146,18 @@ async def bulletin(redis, bundle: dict[str, Any], api_key: str,
     try:
         segs = script(bundle, now)
         text = " ".join(s["text"] for s in segs)
-        audio = await _speak(api_key, text)
+        audio = await (_speak(api_key, text) if api_key else _speak_edge(text))
         bid = hashlib.sha256(audio).hexdigest()[:16]
         await redis.set(AUDIO_KEY + bid, base64.b64encode(audio).decode(), ex=6 * 3600)
         await redis.incr(day)
         await redis.expire(day, 2 * 86400)
         meta = {"id": bid, "made_at": now.isoformat(), "segments": segs,
-                "chars": len(text), "voice": VOICE}
+                "chars": len(text), "engine": "openai" if api_key else "edge",
+                "voice": VOICE if api_key else EDGE_VOICE}
         await redis.set(META_KEY, json.dumps(meta))
         logger.info("newsroom_tv_bulletin", id=bid, chars=len(text), bytes=len(audio))
         return meta
-    except httpx.HTTPError as exc:
+    except Exception as exc:  # a voice service failing must never break the page
         logger.warning("newsroom_tv_failed", error=type(exc).__name__)
         return meta
     finally:
