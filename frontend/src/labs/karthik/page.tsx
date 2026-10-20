@@ -11,7 +11,7 @@ import { WorldClocks } from "./world-clocks";
 
 import { useKarthikBook, usePumpfunDays, useWalletsProfit } from "./hooks";
 import type {
-  KarthikBook, KarthikDay, KarthikFlows, KarthikTrade, KarthikWhatIfLine, PumpfunDay,
+  FamilyMonths, KarthikBook, KarthikDay, KarthikFlows, KarthikTrade, KarthikWhatIfLine, PumpfunDay,
   StartDate, WalletProfit,
 } from "./types";
 
@@ -846,6 +846,36 @@ function short(value: string | number): string {
   return `$${Math.round(n)}`;
 }
 
+/** "3 user wallets with $500 each ... month wise" (Karthik, 2026-10-20): the
+    book's own trades on three wallets, the later ones paying the queue's price. */
+export function FamilyBox({ f }: { f: FamilyMonths }) {
+  const tone = (v: number) => (v > 0 ? "text-up" : v < 0 ? "text-down" : "text-ink-dim");
+  const signed = (v: number) => `${v >= 0 ? "+" : "-"}${usd(Math.abs(v))}`;
+  return (
+    <div className="mt-2 rounded-lg border border-line bg-surface px-3 py-2 text-right" data-testid="family-box">
+      <div className="text-[11px] uppercase tracking-wider text-ink-dim">
+        If {f.wallets} user wallets × {usd(f.start_usd)} had traded it
+      </div>
+      <div className={`text-lg font-semibold tabular-nums ${tone(f.pnl_usd)}`}>{signed(f.pnl_usd)}</div>
+      <table className="ml-auto text-[12px] tabular-nums">
+        <tbody>
+          {f.months.map((m) => (
+            <tr key={m.month}>
+              <td className="pr-3 text-left text-ink-dim">
+                {new Date(`${m.month}-01T00:00:00`).toLocaleDateString("en-GB", { month: "short", year: "numeric" })}
+              </td>
+              <td className={`text-right font-medium ${tone(m.pnl_usd)}`}>{signed(m.pnl_usd)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="mt-1 text-[10px] text-ink-dim">
+        {usd(f.ticket_usd)} ticket each, sized like USER1 · paper estimate, not real fills
+      </div>
+    </div>
+  );
+}
+
 /** Money flowing into pump.fun, day by day since the book opened (Karthik,
     2026-09-30). Its own call, so a slow count never holds up the book. */
 export function PumpfunMoneyTable({ days, graduationSol }: {
@@ -1028,6 +1058,7 @@ export function KarthikLabPage() {
               </div>
             </div>
           </div>
+          {data.family ? <FamilyBox f={data.family} /> : null}
           <PoolTrades trades={data.trades_list} />
           <MoneyIn flows={data.flows} />
         </div>
