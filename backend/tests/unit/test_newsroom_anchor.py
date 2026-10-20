@@ -61,17 +61,24 @@ class Redis:
         pass
 
 
-def test_one_bulletin_an_hour_and_none_without_a_key(monkeypatch):
+def test_one_bulletin_an_hour_and_the_free_voice_without_a_key(monkeypatch):
     calls = []
 
     async def speak(key, text):
         calls.append(text)
         return b"mp3-" + str(len(calls)).encode()
 
+    async def edge(text):
+        calls.append("edge")
+        return b"edge-mp3"
+
     monkeypatch.setattr(anchor, "_speak", speak)
+    monkeypatch.setattr(anchor, "_speak_edge", edge)
+    free = asyncio.run(anchor.bulletin(Redis(), BUNDLE, "", NOW))
+    assert free["engine"] == "edge" and calls == ["edge"]
+    calls.clear()
     r = Redis()
     run = lambda at, key="k": asyncio.run(anchor.bulletin(r, BUNDLE, key, at))  # noqa: E731
-    assert run(NOW, key="") is None and calls == []
     first = run(NOW)
     assert run(NOW + timedelta(minutes=59)) == first and len(calls) == 1          # still fresh
     second = run(NOW + timedelta(minutes=61))
@@ -79,3 +86,13 @@ def test_one_bulletin_an_hour_and_none_without_a_key(monkeypatch):
     assert asyncio.run(anchor.audio(r, second["id"])) == b"mp3-2"
     r.d[anchor.DAY_KEY + f"{NOW:%Y%m%d}"] = anchor.DAILY_CAP                        # cap reached
     assert run(NOW + timedelta(hours=3)) == second and len(calls) == 2
+
+
+def test_a_failed_free_voice_leaves_the_device_to_read_it(monkeypatch):
+    async def broken(text):
+        raise LookupError("403")
+
+    monkeypatch.setattr(anchor, "_speak_edge", broken)
+    r = Redis()
+    assert asyncio.run(anchor.bulletin(r, BUNDLE, "", NOW)) is None
+    assert anchor.LOCK_KEY not in r.d                     # the next viewer can try again

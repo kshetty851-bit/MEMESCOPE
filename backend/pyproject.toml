@@ -32,6 +32,10 @@ dependencies = [
     # Solana's documented Python SDK. It is isolated to the future execution
     # wallet boundary; Paper Wallet remains quote-only and deterministic.
     "solders>=0.26.0",
+    # The newsroom TV anchor's free voice: Microsoft Edge's neural "Read Aloud"
+    # voices (Karthik, 2026-10-20, option C). Unofficial; 7.3+ passes the
+    # service's current access check, 7.0 is refused with 403.
+    "edge-tts>=7.3.1",
 ]
 
 [project.optional-dependencies]
