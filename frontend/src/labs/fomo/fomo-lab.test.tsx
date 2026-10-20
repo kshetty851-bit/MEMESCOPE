@@ -66,4 +66,16 @@ describe("FOMO Lab", () => {
     expect(screen.getByText("already held")).toBeInTheDocument();
     expect(screen.getByText("3 / 20")).toBeInTheDocument();
   });
+
+  it("shows the crowd book on fresh graduations", async () => {
+    show({
+      ...base, running: true, max_open_trades: 20, open_trades: 0, equity_usd: "500", pnl_usd: "0",
+      cash_usd: "500", leaders: [], positions: [], signals: [],
+      crowd: { started_at: "2026-10-20T18:00:00Z", feed_at: "2026-10-20T18:10:00Z", feed_error: null, coins_seen: 4,
+               cash_usd: "475", open_value_usd: "26", equity_usd: "501", pnl_usd: "1", open_trades: 1,
+               positions: [], decisions: { opened: 1, first_buyer: 3 } },
+    });
+    expect(await screen.findByText("Crowd book · fresh graduations")).toBeInTheDocument();
+    expect(screen.getByText(/1 bought · 3 first fomo buyer/)).toBeInTheDocument();
+  });
 });

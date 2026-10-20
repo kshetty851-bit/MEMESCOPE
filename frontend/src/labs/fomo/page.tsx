@@ -62,6 +62,14 @@ interface Board {
   signals?: Signal[];
   /** The multiple-traders book (2026-10-19). */
   consensus?: Consensus | null;
+  /** The Crowd book (2026-10-20): fresh graduations fomo's big traders pile into. */
+  crowd?: Crowd | null;
+}
+
+interface Crowd extends Consensus {
+  feed_at: string | null;
+  feed_error: string | null;
+  coins_seen: number;
 }
 
 interface Consensus {
@@ -110,6 +118,8 @@ const OUTCOMES: Record<string, { cls: string; label?: string }> = {
   max_open_trades: { cls: "bg-plasma/15 text-plasma ring-plasma/30", label: "all lots open" },
   already_held: { cls: "bg-plasma/15 text-plasma ring-plasma/30", label: "already held" },
   no_consensus: { cls: "bg-raised text-ink-dim ring-line", label: "no 2nd trader" },
+  first_buyer: { cls: "bg-raised text-ink-dim ring-line", label: "first fomo buyer" },
+  same_trader_again: { cls: "bg-raised text-ink-dim ring-line", label: "same trader again" },
   insufficient_cash: { cls: "bg-plasma/15 text-plasma ring-plasma/30", label: "out of cash" },
 };
 
@@ -290,6 +300,33 @@ function ConsensusBook({ c, maxLots, trade }: { c: Consensus; maxLots: number; t
   );
 }
 
+function CrowdBook({ c, maxLots, trade }: { c: Crowd; maxLots: number; trade: string }) {
+  const skipped = Object.entries(c.decisions).filter(([k]) => k !== "opened");
+  return (
+    <Section title="Crowd book · fresh graduations" count={c.positions.length}>
+      <p className="mb-3 text-sm text-ink-dim">
+        A third $500 paper book. It listens to fomo&apos;s live app feed (only big trades, about
+        $3k+ positions) and buys a pump.fun coin that graduated in the last 30 minutes when a{" "}
+        <b className="text-ink-2">second different fomo trader</b> buys it, then sells 5 minutes later.
+        Started {time(c.started_at)}. {usd(trade)} a lot, up to {maxLots} at once.{" "}
+        {c.feed_error ? <span className="text-warn">Feed: {c.feed_error.replaceAll("_", " ")}.</span>
+          : c.feed_at ? <>Feed heard {time(c.feed_at)}.</> : null}
+      </p>
+      <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Stat label="Equity" value={usd(c.equity_usd)} cls="text-ink" bar="from-accent/15 to-transparent" />
+        <Stat label="P/L" value={usd(c.pnl_usd, true)} cls={tone(c.pnl_usd)}
+              bar={Number(c.pnl_usd) < 0 ? "from-down/15 to-transparent" : "from-up/15 to-transparent"} />
+        <Stat label="Fresh graduations fomo bought" value={String(c.coins_seen)} cls="text-brand-bright"
+              bar="from-brand-bright/15 to-transparent" />
+        <Stat label="Open lots" value={`${c.open_trades} / ${maxLots}`} cls="text-plasma" bar="from-plasma/15 to-transparent"
+              hint={`${c.decisions.opened ?? 0} bought${skipped.length ? " · " : ""}${skipped
+                .map(([k, n]) => `${n} ${OUTCOMES[k]?.label ?? k.replaceAll("_", " ")}`).join(" · ")}`} />
+      </div>
+      <Lots positions={c.positions} />
+    </Section>
+  );
+}
+
 const MEDALS = ["bg-warn text-canvas", "bg-ink-2 text-canvas", "bg-down text-canvas"];
 
 export function FomoLabPage() {
@@ -389,6 +426,7 @@ export function FomoLabPage() {
           </Section>
 
           {data.consensus ? <ConsensusBook c={data.consensus} maxLots={maxLots} trade={data.trade_usd} /> : null}
+          {data.crowd ? <CrowdBook c={data.crowd} maxLots={maxLots} trade={data.trade_usd} /> : null}
 
           <Section title="Observed swaps and decisions" count={data.signals?.length ?? 0}>
             <div className="max-h-[520px] overflow-auto">
