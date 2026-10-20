@@ -387,8 +387,63 @@
   .np-heat__cell { min-height: 70px; flex-basis: calc(var(--w) * 70px); }
 }
 
+
+/* ---- Newsroom TV (2026-10-20): an AI anchor in a small set, top right ---- */
+.np-tv { position: fixed; top: 76px; right: 18px; z-index: 40; width: 340px; font-family: var(--np-body), sans-serif; animation: np-tv-in 0.7s var(--np-ease) both; }
+@keyframes np-tv-in { from { opacity: 0; transform: translateY(-10px) scale(0.96); } to { opacity: 1; transform: none; } }
+.np-tv__antenna { position: absolute; left: 50%; top: -26px; width: 70px; height: 28px; transform: translateX(-50%); }
+.np-tv__antenna::before, .np-tv__antenna::after { content: ""; position: absolute; bottom: 0; width: 2px; height: 32px; background: var(--np-paper-3); transform-origin: bottom; }
+.np-tv__antenna::before { left: 26px; transform: rotate(-28deg); }
+.np-tv__antenna::after { right: 26px; transform: rotate(28deg); }
+.np-tv__set { display: flex; gap: 8px; padding: 10px; background: linear-gradient(180deg, #2b2a24, #1a1915); border: 1px solid var(--np-rule-strong); border-radius: 18px; }
+.np-tv__screen { position: relative; flex: 1; aspect-ratio: 8 / 5; overflow: hidden; border-radius: 14px / 18px; background: #050505; }
+.np-tv__studio { display: block; width: 100%; height: 100%; }
+.np-tv__glass { position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+  background: repeating-linear-gradient(0deg, rgb(0 0 0 / 0.16) 0 1px, transparent 1px 3px), radial-gradient(ellipse at center, transparent 55%, rgb(0 0 0 / 0.55) 100%); }
+.np-tv__glass::after { content: ""; position: absolute; inset: 0; background: linear-gradient(130deg, rgb(255 255 255 / 0.08), transparent 40%); }
+.np-tv__panel { width: 22px; display: flex; flex-direction: column; align-items: center; gap: 8px; padding-top: 8px; }
+.np-tv__panel i { width: 14px; height: 14px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #6d6a5e, #24231e); border: 1px solid var(--np-rule); }
+.np-tv__panel span { flex: 1; width: 10px; margin-bottom: 6px; background: repeating-linear-gradient(0deg, var(--np-rule) 0 2px, transparent 2px 5px); }
+.np-tv__live { position: absolute; top: 7px; left: 8px; display: inline-flex; align-items: center; gap: 5px; padding: 2px 6px; font: 800 0.62rem var(--np-head), sans-serif; letter-spacing: 0.08em; color: var(--np-ink); background: var(--np-lime); }
+.np-tv__live i { width: 6px; height: 6px; border-radius: 50%; background: var(--np-ink); }
+.np-tv.is-live .np-tv__live i { animation: np-glow 1.2s ease-in-out infinite; }
+.np-tv__ai { position: absolute; top: 7px; right: 8px; font-size: 0.56rem; color: var(--np-paper-2); background: rgb(13 13 11 / 0.6); padding: 1px 5px; }
+.np-tv__lower { position: absolute; left: 8px; right: 8px; bottom: 20px; display: flex; align-items: stretch; min-height: 20px; transform: translateY(0); }
+.np-tv__bug { display: grid; place-items: center; padding: 0 6px; font: 800 0.62rem var(--np-head), sans-serif; color: var(--np-ink); background: var(--np-lime); }
+.np-tv__label { flex: 1; min-width: 0; padding: 3px 7px; font: 700 0.68rem/1.2 var(--np-head), sans-serif; color: var(--np-ink); background: var(--np-paper);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; animation: np-tv-wipe 0.5s var(--np-ease) both; }
+@keyframes np-tv-wipe { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+.np-tv__crawl { position: absolute; left: 0; right: 0; bottom: 0; height: 17px; overflow: hidden; background: rgb(13 13 11 / 0.92); color: var(--np-paper); font-size: 0.6rem; line-height: 17px; white-space: nowrap; }
+.np-tv__crawl span { display: inline-block; padding-left: 100%; animation: np-tv-crawl 26s linear infinite; }
+@keyframes np-tv-crawl { to { transform: translateX(-100%); } }
+.np-tv__cover { position: absolute; inset: 0; display: grid; place-items: end start; padding: 0 0 46px 10px; background: linear-gradient(180deg, transparent 55%, rgb(13 13 11 / 0.35)); }
+.np-tv__cover.is-static { background: repeating-radial-gradient(circle at 30% 40%, #555 0 1px, #111 1px 3px); animation: np-tv-static 0.12s steps(2) infinite; }
+.np-tv__cover .np-mono { color: var(--np-paper); background: rgb(13 13 11 / 0.8); padding: 3px 8px; }
+@keyframes np-tv-static { to { background-position: 7px 3px; } }
+.np-tv__play { font: 800 0.7rem var(--np-head), sans-serif; letter-spacing: 0.06em; text-transform: uppercase; color: var(--np-ink); background: var(--np-lime); border: 0; padding: 6px 11px; cursor: pointer; transition: transform 0.2s var(--np-ease); }
+.np-tv__play:hover { transform: scale(1.05); }
+.np-tv__play:focus-visible, .np-tv__controls button:focus-visible, .np-tv-pill:focus-visible { outline: 2px solid var(--np-cyan); outline-offset: 2px; }
+.np-tv__controls { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 6px; font-size: 0.72rem; }
+.np-tv__controls button { font: 700 0.72rem var(--np-head), sans-serif; color: var(--np-paper); background: var(--np-ink-2); border: 1px solid var(--np-rule-strong); padding: 3px 9px; cursor: pointer; }
+.np-tv__wall { font: 800 11px var(--np-head), sans-serif; letter-spacing: 0.16em; fill: var(--np-paper); opacity: 0.85; }
+.np-tv__wall--sub { font-size: 7px; fill: var(--np-lime); letter-spacing: 0.24em; }
+.np-tv__face { --open: 0; }
+.np-tv__mouth { transform: scaleY(calc(1 + var(--open) * 3.4)); transition: transform 60ms linear; }
+.np-tv__eyes { transform-origin: 160px 91px; animation: np-tv-blink 4.6s infinite; }
+@keyframes np-tv-blink { 0%, 95%, 100% { transform: scaleY(1); } 97% { transform: scaleY(0.1); } }
+.np-tv__anchor { transform-origin: 160px 200px; }
+.np-tv.is-live .np-tv__anchor { animation: np-tv-sway 6s ease-in-out infinite; }
+@keyframes np-tv-sway { 0%, 100% { transform: rotate(0); } 30% { transform: rotate(-1.4deg); } 65% { transform: rotate(1.1deg); } }
+.np-tv__windows { animation: np-glow 5s ease-in-out infinite; }
+.np-tv-pill { position: fixed; right: 16px; bottom: 16px; z-index: 40; display: inline-flex; align-items: center; gap: 7px; padding: 9px 14px;
+  font: 800 0.78rem var(--np-head), sans-serif; letter-spacing: 0.08em; color: var(--np-ink); background: var(--np-lime); border: 0; border-radius: 999px; cursor: pointer; }
+.np-tv-pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--np-ink); animation: np-glow 1.6s ease-in-out infinite; }
+@media (max-width: 1200px) { .np-tv { width: 290px; } }
+@media (max-width: 767px) { .np-tv { top: auto; bottom: 16px; right: 16px; left: 16px; width: auto; max-width: 340px; margin-left: auto; } .np-tv__antenna { display: none; } }
+
 @media (prefers-reduced-motion: reduce) {
   .np *, .np *::before, .np *::after { animation: none !important; transition: none !important; }
   .np-js .np-reveal:not(.is-in) { opacity: 1; transform: none; }
   .np-ticker__track { transform: none; }
+  .np-tv__crawl span { padding-left: 0; }
 }

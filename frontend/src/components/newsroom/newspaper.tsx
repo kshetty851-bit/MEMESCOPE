@@ -31,6 +31,7 @@ import { ago, clock, pct, trend, usd } from "./format";
 import { useLastVisit, useNewsroom, useNow, useWatchlist } from "./hooks";
 import { IconArrow, IconPause, IconPlay } from "./icons";
 import { Events, Heatmap, MarketPulse, PumpfunToday, SecurityDesk } from "./markets";
+import { NewsTV } from "./tv";
 import type { Coin, Newsroom, Story } from "./types";
 import { Newswire, WorldMap } from "./wire";
 
@@ -69,6 +70,7 @@ export function Newspaper() {
         </filter>
       </svg>
       <Masthead data={data} now={now} failed={nr.isError} />
+      <NewsTV data={data} />
       <Ticker coins={coins} />
       {!ready ? (
         <Press state={nr.isError ? "error" : data?.warming_up ? "warming" : "loading"} />
