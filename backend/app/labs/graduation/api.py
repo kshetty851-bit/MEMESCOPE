@@ -1468,8 +1468,9 @@ KARTHIK_WHATIF_SIZES = tuple((t, 6 * t) for t in (10, 20, 25, 50, 100, 200))
 #: Karthik, 2026-09-30: "remove 25k 50k ... 300k 500k", keep 200k.
 #: Each column is (at least, under); None = no upper bound. Karthik,
 #: 2026-10-03: the $100k-$150k band beside $75k, the best pool size since
-#: 18 Sep by every graduation's 5-minute return.
-KARTHIK_GRID_COLUMNS = ((25_000, None), (50_000, None), (75_000, None),
+#: 18 Sep by every graduation's 5-minute return. Karthik, 2026-10-20: "remove
+#: 25k, keep the rest" (the book starts at $50k).
+KARTHIK_GRID_COLUMNS = ((50_000, None), (75_000, None),
                         (100_000, 150_000), (100_000, None), (150_000, None),
                         (200_000, None))
 #: The $25k+ and $50k+ columns (Karthik, 2026-10-03: "add 50k pool too",
