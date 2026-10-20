@@ -1586,9 +1586,9 @@ def _karthik_line(rows: Sequence[Any], sol: Decimal | None, *, size: float,
 #: Karthik, 2026-10-20: "if we used 3 user wallets with 500$ each ... month
 #: wise". Karthik, same day: "shud show profit based on the karthik lab rule" -
 #: so each stakes exactly what the lab stakes ($100 under $150k, $25 above),
-#: all three in every coin one after another, the later ones paying the
-#: queue's impact.
-FAMILY_WALLETS, FAMILY_START = 3, 500.0
+#: every wallet in every coin one after another, the later ones paying the
+#: queue's impact. Karthik, 2026-10-20: "change to 2 wallets".
+FAMILY_WALLETS, FAMILY_START = 2, 500.0
 
 
 def _family_months(rows: Sequence[Any], buys_before: dict,
