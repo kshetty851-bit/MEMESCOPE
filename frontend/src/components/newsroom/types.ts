@@ -26,13 +26,11 @@ export interface BtcNet {
   height: number; difficulty_change_pct: number; difficulty_at: string; difficulty_blocks_left: number;
   halving_height: number; halving_blocks_left: number; halving_estimate: string;
 }
-export interface Meme {
-  chain: string; address: string; boost: number | null; liquidity: number | null; volume24h: number | null;
-  change24h: number | null; fdv: number | null; created: number | null; symbol: string | null; name: string | null; url: string | null;
-}
 export interface Ours {
   graduations_24h: number; graduations_1h: number; rug_measured_24h: number; rugged_24h: number;
   rug_rate_24h: number | null; recent_drains: { mint: string; symbol: string | null; name: string | null; graduated_at: string }[];
+  /** Graduated in the last day and not drained in hour one, best first hour first (2026-10-20). */
+  survivors?: { mint: string; symbol: string | null; name: string | null; graduated_at: string; liquidity_usd: number; change_1h_pct: number | null }[];
   karthik_lab: { started_at: string; judge_at: string; balance_usd: string; pnl_usd: string; pnl_pct: string; capital_usd: string; trades: number; wins: number; rugs: number } | null;
 }
 export interface MapPoint { code: string; name: string; lat: number; lon: number; count: number; stories: { id: string; title: string; url: string; source: string; at: string }[] }
@@ -48,7 +46,6 @@ export interface Newsroom {
   fear_greed?: { value: number; label: string; yesterday: number | null } | null;
   hacks?: Hack[] | null;
   bitcoin_network?: BtcNet | null;
-  memes?: Meme[] | null;
   ours?: Ours | null;
   stories?: Story[];
   lead?: Story | null;

@@ -57,7 +57,6 @@
 }
 .np-mast__issue { color: var(--np-paper-3); }
 .np-date--short { display: none; }
-.np-meme > .np-dim:first-of-type { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .np-live { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; color: var(--np-paper-2); }
 .np-live i { width: 8px; height: 8px; border-radius: 50%; background: var(--np-lime); box-shadow: 0 0 0 0 rgb(198 255 58 / 0.6); animation: np-beat 1.8s var(--np-ease) 1; }
 .np-live.is-stale i { background: var(--np-orange); animation: none; }
@@ -261,18 +260,16 @@
 .np-ours { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 12px 14px; margin: 0 0 14px; background: rgb(73 216 255 / 0.06); border-top: 1px solid rgb(73 216 255 / 0.35); }
 .np-ours .np-mono { color: var(--np-cyan); font-size: 1rem; }
 .np-badge { font-family: var(--np-head), sans-serif; font-weight: 800; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; background: var(--np-cyan); color: var(--np-ink); padding: 1px 6px; border-radius: 2px; }
-.np-memes { list-style: none; margin: 0; padding: 0; }
-.np-meme { display: grid; grid-template-columns: minmax(0, 1.3fr) 84px 1fr 1fr 70px auto; align-items: center; gap: 4px 12px; padding: 10px 0; border-bottom: 1px solid var(--np-rule); }
-.np-meme__name { font-family: var(--np-head), sans-serif; font-weight: 800; font-size: 1.1rem; letter-spacing: 0.02em; display: flex; flex-direction: column; min-width: 0; }
-.np-meme__name span { font-family: var(--np-body), serif; font-weight: 400; font-size: 0.82rem; color: var(--np-paper-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.np-meme__why { grid-column: 1 / -1; font-size: 0.82rem; color: var(--np-paper-3); }
-.np-risk { font-family: var(--np-head), sans-serif; font-weight: 800; font-size: 0.8rem; letter-spacing: 0.05em; text-transform: uppercase; padding: 2px 7px; border-radius: 2px; white-space: nowrap; }
-.r-high { background: var(--np-orange); color: var(--np-ink); }
-.r-elevated { border: 1px solid var(--np-orange); color: var(--np-orange); }
-.r-watch { border: 1px solid var(--np-rule-strong); color: var(--np-paper-2); }
 .np-drains { list-style: none; margin: 0 0 10px; padding: 0; }
 .np-drains li { display: grid; grid-template-columns: 70px minmax(0, 1fr) auto; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--np-rule); font-size: 0.95rem; }
 .np-drains li a { color: var(--np-cyan); }
+/* Today on pump.fun (2026-10-20): MEMESCOPE's own day, first on the page. */
+.np-pf__figs { grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 0 0 14px; }
+.np-pf__cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0 clamp(24px, 3vw, 44px); }
+.np-pf__cols > div + div { padding-left: clamp(20px, 3vw, 40px); border-left: 1px solid var(--np-rule); }
+.np-pf__sub { font-family: var(--np-head), sans-serif; font-weight: 800; font-size: 0.86rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--np-paper-3); margin: 6px 0 4px; }
+.np-pf__coin { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.np-pf__val { display: inline-flex; gap: 10px; align-items: baseline; }
 
 /* Heatmap */
 .np-heat { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; }
@@ -328,6 +325,9 @@
   .np-split > .np-sec + .np-sec { border-top: 1px solid var(--np-rule); }
   .np-secwire { margin-top: 12px; }
   .np-pulse { grid-template-columns: 1fr 1fr; }
+  .np-pf__figs { grid-template-columns: 1fr 1fr; }
+  .np-pf__cols { grid-template-columns: 1fr; }
+  .np-pf__cols > div + div { padding-left: 0; border-left: 0; border-top: 1px solid var(--np-rule); margin-top: 10px; }
   .np-figs { grid-column: 1 / -1; border-top: 1px solid var(--np-rule); }
   .np-quote:nth-child(2) { border-right: 0; }
 }
@@ -341,6 +341,9 @@
   .np-lead__body { grid-template-columns: 1fr; }
   .np-lead__head { font-size: clamp(2.2rem, 11vw, 3.2rem); }
   .np-pulse { grid-template-columns: 1fr 1fr; }
+  .np-pf__figs { grid-template-columns: 1fr 1fr; }
+  .np-pf__cols { grid-template-columns: 1fr; }
+  .np-pf__cols > div + div { padding-left: 0; border-left: 0; border-top: 1px solid var(--np-rule); margin-top: 10px; }
   .np-quote { padding: 14px; }
   .np-quote:nth-child(2) { border-right: 0; }
   .np-quote__px { font-size: 1.5rem !important; }
@@ -353,8 +356,6 @@
   .np-tabs__ink { display: none; }
   .np-tab.is-on { color: var(--np-lime); text-decoration: underline 2px; text-underline-offset: 9px; }
   .np-movers__list { grid-template-columns: 1fr; }
-  .np-meme { grid-template-columns: minmax(0, 1fr) auto auto; }
-  .np-meme > .np-mono:nth-of-type(1), .np-meme > .np-mono:nth-of-type(3) { display: none; }
   .np-events li { grid-template-columns: 1fr; gap: 6px; }
   .np-events__when { text-align: left; }
   .np-drains li { grid-template-columns: 60px minmax(0, 1fr); }

@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { ago, countdown, dayTime, pct, trend, usd } from "./format";
 import { useNow, useRevealOnce, type useWatchlist } from "./hooks";
 import { IconShield, IconStar } from "./icons";
-import type { BtcNet, Coin, Hack, Market, Meme, Narrative, Ours, Story } from "./types";
+import type { BtcNet, Coin, Hack, Market, Narrative, Ours, Story } from "./types";
 
 type Watch = ReturnType<typeof useWatchlist>;
 
@@ -137,65 +137,76 @@ export function Heatmap({ narratives, stories }: { narratives: Narrative[] | nul
   );
 }
 
-function riskOf(m: Meme): { level: "high" | "elevated" | "watch"; why: string[] } {
-  const why: string[] = [];
-  const ageH = m.created ? (Date.now() - m.created) / 3_600_000 : null;
-  if (ageH != null && ageH < 24) why.push(`pool ${ageH < 1 ? "under an hour" : `${Math.round(ageH)} h`} old`);
-  if ((m.liquidity ?? 0) < 50_000) why.push(`thin liquidity (${usd(m.liquidity)})`);
-  if (m.fdv && m.liquidity && m.fdv / m.liquidity > 40) why.push("valuation far above its pool");
-  if (m.boost) why.push("paid promotion (DexScreener boost)");
-  return { level: why.length >= 3 ? "high" : why.length === 2 ? "elevated" : "watch", why };
-}
-
-export function MemeRadar({ memes, ours }: { memes: Meme[] | null; ours: Ours | null }) {
+function coinName(c: { mint: string; symbol: string | null; name: string | null }) {
   return (
-    <Section id="memes" title="Meme Radar" aside={<span className="np-fine">DexScreener most-boosted · risk is a checklist, not a prediction</span>}>
-      {ours ? (
-        <p className="np-ours">
-          <span className="np-badge">Our lab</span>
-          <span className="np-mono">{ours.graduations_24h}</span> pump.fun coins graduated in 24 h (<span className="np-mono">{ours.graduations_1h}</span> in the last hour).
-          {ours.rug_rate_24h != null ? <> <span className="np-mono">{ours.rug_rate_24h}%</span> of the {ours.rug_measured_24h} we measured lost 80%+ within their first hour.</> : null}
-        </p>
-      ) : null}
-      {!memes?.length ? <Missing what="DexScreener is not answering right now." /> : (
-        <ol className="np-memes">
-          {memes.slice(0, 8).map((m) => {
-            const r = riskOf(m);
-            return (
-              <li key={`${m.chain}:${m.address}`} className="np-meme">
-                <a href={m.url ?? "#"} target="_blank" rel="noopener noreferrer" className="np-meme__name">{m.symbol ?? "?"}<span>{m.name}</span></a>
-                <span className="np-mono np-dim">{m.chain}</span>
-                <span className="np-mono">{usd(m.volume24h)} <span className="np-dim">vol</span></span>
-                <span className="np-mono">{usd(m.liquidity)} <span className="np-dim">liq</span></span>
-                <span className={cn("np-mono", `t-${trend(m.change24h)}`)}>{pct(m.change24h)}</span>
-                <span className={cn("np-risk", `r-${r.level}`)} title={r.why.join("; ") || "no flags"}>{r.level === "watch" ? "Watch" : r.level === "elevated" ? "Elevated risk" : "High risk"}</span>
-                {r.why.length ? <span className="np-meme__why">{r.why.join(" · ")}</span> : null}
-              </li>
-            );
-          })}
-        </ol>
-      )}
-    </Section>
+    <span className="np-pf__coin">
+      <strong>{c.symbol || `${c.mint.slice(0, 4)}…${c.mint.slice(-4)}`}</strong>
+      {c.name && c.name !== c.symbol ? <span className="np-dim"> {c.name}</span> : null}
+    </span>
   );
 }
 
-export function OnchainWatch({ ours, unavailable, now }: { ours: Ours | null; unavailable: { section: string; why: string }[]; now: number }) {
-  const off = unavailable.filter((u) => /whale|flows|liquidation/i.test(u.section));
+const clock = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+/** MEMESCOPE's own pump.fun numbers, first on the page (Karthik, 2026-10-20):
+ *  what no other paper has. Replaces DexScreener's paid "boosted" list, whose
+ *  top coins were mostly down 90%+. */
+export function PumpfunToday({ ours, now }: { ours: Ours | null; now: number }) {
+  if (!ours) return null;
+  const lab = ours.karthik_lab;
+  const labPnl = lab ? Number(lab.pnl_usd) : 0;
+  const survived = ours.rug_measured_24h - ours.rugged_24h;
+  const survivors = ours.survivors ?? [];
   return (
-    <Section id="chain" title="On-chain Watch" aside={<span className="np-fine">What MEMESCOPE measured itself</span>}>
-      {ours?.recent_drains.length ? (
-        <ol className="np-drains">
-          {ours.recent_drains.slice(0, 6).map((d) => (
-            <li key={d.mint}>
-              <span className="np-mono" title={`${ago(d.graduated_at, now)}`}>{new Date(d.graduated_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
-              <span><strong>{d.symbol || `${d.mint.slice(0, 4)}…${d.mint.slice(-4)}`}</strong>{d.name && d.name !== d.symbol ? <span className="np-dim"> {d.name}</span> : null}</span>
-              <a href={`https://solscan.io/token/${d.mint}`} target="_blank" rel="noopener noreferrer" className="np-mono">token</a>
-            </li>
-          ))}
-        </ol>
-      ) : <Missing what="No first-hour drains recorded in the last 12 hours." />}
-      <p className="np-fine">Times are when each coin graduated on pump.fun; each then fell below a fifth of its opening price within its first hour. A drain is a measured price collapse, not proof of fraud.</p>
-      {off.map((u) => <p key={u.section} className="np-missing"><strong>{u.section}:</strong> {u.why}</p>)}
+    <Section id="pumpfun" title="Today on pump.fun" className="np-pf"
+             aside={<span className="np-fine">Measured by MEMESCOPE on-chain, not reported</span>}>
+      <dl className="np-figs np-pf__figs">
+        <div><dt>Graduated · 24 h</dt><dd className="np-mono">{ours.graduations_24h.toLocaleString()} <span className="np-dim">· {ours.graduations_1h} in the last hour</span></dd></div>
+        <div><dt>Lost 80%+ in hour one</dt><dd className="np-mono t-down">{ours.rug_rate_24h != null ? `${ours.rug_rate_24h}%` : "—"} <span className="np-dim">of {ours.rug_measured_24h.toLocaleString()} measured</span></dd></div>
+        <div><dt>Survived hour one</dt><dd className="np-mono t-up">{survived.toLocaleString()}</dd></div>
+        {lab ? (
+          <div><dt>Karthik&apos;s Lab · paper</dt><dd className={cn("np-mono", `t-${trend(labPnl)}`)}>{labPnl >= 0 ? "+" : "−"}{usd(Math.abs(labPnl))} <span className="np-dim">· {lab.trades} trades · {lab.rugs} rugs</span></dd></div>
+        ) : null}
+      </dl>
+      <div className="np-pf__cols">
+        <div>
+          <h3 className="np-pf__sub">Survivors · best first hours</h3>
+          {survivors.length ? (
+            <ol className="np-drains">
+              {survivors.slice(0, 6).map((c) => (
+                <li key={c.mint}>
+                  <span className="np-mono" title={ago(c.graduated_at, now)}>{clock(c.graduated_at)}</span>
+                  {coinName(c)}
+                  <span className="np-pf__val">
+                    <span className={cn("np-mono", `t-${trend(c.change_1h_pct)}`)}>{pct(c.change_1h_pct, 0)}</span>
+                    <span className="np-mono np-dim">{usd(c.liquidity_usd)} pool</span>
+                    <a href={`https://dexscreener.com/solana/${c.mint}`} target="_blank" rel="noopener noreferrer" className="np-mono">chart</a>
+                  </span>
+                </li>
+              ))}
+            </ol>
+          ) : <Missing what="No first-hour survivors measured in the last day yet." />}
+        </div>
+        <div>
+          <h3 className="np-pf__sub">Drained · lost 80%+ in hour one</h3>
+          {ours.recent_drains.length ? (
+            <ol className="np-drains">
+              {ours.recent_drains.slice(0, 6).map((d) => (
+                <li key={d.mint}>
+                  <span className="np-mono" title={ago(d.graduated_at, now)}>{clock(d.graduated_at)}</span>
+                  {coinName(d)}
+                  <a href={`https://solscan.io/token/${d.mint}`} target="_blank" rel="noopener noreferrer" className="np-mono">token</a>
+                </li>
+              ))}
+            </ol>
+          ) : <Missing what="No first-hour drains recorded in the last 12 hours." />}
+        </div>
+      </div>
+      <p className="np-fine">
+        Times are when each coin graduated. A survivor kept at least a fifth of its opening price
+        through its first hour; its change is from its first price to about 60 minutes later. A drain
+        is a measured price collapse, not proof of fraud. Nothing here is a recommendation.
+      </p>
     </Section>
   );
 }
