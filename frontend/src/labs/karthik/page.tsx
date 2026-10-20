@@ -870,7 +870,7 @@ export function FamilyBox({ f }: { f: FamilyMonths }) {
         </tbody>
       </table>
       <div className="mt-1 text-[10px] text-ink-dim">
-        {usd(f.ticket_usd)} ticket each, sized like USER1 · paper estimate, not real fills
+        Karthik Lab rule: {sizeWords(f.tickets_by_pool)} · paper estimate, not real fills
       </div>
     </div>
   );
