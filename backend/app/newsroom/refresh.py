@@ -19,7 +19,7 @@ from app.newsroom import briefing, news, sources
 logger = get_logger(__name__)
 KEY, ITEMS_KEY = "newsroom:v1", "newsroom:items"
 KEEP = timedelta(hours=72)
-SECTIONS = ("market", "narratives", "fear_greed", "hacks", "bitcoin_network", "memes")
+SECTIONS = ("market", "narratives", "fear_greed", "hacks", "bitcoin_network")
 
 
 def _item_json(i: news.Item) -> dict[str, Any]:
@@ -152,7 +152,6 @@ async def build(session_factory, redis) -> dict[str, Any]:
             "fear_greed": sources.fear_greed,
             "hacks": sources.hacks,
             "bitcoin_network": sources.bitcoin_network,
-            "memes": sources.boosted_memes,
         }
         got = await asyncio.gather(
             *(f(client) for f in readers.values()), return_exceptions=True
@@ -188,7 +187,7 @@ async def build(session_factory, redis) -> dict[str, Any]:
     kept = kept[:900]
     await redis.set(ITEMS_KEY, json.dumps(kept))
 
-    stories = stories_from([_item_obj(d) for d in kept], now)
+    stories = news.curate(stories_from([_item_obj(d) for d in kept], now), limit=160)
     async with session_factory() as session:
         try:
             from app.newsroom import ours

@@ -8,9 +8,10 @@
  *   rules; blackletter nameplate (UnifrakturMaguntia), condensed tabloid heads (Big Shoulders Display),
  *   serif reading text (Source Serif 4), mono figures (Geist Mono); lime = live/up, orange = down/alerts,
  *   cyan = links and MEMESCOPE's own data.
- * STORY: in one viewport the reader sees the day's biggest story, prices moving, and three lines on
- *   what to watch; scrolling adds the wire, the world, memes, sectors, security and events; every
- *   figure says where it came from and when.
+ * STORY: first, MEMESCOPE's own pump.fun day (graduations, first-hour drains and survivors, the
+ *   lab's result; 2026-10-20), then the day's biggest story, prices moving, and three lines on what
+ *   to watch; scrolling adds the wire, the world, sectors, security and events; every figure says
+ *   where it came from and when.
  * FIRST VIEWPORT: date rail + live status + Lab link; centred nameplate over a double rule; slow ticker;
  *   lead headline across ~70% with image and timeline; "Crypto in 60 seconds" in the right column.
  * FORM: brief-pinned, cited — world: "newspaper-inspired grid with contemporary crypto dashboards",
@@ -29,13 +30,13 @@ import { body, figures, headline, nameplate } from "./fonts";
 import { ago, clock, pct, trend, usd } from "./format";
 import { useLastVisit, useNewsroom, useNow, useWatchlist } from "./hooks";
 import { IconArrow, IconPause, IconPlay } from "./icons";
-import { Events, Heatmap, MarketPulse, MemeRadar, OnchainWatch, SecurityDesk } from "./markets";
+import { Events, Heatmap, MarketPulse, PumpfunToday, SecurityDesk } from "./markets";
 import type { Coin, Newsroom, Story } from "./types";
 import { Newswire, WorldMap } from "./wire";
 
 const SOURCE_LABEL: Record<string, string> = {
   market: "CoinGecko prices", narratives: "CoinGecko sectors", fear_greed: "Fear & Greed index", hacks: "DeFiLlama hacks",
-  bitcoin_network: "mempool.space", memes: "DexScreener boosts", memescope: "MEMESCOPE lab data",
+  bitcoin_network: "mempool.space", memescope: "MEMESCOPE lab data",
 };
 
 /** Launch of MEMESCOPE's public edition: the issue number counts days from here. */
@@ -62,6 +63,7 @@ export function Newspaper() {
         <Press state={nr.isError ? "error" : data?.warming_up ? "warming" : "loading"} />
       ) : (
         <main className="np-page">
+          <PumpfunToday ours={data.ours ?? null} now={now} />
           <section className="np-front np-enter" style={{ ["--d" as string]: "160ms" }}>
             <Lead story={data.lead ?? null} now={now} />
             <Briefing data={data} now={now} />
@@ -70,10 +72,6 @@ export function Newspaper() {
           <Newswire stories={nr.stories} pending={nr.pending} onApply={nr.apply} now={now}
                     lastVisit={lastVisit} coins={coins} btc={btc} watch={watch} />
           <WorldMap points={data.map ?? []} now={now} />
-          <div className="np-split">
-            <MemeRadar memes={data.memes ?? null} ours={data.ours ?? null} />
-            <OnchainWatch ours={data.ours ?? null} unavailable={data.unavailable ?? []} now={now} />
-          </div>
           <Heatmap narratives={data.narratives ?? null} stories={nr.stories} />
           <SecurityDesk hacks={data.hacks ?? null} stories={nr.stories} now={now} />
           <Events btc={data.bitcoin_network ?? null} ours={data.ours ?? null} unavailable={data.unavailable ?? []} />

@@ -117,6 +117,20 @@ _STOP = set(
     ["a", "an", "the", "of", "to", "in", "on", "for", "and", "or", "with", "by", "at", "from", "as", "is", "are", "was", "were", "be", "been", "this", "that", "its", "it's", "new", "news", "says", "say", "after", "over", "into", "how", "why", "what", "will", "can", "could", "may", "more", "than", "up", "down", "amid"]
 )
 _TAGS = re.compile(r"<[^>]+>")
+#: Daily round-ups re-tell the day's stories: they are not news (2026-10-20).
+_ROUNDUP = re.compile(
+    r"what happened in crypto today"
+    r"|\b(daily|weekly|morning|evening)\s+(recap|roundup|round-up|wrap|brief(ing)?)\b"
+    r"|\bthis week in (crypto|bitcoin|defi)\b|\bcrypto news today\b"
+    r"|\bprice predictions? (today|for)\b",
+    re.I,
+)
+#: A quote headline -- "Sam Callahan: Bitcoin Doesn't Need Rate Cuts" -- is a
+#: person's view, not a report: a capitalised name of 2-3 words, then a colon.
+_QUOTE_HEADLINE = re.compile(r"^[A-Z][\w.'-]+(?: [A-Z][\w.'-]+){1,2}: ")
+#: No single publisher may fill more than this share of the front page's
+#: single-source stories (Bitcoin.com News was a quarter of them, 20 Oct).
+MAX_SOURCE_SHARE = 0.15
 
 
 @dataclass
@@ -165,7 +179,8 @@ def classify(item: Item) -> Item:
     if "regulation" not in item.topics and _REG_ACRONYM.search(text):
         item.topics.append("regulation")
     item.regions = [c for c, _n, _la, _lo, rx in _REGION_RE if rx.search(text)]
-    if _COMMENTARY.search(item.url) or _COMMENTARY.search(item.title):
+    if (_COMMENTARY.search(item.url) or _COMMENTARY.search(item.title)
+            or _QUOTE_HEADLINE.match(item.title)):
         item.kind = "commentary"
     elif _DEVELOPING.search(item.title):
         item.kind = "developing"
@@ -255,3 +270,26 @@ def cluster(items: list[Item], threshold: float = 0.34) -> list[list[Item]]:
         else:
             groups.append((set(w), [it]))
     return sorted((g for _, g in groups), key=lambda g: g[-1].published_at, reverse=True)
+
+
+def is_roundup(title: str) -> bool:
+    return bool(_ROUNDUP.search(title))
+
+
+def curate(stories: list[dict], limit: int) -> list[dict]:
+    """Round-ups out, and no publisher above `MAX_SOURCE_SHARE` of `limit`
+    among single-source stories. Stories several publishers carry are always
+    kept: those are the ones a reader most needs. Order is preserved."""
+    cap = max(1, int(limit * MAX_SOURCE_SHARE))
+    seen: dict[str, int] = {}
+    out = []
+    for s in stories:
+        if is_roundup(s["title"]):
+            continue
+        if s["sources"] < 2:
+            n = seen.get(s["source"], 0)
+            if n >= cap:
+                continue
+            seen[s["source"]] = n + 1
+        out.append(s)
+    return out
