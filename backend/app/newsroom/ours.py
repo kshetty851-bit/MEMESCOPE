@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, literal_column, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.labs.graduation.models import GradMigration, GradRugVerdict
@@ -76,10 +76,13 @@ async def pulse(session: AsyncSession, now: datetime | None = None) -> dict[str,
     # Graduations in each of the last 24 clock hours, oldest first; the newest
     # is the hour in progress (the front page's hour bars, 2026-10-20).
     top = now.replace(minute=0, second=0, microsecond=0)
+    # A literal 'hour', not a bound one: two bound copies are two different
+    # expressions to Postgres, and the GROUP BY is refused.
+    hour = func.date_trunc(literal_column("'hour'"), GradMigration.ts)
     by_hour = dict((await session.execute(
-        select(func.date_trunc("hour", GradMigration.ts), func.count())
+        select(hour, func.count())
         .where(GradMigration.ts >= top - timedelta(hours=23))
-        .group_by(func.date_trunc("hour", GradMigration.ts)))).all())
+        .group_by(hour))).all())
     hourly = [{"hour": (top - timedelta(hours=23 - i)).isoformat(),
                "graduations": int(by_hour.get(top - timedelta(hours=23 - i), 0))}
               for i in range(24)]
