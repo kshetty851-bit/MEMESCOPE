@@ -94,6 +94,27 @@ def sell_order(**overrides: Any) -> dict[str, Any]:
     return order(**base)
 
 
+class TestBuyAgainstTheSafetyQuote:
+    """KIMCHI, 2026-10-21: Jupiter reported 16% impact on a $10 buy in a $50k
+    pool that was quoted 2% BELOW the pool's own price. With the safety quote's
+    token amount as the reference, the order is judged on what it actually buys."""
+
+    def test_a_false_jupiter_impact_does_not_block_a_fair_order(self) -> None:
+        verdict = verify(authorized=buy_authorisation(reference_out_raw=2_500_000),
+                         order=order(priceImpactPct="0.1635"), now=NOW)
+        assert verdict.approved
+        assert verdict.observed["shortfall_vs_safety_quote_pct"] == "0"
+
+    def test_a_real_shortfall_is_still_refused(self) -> None:
+        verdict = verify(authorized=buy_authorisation(reference_out_raw=2_800_000),  # 10.7% short
+                         order=order(priceImpactPct="0.001"), now=NOW)
+        assert OrderRejection.PRICE_IMPACT_ABOVE_POLICY in verdict.reason_codes
+
+    def test_without_a_reference_jupiters_figure_still_rules(self) -> None:
+        verdict = verify(authorized=buy_authorisation(), order=order(priceImpactPct="0.1635"), now=NOW)
+        assert OrderRejection.PRICE_IMPACT_ABOVE_POLICY in verdict.reason_codes
+
+
 class TestBuy:
     def test_a_matching_order_is_approved(self) -> None:
         verdict = verify(authorized=buy_authorisation(), order=order(), now=NOW)

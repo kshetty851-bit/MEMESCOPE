@@ -87,6 +87,11 @@ class AuthorizedOrder:
     #: quantity was confirmed from chain evidence rather than assumed.
     position_id: str | None = None
     position_quantity_confirmed: bool = True
+    #: BUY only: raw tokens the safety-approved quote would buy, that quote's
+    #: price having been checked against the pool on chain (2026-10-21). When
+    #: set, the order's impact is how far short of it the order falls, not
+    #: Jupiter's `priceImpactPct`, whose reference price can be stale.
+    reference_out_raw: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -206,7 +211,14 @@ def verify(
         reasons.append(OrderRejection.ORDER_STALE)
 
     impact = _decimal(order.get("priceImpactPct"))
-    if impact is not None:
+    if (authorized.side == "BUY" and authorized.reference_out_raw
+            and out_amount is not None and out_amount > 0):
+        shortfall = max(Decimal(0), 1 - Decimal(out_amount) / Decimal(authorized.reference_out_raw))
+        observed["jupiter_price_impact_pct"] = str(impact)
+        observed["shortfall_vs_safety_quote_pct"] = str(shortfall * 100)
+        if shortfall * 100 > authorized.max_price_impact_pct:
+            reasons.append(OrderRejection.PRICE_IMPACT_ABOVE_POLICY)
+    elif impact is not None:
         observed["price_impact_pct"] = str(impact)
         # Jupiter reports a fraction; the policy is written in percent.
         if abs(impact) * 100 > authorized.max_price_impact_pct:

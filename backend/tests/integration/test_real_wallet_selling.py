@@ -264,7 +264,7 @@ async def test_nothing_is_asked_for_under_a_kill_switch(db_session):
 # --- the executor -------------------------------------------------------------
 
 class _Orders:
-    async def prepare(self, intent: RealWalletLiveIntent) -> Any:
+    async def prepare(self, intent: RealWalletLiveIntent, **_: Any) -> Any:
         return SimpleNamespace(request_id=f"req-{uuid.uuid4().hex}",
                                evidence={"intent_fingerprint": "fp"})
 

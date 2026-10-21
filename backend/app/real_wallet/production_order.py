@@ -80,7 +80,8 @@ class ProductionOrderFactory:
         self._base_url = settings.JUPITER_V2_BASE_URL.rstrip("/")
         self._timeout = httpx.Timeout(settings.JUPITER_V2_ORDER_TIMEOUT_SECONDS)
 
-    async def prepare(self, intent: RealWalletLiveIntent) -> PreparedOrder:
+    async def prepare(self, intent: RealWalletLiveIntent, *,
+                      reference_out_raw: int | None = None) -> PreparedOrder:
         if not intent.input_mint or not intent.output_mint:
             raise JupiterV2OrderUnavailableError("intent_missing_mints")
         amount_raw = _authorised_amount_raw(intent)
@@ -134,6 +135,7 @@ class ProductionOrderFactory:
                 ),
                 position_id=(str(intent.position_id) if intent.position_id else None),
                 position_quantity_confirmed=True,
+                reference_out_raw=reference_out_raw,
             ),
             order=body,
             now=now,

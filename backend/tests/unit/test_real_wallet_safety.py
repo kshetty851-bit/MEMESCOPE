@@ -848,3 +848,34 @@ async def test_untraceable_on_helius_with_a_clean_lab_read_buys_inside_a_rug_win
     decision = await _source_decision(monkeypatch, _Helius(_COIN, fail=True), blocked={"FunderB"})
     assert decision.decision == "ALLOW", decision.reason_codes
     assert decision.provenance["sources"]["lab_ids"] == 1
+
+
+async def test_a_false_jupiter_impact_does_not_block_a_fair_buy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """KIMCHI, 2026-10-21: Jupiter reported 16.35% impact on a $10 buy whose
+    quote paid 2% LESS per token than the pool's on-chain price. The buy is
+    judged on what it pays against the pool."""
+    from dataclasses import replace
+
+    _pool_reads(monkeypatch, "0.0004758")
+    quotes = _Quotes(replace(_quote(side="entry", output="100000000", impact="16.35"),
+                             estimated_price_usd=Decimal("0.000466")),
+                     _quote(side="exit", output="98000000"))
+    decision = await _decision(monkeypatch, snapshot=_snapshot(**_STALE_FEED), quotes=quotes)
+    assert Reason.BUY_PRICE_IMPACT_TOO_HIGH not in decision.reason_codes
+    assert decision.buy_price_impact_pct == 0
+    assert decision.buy_quote["jupiter_price_impact_pct"] == "16.35"
+
+
+async def test_paying_far_over_the_pool_price_is_still_too_much_impact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dataclasses import replace
+
+    _pool_reads(monkeypatch, "0.000634")
+    quotes = _Quotes(replace(_quote(side="entry", output="100000000", impact="0.5"),
+                             estimated_price_usd=Decimal("0.000710")),    # 12% over the pool
+                     _quote(side="exit", output="98000000"))
+    decision = await _decision(monkeypatch, snapshot=_snapshot(**_STALE_FEED), quotes=quotes)
+    assert Reason.BUY_PRICE_IMPACT_TOO_HIGH in decision.reason_codes
