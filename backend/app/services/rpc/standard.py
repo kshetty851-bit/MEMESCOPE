@@ -35,6 +35,8 @@ from app.services.rpc.base import (
     SolanaRPC,
 )
 
+
+PUBLIC_SOLANA_RPC = "https://api.mainnet-beta.solana.com"
 logger = get_logger(__name__)
 
 #: `getMultipleAccounts` accepts at most 100 addresses per request. Published
@@ -67,6 +69,10 @@ class StandardSolanaRPC(SolanaRPC):
         backoff: BackoffPolicy | None = None,
     ) -> None:
         self._rpc_url = rpc_url or settings.SOLANA_RPC_URL
+        # The backup is for the free public node only: a keyed vendor URL is
+        # never silently swapped for someone else's node.
+        self._backup_url = (settings.SOLANA_RPC_BACKUP_URL.strip()
+                            if self._rpc_url == PUBLIC_SOLANA_RPC else "")
         self._client = client
         # An injected client is borrowed, never owned: closing someone else's
         # connection pool is how one caller's teardown breaks another's.
@@ -120,7 +126,8 @@ class StandardSolanaRPC(SolanaRPC):
 
         for attempt in range(1, attempts + 1):
             try:
-                response = await self._http.post(self._rpc_url, json=payload)
+                url = self._backup_url if attempt > 1 and self._backup_url else self._rpc_url
+                response = await self._http.post(url, json=payload)
 
                 if response.status_code == 429:
                     last_error = RpcRateLimitError(f"{method} rate limited")
