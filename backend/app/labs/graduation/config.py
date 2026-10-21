@@ -1111,7 +1111,12 @@ KARTHIK_MANY_AT_ONCE_AT = datetime(2026, 10, 3, 13, 15, tzinfo=UTC)
 #: $50k AND UP from 2026-10-03, at his request ("show main 50k instead of
 #: 75k"): the $50-75k slice comes from KARTHIK_Q50_5M, his rule on those pools,
 #: whose trades before 26 Sep were rebuilt by replay.
-KARTHIK_BOOK_POOLS: tuple[int, int | None] = (50_000, None)
+#: $50k UP TO $200k from 2026-10-21, at his request ("apply skip $200k+ since
+#: day 1"): replayed from 1 Oct, the $200k+ pools were 674 of 962 trades for
+#: +$109 and 5 of 15 rugs; without them 264 trades, 9 rugs, +$1,767 vs +$1,797
+#: (fixed dollars) and the two-wallet box +$92 better. Lab only: the real
+#: wallets keep their own pool settings.
+KARTHIK_BOOK_POOLS: tuple[int, int | None] = (50_000, 200_000)
 KARTHIK_BOOK_POOLS_AT = datetime(2026, 10, 3, 12, 30, tzinfo=UTC)
 #: Pools the book skips inside its range (Karthik, 2026-10-12: "apply skip
 #: 150-200k pools to karthik lab since day 1 and also put this rule in main

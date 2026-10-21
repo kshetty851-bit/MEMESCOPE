@@ -307,30 +307,28 @@ async def test_the_public_summary_gives_headline_figures_and_nothing_else() -> N
 
 
 async def test_the_book_counts_only_its_pool_range_but_the_checks_see_every_size() -> None:
-    """The book counts $50k-and-up pools (2026-10-03). Anything under that is
-    never the book's, even if a row for it reaches this read; the checks
-    beside the book still see every size."""
+    """The book counts $50k-$200k pools (from $50k 2026-10-03, capped at $200k
+    2026-10-21). Anything outside is never the book's, even if a row for it
+    reaches this read; the checks beside the book still see every size."""
     from app.labs.graduation.api import karthik_book
 
     start = next(s for s in config.FRESH_BOOKS if s.book == "KARTHIK_QUIET_5M").start
     shallow = _Pos("SHALLOW", start + timedelta(hours=1), -0.99)  # $40k rug, not the book's
     shallow.liq_open_usd = Decimal(40_000)
-    deep = _Pos("DEEP", start + timedelta(hours=2), 0.10)            # $400k: the book's
-    deep.liq_open_usd = Decimal(400_000)
-    book = await karthik_book(db=_StubDb([shallow, deep]))  # type: ignore[arg-type]
+    deep = _Pos("DEEP", start + timedelta(hours=2), 0.10)            # $120k: the book's
+    deep.liq_open_usd = Decimal(120_000)
+    huge = _Pos("HUGE", start + timedelta(hours=3), 0.02)            # $400k: over the cap
+    huge.liq_open_usd = Decimal(400_000)
+    book = await karthik_book(db=_StubDb([shallow, deep, huge]))  # type: ignore[arg-type]
 
-    assert book["pools_usd"] == [50_000, None]
-    assert "$50k and up" in book["rule"]
+    assert book["pools_usd"] == [50_000, 200_000]           # $200k+ skipped since 21 Oct
     assert (book["trades"], book["rugs"]) == (1, 0)
     assert [(t["symbol"], t["mint"]) for t in book["trades_list"]] == [("DEEP", "DEEPpump")]
     _, now = _grid(book)
-    # The grid starts at $25k (2026-10-03): the $40k rug is in that column only,
-    # bought first and sold before the $400k pool came.
-    assert (now[25_000]["trades"], now[25_000]["rugs"]) == (2, 1)
-    # The $400k pool is in every other floor's column, not the $100k-$150k band's.
-    assert all((c["trades"], c["rugs"]) == (1, 0) for k, c in now.items()
-               if not isinstance(k, tuple) and k >= 50_000)
-    assert (now[(100_000, 150_000)]["trades"], now[(100_000, 150_000)]["rugs"]) == (0, 0)
+    # The grid starts at $25k (2026-10-03) and sees every size: the $40k rug
+    # only in that column, the $120k and $400k pools in every floor at or under them.
+    assert (now[25_000]["trades"], now[25_000]["rugs"]) == (3, 1)
+    assert (now[(100_000, 150_000)]["trades"], now[(100_000, 150_000)]["rugs"]) == (1, 0)
 
 
 async def test_every_closed_trade_is_listed_not_just_the_latest_sixty() -> None:
