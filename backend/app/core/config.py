@@ -236,6 +236,11 @@ class Settings(BaseSettings):
     #: The endpoint used when the provider is not vendor-specific. Any public
     #: endpoint, self-hosted validator, or paid provider's standard URL.
     SOLANA_RPC_URL: str = "https://api.mainnet-beta.solana.com"
+    #: A second free node, asked only after the public one refuses a call
+    #: (2026-10-21: it began answering this server "413 Request Entity Too
+    #: Large" at 22:06 Dubai, which blanked the real wallet's value). Used only
+    #: by clients pointed at the public endpoint; empty turns it off.
+    SOLANA_RPC_BACKUP_URL: str = "https://solana-rpc.publicnode.com"
     #: Subscription endpoint for the scanner. `logsSubscribe` is standard, so
     #: any node exposing a WebSocket serves it.
     SOLANA_WS_URL: str = "wss://api.mainnet-beta.solana.com"
