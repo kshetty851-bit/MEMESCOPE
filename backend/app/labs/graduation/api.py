@@ -3005,7 +3005,7 @@ async def _pool_ten_k_book(db: AsyncSession, rows: Sequence[Any], sol: Decimal |
                   "max_sells_before": pl.MAX_SELLS_BEFORE,
                   "max_buys_before": pl.MAX_BUYS_BEFORE,
                   "entry_age_s": list(pl.ENTRY_AGE_S),
-                  "skip_famous": True},
+                  "skip_famous": True, "skip_name_len": pl.SKIP_NAME_LEN},
         "balance_usd": Decimal(str(walk.cash)).quantize(cents),
         "days": _karthik_days(took, pl.START, pl.TEN_K_START, cents),
         "start_dates": _start_dates(rows, sol, ticket=pl.WALLET_TICKET, capital=pl.TEN_K_START,
@@ -3048,7 +3048,7 @@ async def _pool_lab_build(db: AsyncSession) -> dict[str, Any]:
     ten_live = [r for r in ten_live if pl.in_entry_window(r)]
     # The 48-hour switch (2026-10-21) decides on every coin the rule picked,
     # bought or not; the book and its size grid hold only what it let through.
-    picked = ten_live
+    picked = [r for r in ten_live if not pl.long_name(r.symbol)]
     ten_live = pl.switched(picked)
     ten_book = await _pool_ten_k_book(db, ten_live, sol, cents, picked=picked)
     on, made, n = pl.green([r for r in picked if r.closed_at is not None], now)

@@ -75,6 +75,7 @@ interface TenKRules {
   entry_age_s?: [number, number] | null;
   skip_famous?: boolean;
   reaction_s?: number;
+  skip_name_len?: number;
 }
 interface TenKBook {
   ticket_usd: number;
@@ -314,6 +315,7 @@ export function TenKRuleBook({ book }: { book: TenKBook }) {
     ["Only quiet pools", `Fewer than ${r.quiet_max_txs} trades in the pool so far when it buys. A busy start is skipped.`],
     ...(r.max_sells_before != null ? [["Few sellers", `It skips a coin whose pool already had more than ${r.max_sells_before} sells when it buys: early sellers in a tiny pool are cashing out, and those coins lost money on every day of this book.`] as [string, string]] : []),
     ...(r.max_buys_before != null ? [["Not already pumped", `It skips a coin whose pool already had more than ${r.max_buys_before} buys in DexScreener's last 5 minutes when it buys: the early pump has mostly happened.`] as [string, string]] : []),
+    ...(r.skip_name_len ? [["Short names only", `It skips a coin whose name is ${r.skip_name_len} characters or longer ("MOONCAT", "Kimchi1x"); "Mii" or "WISP" are bought, and so is a coin with no name. Applied from the first trade.`] as [string, string]] : []),
     ...(r.skip_famous ? [["No famous names", "It skips coins named after famous people, brands or companies (OpenAI, Tesla, Trump, GTA, Pepe…). On this book they rugged one time in six and lost money; the coins it refused are listed under the trades."] as [string, string]] : []),
     ["Only fresh coins", `It buys within ${r.max_entry_age_s / 60} minutes of the coin graduating, or not at all.`],
     ...(r.entry_age_s ? [["Not too early, not too late", `It only keeps coins it bought ${r.entry_age_s[0]} to ${r.entry_age_s[1]} seconds after they graduated: the very first seconds rugged most (about one in six), and later buys lost a little.`] as [string, string]] : []),

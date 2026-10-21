@@ -128,7 +128,9 @@ WALLET_START = 500.0
 #: few-sellers rule) would have emptied $100-$150. Applied from day 1.
 #: Back to 10x on 2026-10-11 (Karthik: "in pool lab change the table to 10x
 #: instead of 5x"): same trades and dollars, half the percentage return.
-TEN_K_RATIO = 10
+#: Back to 5x on 2026-10-21 (Karthik: "apply it since day 1 and 250$ start"):
+#: its 3-minute trades rarely hold two at once, so $250 buys what $500 did.
+TEN_K_RATIO = 5
 TEN_K_START = WALLET_TICKET * TEN_K_RATIO
 #: The 48-hour switch (Karthik, 2026-10-21: "revise pool lab with all this rule
 #: since day 1"): the $10k book buys only while every trade its rule made that
@@ -138,6 +140,12 @@ TEN_K_START = WALLET_TICKET * TEN_K_RATIO
 #: from 5 Oct: +$661 on $500 vs +$345 always buying; it sat out 15-21 Oct
 #: (-$457) but also missed 12 Oct (+$336). One cycle so far; judge it forward.
 SWITCH_HOURS = 48
+#: Skip a coin whose name is this many characters or more (Karthik, 2026-10-21:
+#: "apply it since day 1"). Replayed from 5 Oct with the switch: +$1,066 vs
+#: +$661 on $500, 30 of the 162 skipped coins rugged. Nearly all of it came in
+#: 13-21 Oct (+$7 before), the best of 64 rules tried: judge it on new coins.
+#: An unnamed coin is kept.
+SKIP_NAME_LEN = 6
 SWITCH_MIN_TRADES = 5
 #: The real wallets' per-coin cap across user wallets (REAL_WALLET_MAX_COIN_USD).
 COIN_CAP = 250.0
@@ -253,3 +261,8 @@ def switched(rows: Sequence[Any]) -> list[Any]:
     ponytail: O(n^2) over the book's ~1,000 rows; a running window if it grows."""
     closed = [r for r in rows if r.closed_at is not None]
     return [r for r in rows if green(closed, r.opened_at)[0]]
+
+
+def long_name(symbol: str | None) -> bool:
+    """`SKIP_NAME_LEN` characters or more; a coin with no name is kept."""
+    return len((symbol or "").strip()) >= SKIP_NAME_LEN
