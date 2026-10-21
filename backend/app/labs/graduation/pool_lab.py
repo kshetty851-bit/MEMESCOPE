@@ -25,8 +25,9 @@ from __future__ import annotations
 
 import re
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 #: The timer: the live columns count from here.
@@ -129,6 +130,15 @@ WALLET_START = 500.0
 #: instead of 5x"): same trades and dollars, half the percentage return.
 TEN_K_RATIO = 10
 TEN_K_START = WALLET_TICKET * TEN_K_RATIO
+#: The 48-hour switch (Karthik, 2026-10-21: "revise pool lab with all this rule
+#: since day 1"): the $10k book buys only while every trade its rule made that
+#: CLOSED in the last 48 hours adds up to a profit, counted on all its coins,
+#: bought or not, so it keeps watching while it stands aside. Fewer than
+#: `SWITCH_MIN_TRADES` closed means too little to judge, and it buys. Replayed
+#: from 5 Oct: +$661 on $500 vs +$345 always buying; it sat out 15-21 Oct
+#: (-$457) but also missed 12 Oct (+$336). One cycle so far; judge it forward.
+SWITCH_HOURS = 48
+SWITCH_MIN_TRADES = 5
 #: The real wallets' per-coin cap across user wallets (REAL_WALLET_MAX_COIN_USD).
 COIN_CAP = 250.0
 RUG = -0.5
@@ -227,3 +237,19 @@ def wallets_payload(wallets: list[Wallet]) -> dict[str, Any]:
         "pnl_usd": round(total - WALLET_START * len(rows), 2),
         "trades": sum(r["trades"] for r in rows),
     }
+
+
+def green(rows: Sequence[Any], at: datetime) -> tuple[bool, float, int]:
+    """(buy?, what the rule made on trades closed in the `SWITCH_HOURS` before
+    `at` at `WALLET_TICKET` each, how many). Only trades closed before `at`."""
+    lo = at - timedelta(hours=SWITCH_HOURS)
+    past = [r for r in rows if r.closed_at is not None and lo <= r.closed_at < at]
+    made = sum(float(r.net_return) * WALLET_TICKET for r in past)
+    return (len(past) < SWITCH_MIN_TRADES or made > 0), made, len(past)
+
+
+def switched(rows: Sequence[Any]) -> list[Any]:
+    """The rows the 48-hour switch lets the book buy.
+    ponytail: O(n^2) over the book's ~1,000 rows; a running window if it grows."""
+    closed = [r for r in rows if r.closed_at is not None]
+    return [r for r in rows if green(closed, r.opened_at)[0]]

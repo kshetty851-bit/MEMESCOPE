@@ -88,6 +88,9 @@ interface TenKBook {
   start_dates?: StartDate[];
   closed: (KarthikTrade & { rugged: boolean })[];
   open: OpenTrade[];
+  /** The 48-hour switch (2026-10-21): buys only while the rule made money on
+   *  trades closed in the last `hours`; `skipped` = coins it sat out. */
+  switch?: { hours: number; green: boolean; last_usd: string; last_trades: number; skipped: number };
 }
 export interface PoolLab {
   computing?: boolean;
@@ -282,6 +285,22 @@ const k = (n: number) => `$${Math.round(n / 1000)}k`;
 
 /** The $10k book's rules in plain words (Karthik, 2026-10-06: "write rule book
  *  in 10k lab"). Every number is the API's, so the words follow the book. */
+/** Green or red: is the $10k book buying right now (2026-10-21)? */
+export function SwitchLight({ s }: { s: NonNullable<TenKBook["switch"]> }) {
+  const made = Number(s.last_usd);
+  return (
+    <div data-testid="switch-light"
+         className={`flex items-center gap-3 rounded-lg border px-3 py-2 text-[13px] ${s.green ? "border-up/40 bg-up/10" : "border-down/40 bg-down/10"}`}>
+      <span aria-hidden className={`size-3 rounded-full ${s.green ? "bg-up" : "bg-down animate-pulse"}`} />
+      <span>
+        <b className={s.green ? "text-up" : "text-down"}>{s.green ? "Buying" : "Standing aside"}</b>
+        {" · "}last {s.hours} h: the rule made {made >= 0 ? "+" : "−"}{usd(String(Math.abs(made)))} on {s.last_trades} trades
+        {s.green ? "" : ". It starts again once that is positive."}
+      </span>
+    </div>
+  );
+}
+
 export function TenKRuleBook({ book }: { book: TenKBook }) {
   const r = book.rules;
   if (!r) return null;
@@ -299,6 +318,7 @@ export function TenKRuleBook({ book }: { book: TenKBook }) {
     ["Only fresh coins", `It buys within ${r.max_entry_age_s / 60} minutes of the coin graduating, or not at all.`],
     ...(r.entry_age_s ? [["Not too early, not too late", `It only keeps coins it bought ${r.entry_age_s[0]} to ${r.entry_age_s[1]} seconds after they graduated: the very first seconds rugged most (about one in six), and later buys lost a little.`] as [string, string]] : []),
     ["No repeat creators", "Coins whose creator has launched a coin before are left out: on this book they lost money. (The $50k books buy them again.)"],
+    ...(book.switch ? [[`${book.switch.hours}-hour switch`, `It buys only while every trade its rule made that closed in the last ${book.switch.hours} hours adds up to a profit. It keeps watching while it waits, and starts again once that turns positive. Applied from the first trade: it sat out ${book.switch.skipped} coins.`] as [string, string]] : []),
     ["Several at once", `${usd(book.ticket_usd)} per trade from a ${usd(book.capital_usd)} balance. It buys every coin that passes while a whole ${usd(book.ticket_usd)} is free.`],
     ...(r.stop_pct ? [["Stop-loss", `If the price falls ${r.stop_pct}% below what it paid, it sells about ${r.reaction_s ?? 3} seconds later instead of waiting. Tiny-pool rugs drain over seconds, so most are caught before they reach -50%.`] as [string, string]] : []),
     ["Always sells", r.stop_pct
@@ -456,6 +476,7 @@ export function PoolLabPage() {
         <p className="text-sm text-ink-3">Working out the backtest — about a minute after a restart.</p>
       ) : (
         <>
+          {d.ten_k.book?.switch ? <SwitchLight s={d.ten_k.book.switch} /> : null}
           {d.ten_k.book ? <TenKRuleBook book={d.ten_k.book} /> : null}
           {d.ten_k.book?.start_dates?.length ? (
             <StartDates book="$10k book" lines={d.ten_k.book.start_dates} capital={Number(d.ten_k.book.capital_usd)}
