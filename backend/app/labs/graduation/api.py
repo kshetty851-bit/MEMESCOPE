@@ -2962,7 +2962,7 @@ async def _busy_sellers(db: AsyncSession, rows: Sequence[Any]) -> set[Any]:
 
 
 async def _pool_ten_k_book(db: AsyncSession, rows: Sequence[Any], sol: Decimal | None,
-                           cents: Decimal) -> dict[str, Any]:
+                           cents: Decimal, picked: Sequence[Any] = ()) -> dict[str, Any]:
     """The $10k book at $50 on $500, laid out like Karthik's Lab (2026-10-05:
     "10k pool should show open and closed trades too and daily profits and
     rugs same like karthik lab"): its days, every closed trade, what it holds."""
@@ -2981,6 +2981,9 @@ async def _pool_ten_k_book(db: AsyncSession, rows: Sequence[Any], sol: Decimal |
     busy = await _busy_sellers(db, held) | await _busy_buyers(db, held)
     held = [p for p in held if p.id not in busy and not pl.famous_name(p.symbol)
             and pl.in_entry_window(p)]
+    if picked:   # a coin bought while the 48-hour switch was red is not the book's
+        closed = [r for r in picked if r.closed_at is not None]
+        held = [p for p in held if pl.green(closed, p.opened_at)[0]]
 
     def move(p: Any) -> Decimal | None:
         live = net_return(p, p.last_quote)  # after costs, as the trade list's open rows
@@ -3043,7 +3046,15 @@ async def _pool_lab_build(db: AsyncSession) -> dict[str, Any]:
     famous = [r for r in ten_live if pl.famous_name(r.symbol)]
     ten_live = [r for r in ten_live if not pl.famous_name(r.symbol)]
     ten_live = [r for r in ten_live if pl.in_entry_window(r)]
-    ten_book = await _pool_ten_k_book(db, ten_live, sol, cents)
+    # The 48-hour switch (2026-10-21) decides on every coin the rule picked,
+    # bought or not; the book and its size grid hold only what it let through.
+    picked = ten_live
+    ten_live = pl.switched(picked)
+    ten_book = await _pool_ten_k_book(db, ten_live, sol, cents, picked=picked)
+    on, made, n = pl.green([r for r in picked if r.closed_at is not None], now)
+    ten_book["switch"] = {"hours": pl.SWITCH_HOURS, "green": on,
+                          "last_usd": Decimal(str(made)).quantize(cents), "last_trades": n,
+                          "skipped": len(picked) - len(ten_live)}
     # What the famous-name skip refused, and what each would have done.
     ten_book["skipped_famous"] = [
         {"symbol": r.symbol, "mint": r.mint, "opened_at": r.opened_at, "pool_usd": r.liq_open_usd,
