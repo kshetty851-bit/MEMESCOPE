@@ -251,7 +251,9 @@ class RealWalletExecutor:
             # is the honest outcome: the intent's own decision has expired.
             return await self._block(intent, now, "safety_verdict_stale")
         try:
-            prepared = await self._orders.prepare(intent)
+            buy_ref = {} if _is_sell(intent) else {
+                "reference_out_raw": await self._safety_out_raw(intent)}
+            prepared = await self._orders.prepare(intent, **buy_ref)
         except JupiterV2OrderUnavailableError as exc:
             return await self._block(intent, now, f"order_unavailable:{exc}")
         except OrderEvidenceRejectedError as exc:
@@ -596,6 +598,21 @@ class RealWalletExecutor:
             ),
         )
         return canary.allowed
+
+    async def _safety_out_raw(self, intent: RealWalletLiveIntent) -> int | None:
+        """Raw tokens the safety-approved buy quote would get, when its price
+        was checked against the pool on chain (`own_price_impact_pct`)."""
+        if intent.safety_evaluation_id is None:
+            return None
+        quote = await self._session.scalar(
+            select(RealWalletSafetyEvaluation.buy_quote).where(
+                RealWalletSafetyEvaluation.id == intent.safety_evaluation_id))
+        if not isinstance(quote, dict) or "own_price_impact_pct" not in quote:
+            return None
+        try:
+            return int(str(quote["output_amount_raw"]))
+        except (KeyError, TypeError, ValueError):
+            return None
 
     async def _safety_at(self, intent: RealWalletLiveIntent) -> datetime | None:
         """When SEC-2 actually looked. Read from the evaluation row, because

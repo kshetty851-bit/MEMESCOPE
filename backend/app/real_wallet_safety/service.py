@@ -290,9 +290,18 @@ class RealWalletSafetyGate:
                 if quote.output_amount <= 0 or quote.estimated_price_usd <= 0:
                     reasons.append(Reason.QUOTE_INVALID)
                 else:
-                    self._quote_checks(
-                        quote.quoted_at, quote.price_impact_pct, "buy", evaluated_at, reasons
-                    )
+                    if pool_price is not None:
+                        # Our own impact (Karthik, 2026-10-21, after KIMCHI): what
+                        # the quote actually pays per token against the pool's
+                        # on-chain price. Jupiter's own figure is measured from a
+                        # reference price that can be stale: KIMCHI was quoted
+                        # 2% BELOW the pool yet refused at a reported 16% impact.
+                        # A real move shows up in the price paid either way.
+                        buy_impact = max(Decimal(0), (quote.estimated_price_usd - pool_price)
+                                         / pool_price * _HUNDRED)
+                        buy = {**buy, "jupiter_price_impact_pct": str(quote.price_impact_pct),
+                               "own_price_impact_pct": str(buy_impact)}
+                    self._quote_checks(quote.quoted_at, buy_impact, "buy", evaluated_at, reasons)
                     deviation = abs(quote.estimated_price_usd - price) / price * _HUNDRED
                     if deviation > settings.REAL_WALLET_SAFETY_MAX_PRICE_DEVIATION_PCT:
                         reasons.append(Reason.EXECUTION_PRICE_DEVIATION_TOO_HIGH)
