@@ -48,6 +48,7 @@ RUNNER = dict(book="runner", at_min=(55, 80), x=3, pool_x=2, min_pool=5_000, hol
 SECOND = dict(book="secondwind", age_h=(2, 48), crash=0.2, rebound=3, vol_h1=50_000,
               min_pool=10_000, hold=timedelta(hours=24))
 BOOKS = (RUNNER["book"], SECOND["book"])
+RUNNER_ON = False
 
 
 def _d(v: Any) -> Decimal | None:
@@ -171,7 +172,9 @@ async def decide(session, now: datetime) -> dict[str, int]:
         select distinct on (mint) mint, ts from grad_migrations
         where mint = any(:mints) order by mint, ts"""), {"mints": list(latest)})).all())
     runner_lo, runner_hi = (timedelta(minutes=m) for m in RUNNER["at_min"])
-    runners = [m for m, g in grads.items() if runner_lo <= now - g <= runner_hi]
+    # Karthik, 2026-10-22: "turn off runner". Its backtest since 1 Oct lost
+    # $745 over 181 trades (-$4.12 a $25 trade, 177 sold on the trail).
+    runners = [m for m, g in grads.items() if runner_lo <= now - g <= runner_hi] if RUNNER_ON else []
     second_lo, second_hi = (timedelta(hours=h) for h in SECOND["age_h"])
     seconds = [m for m, g in grads.items() if second_lo <= now - g <= second_hi
                and (latest[m][2] or 0) >= SECOND["vol_h1"] and (latest[m][1] or 0) >= SECOND["min_pool"]
