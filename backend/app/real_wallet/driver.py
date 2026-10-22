@@ -560,6 +560,8 @@ class RealWalletDriver:
                 continue
             if lab and await self._no_open_buy(mint):
                 continue
+            if lab and await self._quiet_big_pool(mint, pool, now):
+                continue
             return mint
         return None
 
@@ -714,6 +716,27 @@ class RealWalletDriver:
             select(GradPaperPosition.symbol).where(
                 GradPaperPosition.mint == mint,
                 GradPaperPosition.symbol.is_not(None)).limit(1)))
+
+    async def _quiet_big_pool(self, mint: str, pool: Decimal | float | None,
+                              now: datetime) -> bool:
+        """Karthik Lab's big-pool rule on the wallets too (Karthik, 2026-10-22:
+        "apply same rule to real and user wallets"): a pool of
+        `KARTHIK_BIG_POOL_USD`+ is bought only with `KARTHIK_BIG_MIN_BUYS`+ buys
+        in DexScreener's 5-minute count, last read in the three minutes before
+        `now`. An unread count is quiet, as the lab treats it."""
+        from app.labs.graduation import config as grad_config
+        from app.labs.graduation.models import GradPostgradSample
+
+        if pool is None or float(pool) < grad_config.KARTHIK_BIG_POOL_USD:
+            return False
+        buys = await self._session.scalar(
+            select(GradPostgradSample.txns_m5_buys).where(
+                GradPostgradSample.mint == mint,
+                GradPostgradSample.txns_m5_buys.is_not(None),
+                GradPostgradSample.ts <= now,
+                GradPostgradSample.ts >= now - timedelta(minutes=3),
+            ).order_by(GradPostgradSample.ts.desc()).limit(1))
+        return (buys or 0) < grad_config.KARTHIK_BIG_MIN_BUYS
 
     async def _pool_usd(self, mint: str, now: datetime) -> Decimal | None:
         """The coin's pool size (liquidity) as last read in the three minutes
