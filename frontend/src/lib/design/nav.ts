@@ -51,6 +51,11 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [{ href: "/home", label: "Home", icon: IconNews, status: "ready" }],
   },
   {
+    // Everything MEMESCOPE has seen, measured and traded (Karthik, 2026-10-22).
+    label: "Record",
+    items: [{ href: "/track-record", label: "Track record", icon: IconLedger, status: "ready" }],
+  },
+  {
     label: "Strategy",
     items: [
       // Per-lab pages are removed by default; the ones below are listed

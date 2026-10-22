@@ -60,6 +60,8 @@ celery_app = Celery(
         "app.hq_ops.tasks",
         # The public newspaper homepage (2026-10-17).
         "app.newsroom.scheduler",
+        # The track record page (2026-10-22).
+        "app.track_record.scheduler",
     ],
 )
 
