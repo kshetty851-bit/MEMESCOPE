@@ -113,6 +113,13 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Paper only. Copies fomo.family's 24h top 20 traders; $50 a buy from $500.",
       },
+      {
+        href: "/longwatch-lab",
+        label: "Long-watch Lab",
+        icon: IconSpark,
+        status: "ready",
+        note: "Paper only. Watches every graduation for 48 h; Runner and Second Wind books, $25 a buy from $500.",
+      },
     ],
   },
   {

@@ -218,7 +218,7 @@ function Podium({ top }: { top: Mover[] }) {
               <span className="mt-1 text-[11px] text-ink-dim">
                 {day(m.graduated_at)} · peaked {when(m.peak_after_min)} in · ${short(m.pool_usd)} pool
               </span>
-              <span className="mt-2 text-[11px] text-ink-faint">a day later <b className={m.end_x >= 1 ? "text-up" : "text-down"}>{xs(m.end_x)}</b> · chart ↗</span>
+              <span className="mt-2 text-[11px] text-ink-faint">last reading <b className={m.end_x >= 1 ? "text-up" : "text-down"}>{xs(m.end_x)}</b> · chart ↗</span>
             </span>
           </a>
         );
@@ -239,7 +239,7 @@ function MoverCard({ m, rank }: { m: Mover; rank: number }) {
       <div className="mt-2 truncate text-sm font-medium text-ink">{coin(m)}</div>
       <div className="mt-0.5 text-[11px] text-ink-dim">peaked {when(m.peak_after_min)} in · ${short(m.pool_usd)} pool</div>
       <div className="mt-2 text-[11px] text-ink-faint">
-        a day later: <span className={m.end_x >= 1 ? "text-up" : "text-down"}>{xs(m.end_x)}</span>
+        last reading: <span className={m.end_x >= 1 ? "text-up" : "text-down"}>{xs(m.end_x)}</span>
         <span className="float-right text-accent opacity-0 transition-opacity group-hover:opacity-100">chart ↗</span>
       </div>
     </a>
