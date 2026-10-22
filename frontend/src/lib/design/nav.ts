@@ -86,7 +86,7 @@ export const NAV_GROUPS: NavGroup[] = [
         label: "Karthik's Lab",
         icon: IconSpark,
         status: "ready",
-        note: "Paper only. $400 at $200 a trade on the quiet rule, judged 23 Oct.",
+        note: "Paper only. $300 at $100 a trade on $50k+ quiet pools.",
       },
       // Karthik, 2026-10-05: small pools at every size, and ten user wallets
       // sharing the same coins.
@@ -118,7 +118,7 @@ export const NAV_GROUPS: NavGroup[] = [
         label: "Long-watch Lab",
         icon: IconSpark,
         status: "ready",
-        note: "Paper only. Watches every graduation for 48 h; Runner and Second Wind books, $25 a buy from $500.",
+        note: "Paper only. Watches every graduation for 48 h; Second Wind book, $25 a buy from $500 (Runner off).",
       },
     ],
   },
