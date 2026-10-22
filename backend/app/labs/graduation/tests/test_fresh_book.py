@@ -70,7 +70,7 @@ def test_the_page_shows_the_quiet_book_and_the_other_books() -> None:
     # and says so: the size and the moment it changed are both recorded, so
     # the page can mark what came before as in sample.
     assert (by_book["KARTHIK_QUIET_5M"].capital_usd,
-            by_book["KARTHIK_QUIET_5M"].ticket_usd) == (Decimal(300), Decimal(50))
+            by_book["KARTHIK_QUIET_5M"].ticket_usd) == (Decimal(300), Decimal(100))
     # ...and on 2026-10-03 to $500 at $50, when it moved to $50k+ pools.
     assert (Decimal(500), Decimal(50)) == config.KARTHIK_PREVIOUS_SIZE
     assert (by_book["KARTHIK_QUIET_5M"].start < config.KARTHIK_RESIZED_AT
@@ -172,9 +172,11 @@ class _StubDb:
     rate, then his $50-75k arm's positions (none here). No engine, because the
     thing under test is arithmetic."""
 
-    def __init__(self, rows: list[object]) -> None:
+    def __init__(self, rows: list[object], buys: dict[object, int] | None = None) -> None:
         self._rows = rows
         self._read = False
+        #: Buys before each buy, by row id, for the big-pool rule (22 Oct).
+        self._buys = buys or {}
 
     async def scalars(self, _statement: object) -> _Rows:
         # Only the first read is the book's: the rest (the $50-75k arm) get
@@ -185,8 +187,17 @@ class _StubDb:
     async def scalar(self, _statement: object) -> None:
         return None
 
-    async def execute(self, _statement: object, _params: object = None) -> _Empty:
+    async def execute(self, statement: object, params: object = None) -> _Empty:
+        from app.labs.graduation.api import _BUYS_BEFORE_SQL
+
+        if statement is _BUYS_BEFORE_SQL and self._buys and isinstance(params, dict):
+            return _Pairs([(i, self._buys.get(i)) for i in params["ids"]])
         return _Empty()
+
+
+class _Pairs(list):
+    def all(self) -> list[object]:
+        return list(self)
 
 
 class _Empty:
@@ -330,10 +341,10 @@ async def test_the_book_counts_only_its_pool_range_but_the_checks_see_every_size
     assert (book["trades"], book["rugs"]) == (1, 0)
     assert [(t["symbol"], t["mint"]) for t in book["trades_list"]] == [("DEEP", "DEEPpump")]
     _, now = _grid(book)
-    # The grid starts at $50k (the $25k column went in #360) and has no cap:
-    # the $40k rug is in no column, the $120k and $400k pools in every floor
-    # at or under them.
-    assert (now[50_000]["trades"], now[50_000]["rugs"]) == (2, 0)
+    # The grid starts at $50k (the $25k column went in #360) and keeps the
+    # book's rules in every column: the $40k rug is in none, nor the quiet
+    # $400k pool (22 Oct); the $120k pool is in every floor at or under it.
+    assert (now[50_000]["trades"], now[50_000]["rugs"]) == (1, 0)
     assert (now[(100_000, 150_000)]["trades"], now[(100_000, 150_000)]["rugs"]) == (1, 0)
 
 
@@ -368,7 +379,7 @@ async def test_the_grid_is_every_size_by_every_pool_floor() -> None:
     start = next(s for s in config.FRESH_BOOKS if s.book == "KARTHIK_QUIET_5M").start
     a = _Pos("A", start + timedelta(hours=1), 0.10)
     a.liq_open_usd = Decimal(200_000)
-    book = await karthik_book(db=_StubDb([a]))  # type: ignore[arg-type]
+    book = await karthik_book(db=_StubDb([a], buys={a.id: 40}))  # busy, so big pools take it
     w = book["whatif"]
     assert [(f["floor_usd"], f["cap_usd"]) for f in w["floors"]] == [
         (50_000, None), (75_000, None), (100_000, 150_000),
@@ -377,15 +388,15 @@ async def test_the_grid_is_every_size_by_every_pool_floor() -> None:
     assert [f["floor_usd"] for f in w["floors"] if f["book"]] == [50_000]
     assert [(r["ticket_usd"], r["capital_usd"]) for r in w["sizes"]] == [
         (10, 50), (20, 100), (25, 125), (50, 250), (100, 500), (200, 1000)]
-    assert [r["current"] for r in w["sizes"]] == [False, False, False, True, False, False]
+    assert [r["current"] for r in w["sizes"]] == [False, False, False, False, True, False]  # $100
     assert all(len(r["cells"]) == 6 for r in w["sizes"])
     # A $200k pool at +10%: every floor up to $200k took it.
     floors, now = _grid(book)
     # A $200k pool: every floor up to $200k took it; the $100k-$150k band did not.
     assert [now[f]["trades"] for f in floors] == [1, 1, 0, 1, 1, 1]
-    # Each size stakes like the book: $100 flat is twice the $50 ticket.
+    # Each row stakes exactly its label (22 Oct: the book's ticket is its real $100).
     assert now[50_000]["pnl_usd"] == Decimal("10.00")                # $100 at +10%
-    assert w["sizes"][-1]["cells"][0]["pnl_usd"] == Decimal("40.00")  # $400 at +10%
+    assert w["sizes"][-1]["cells"][0]["pnl_usd"] == Decimal("20.00")  # $200 at +10%
     # $25k+ and $50k+ include the arms' replayed rows, and say so.
 
 
@@ -399,11 +410,10 @@ async def test_each_floor_buys_only_its_own_pools() -> None:
     shallow.liq_open_usd = Decimal(100_000)
     deep = _Pos("DEEP", start + timedelta(hours=1, minutes=2), -0.99)  # SHALLOW still held
     deep.liq_open_usd = Decimal(600_000)
-    book = await karthik_book(db=_StubDb([shallow, deep]))  # type: ignore[arg-type]
+    # A busy $600k pool (40 buys before), so the big-pool rule lets it in.
+    book = await karthik_book(db=_StubDb([shallow, deep], buys={deep.id: 40}))  # type: ignore[arg-type]
 
-    # The $600k rug is a quiet big pool (under 15 buys before): the book skips
-    # it (22 Oct); the grid, every size, keeps it.
-    assert (book["trades"], book["rugs"], book["busy_skipped"]) == (1, 0, 0)
+    assert (book["trades"], book["rugs"], book["busy_skipped"]) == (2, 1, 0)
     _, now = _grid(book)
     assert (now[50_000]["trades"], now[50_000]["rugs"]) == (2, 1)
     assert (now[75_000]["trades"], now[75_000]["rugs"]) == (2, 1)

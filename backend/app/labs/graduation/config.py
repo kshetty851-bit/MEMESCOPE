@@ -1080,7 +1080,10 @@ FRESH_BOOKS: tuple[FreshBookSpec, ...] = (
     # held more than 4 coins at once, so from 4x up the dollars are the same and
     # the rest of the balance sat idle; 6x leaves room for busier hours.
     FreshBookSpec("KARTHIK_QUIET_5M", datetime(2026, 9, 30, 20, 0, tzinfo=UTC),
-                  Decimal(300), Decimal(50)),
+                  # $100 since 2026-10-20 ($100 flat on every coin): the size
+                  # grid scales each row by stake / ticket, and a stale $50 here
+                  # made every row trade double its label (Karthik, 2026-10-22).
+                  Decimal(300), Decimal(100)),
 )
 
 #: When Karthik's book changed size, and what it was before. The new size was
