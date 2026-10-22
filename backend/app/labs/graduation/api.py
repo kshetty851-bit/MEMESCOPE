@@ -2119,7 +2119,20 @@ def _without_bad_names(rows: Sequence[Any]) -> tuple[list[Any], int, int, int]:
     return kept, rugged, blocked, spaced
 
 
+#: The book takes ~2.4 s to build and every visitor and refresh rebuilt it;
+#: held for a minute like the homepage's summary (audit, 2026-10-22).
+_KARTHIK_BOOK: tuple[datetime, dict[str, Any]] | None = None
+
+
 @router.get("/karthik", summary="Karthik's own $500 book, and its judge date")
+async def karthik_book_cached(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    global _KARTHIK_BOOK
+    now = datetime.now(UTC)
+    if _KARTHIK_BOOK is None or (now - _KARTHIK_BOOK[0]).total_seconds() >= _KARTHIK_PUBLIC_TTL_S:
+        _KARTHIK_BOOK = (now, await karthik_book(db))
+    return _KARTHIK_BOOK[1]
+
+
 async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """His book alone, with the two things a balance cannot say.
 
