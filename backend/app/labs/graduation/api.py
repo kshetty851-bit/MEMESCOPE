@@ -2214,6 +2214,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     grid = [r for r in await moneyblock.without_crew(db, grid, datetime.now(UTC))
             if not _unnamed_evening(r) and r.mint not in no_open_buy]
     grid = _without_bad_names(grid)[0]
+    grid = await _busy_if_big(db, grid)     # the book's big-pool rule, every column
     grid_buys = dict((await db.execute(_BUYS_BEFORE_SQL, {
         "ids": [p.id for p in grid], "mints": [p.mint for p in grid],
         "ats": [p.opened_at for p in grid]})).all()) if grid else {}
