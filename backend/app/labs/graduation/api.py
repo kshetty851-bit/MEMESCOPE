@@ -1460,8 +1460,10 @@ async def fresh_held(book: str = "", db: AsyncSession = Depends(get_db)) -> Fres
 #: $40, $25 on $50"; the small sizes sat on $100 before).
 #: Karthik, 2026-10-03: "change size on all 1st table shud be 10x like below
 #: table" -- both tables now run each size on ten times its size.
-#: 2026-10-08: six times (Karthik: "change karthik lab to 6x").
-KARTHIK_WHATIF_SIZES = tuple((t, 6 * t) for t in (10, 20, 25, 50, 100, 200))
+#: 2026-10-08: six times (Karthik: "change karthik lab to 6x"). Five times
+#: from 2026-10-22 (Karthik: "fix this too as 1:5 ratio").
+KARTHIK_WHATIF_RATIO = 5
+KARTHIK_WHATIF_SIZES = tuple((t, KARTHIK_WHATIF_RATIO * t) for t in (10, 20, 25, 50, 100, 200))
 #: (A second, from-1-Oct table went on 2026-10-04: the book itself starts on
 #: 1 Oct now, so it would repeat this one.)
 #: The pool floors across the page's grid (Karthik, 2026-09-27).
@@ -1698,7 +1700,8 @@ def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
         "floors": [{"floor_usd": f, "cap_usd": c, "book": hi is None and f == lo and c is None,
                     "replayed_below": f < 75_000} for f, c in KARTHIK_GRID_COLUMNS],
         "sizes": [{"ticket_usd": t, "capital_usd": c,
-                   "current": (t, c) == (ticket, capital),
+                   # By trade size: on 5x no row carries the book's own balance.
+                   "current": t == ticket,
                    "cells": [cell(col, float(t), float(c)) for col in KARTHIK_GRID_COLUMNS]}
                   for t, c in KARTHIK_WHATIF_SIZES],
     }
