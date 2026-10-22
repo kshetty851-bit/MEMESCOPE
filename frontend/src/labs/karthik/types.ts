@@ -44,6 +44,9 @@ export interface InSol {
 export interface KarthikBook {
   /** The book's trades on three $500 user wallets, month by month (2026-10-20). */
   family?: FamilyMonths;
+  /** Big pools bought only when busy (2026-10-22). */
+  big_pool_usd?: number;
+  big_min_buys?: number;
   in_sol?: InSol | null;
   /** The floor test (2026-10-11): the book's trades from `since`, re-weighted per variant. */
   /** The same book started fresh at each Dubai midnight, newest start first. */
