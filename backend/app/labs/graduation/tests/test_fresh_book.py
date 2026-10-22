@@ -376,7 +376,7 @@ async def test_the_grid_is_every_size_by_every_pool_floor() -> None:
     # $50k and up again since 22 Oct (big pools only when busy).
     assert [f["floor_usd"] for f in w["floors"] if f["book"]] == [50_000]
     assert [(r["ticket_usd"], r["capital_usd"]) for r in w["sizes"]] == [
-        (10, 60), (20, 120), (25, 150), (50, 300), (100, 600), (200, 1200)]
+        (10, 50), (20, 100), (25, 125), (50, 250), (100, 500), (200, 1000)]
     assert [r["current"] for r in w["sizes"]] == [False, False, False, True, False, False]
     assert all(len(r["cells"]) == 6 for r in w["sizes"])
     # A $200k pool at +10%: every floor up to $200k took it.

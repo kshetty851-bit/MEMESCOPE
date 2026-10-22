@@ -506,7 +506,7 @@ export function SizeGrid({ data }: { data: KarthikBook }) {
     <>
       {/* One table since 2026-10-04: the book starts on 1 Oct, so the second
           (from-1-Oct) table would repeat this one. Shown as balances. */}
-      <GridPanel data={data} title={`If each trade had been — on 6x the money, from ${day(data.started_at)}`}
+      <GridPanel data={data} title={`If each trade had been — on 5x the money, from ${day(data.started_at)}`}
                  rows={w.sizes} value />
     </>
   );
