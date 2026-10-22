@@ -62,6 +62,8 @@ celery_app = Celery(
         "app.newsroom.scheduler",
         # The track record page (2026-10-22).
         "app.track_record.scheduler",
+        # Long-watch Lab (2026-10-22): 48-hour readings + Runner / Second Wind books.
+        "app.labs.longwatch.scheduler",
     ],
 )
 
@@ -241,6 +243,13 @@ celery_app.conf.beat_schedule = {
     },
     # FOMO Lab (2026-10-18): fomo.family's 24h top 20, paper only. Returns at
     # once unless FEATURE_FOMO_LAB_ENABLED and both feed keys are set.
+    # Long-watch Lab (2026-10-22): every graduation of the last 48 h read once,
+    # then the Runner and Second Wind paper books. Paper only.
+    "longwatch-tick": {
+        "task": "app.labs.longwatch.scheduler.longwatch_tick",
+        "schedule": crontab(minute="*/10"),
+        "options": {"expires": 540},
+    },
     "fomo-tick": {
         "task": "app.labs.fomo.scheduler.fomo_tick",
         "schedule": crontab(minute="*/2"),

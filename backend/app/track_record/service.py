@@ -41,8 +41,14 @@ select g.mint, g.ts, t.symbol, t.name,
        array_agg(p.price_usd::float8 order by p.ts),
        (array_agg(p.liquidity_usd::float8 order by p.ts))[1]
 from g
-join grad_postgrad_samples p on p.mint = g.mint and p.ts >= g.ts
-     and p.ts <= g.ts + interval '24 hours' and p.price_usd > 0
+join (select mint, ts, price_usd, liquidity_usd from grad_postgrad_samples
+      where mint in (select mint from g)
+      union all
+      -- The Long-watch Lab's 10-minute readings (2026-10-22) carry a coin past
+      -- the first ~2 hours the graduation lab prices it for.
+      select mint, ts, price_usd, liquidity_usd from longwatch_readings
+      where mint in (select mint from g)) p
+     on p.mint = g.mint and p.ts >= g.ts and p.ts <= g.ts + interval '24 hours' and p.price_usd > 0
 left join grad_tokens t on t.mint = g.mint
 group by g.mint, g.ts, t.symbol, t.name""")
 
@@ -132,7 +138,9 @@ async def refresh(session, redis, now: datetime | None = None) -> dict[str, Any]
     d = FIRST_DAY
     while d <= today:
         key = DAY_KEY + d.isoformat()
-        if d >= today - timedelta(days=1) or not await redis.exists(key):
+        # A day's coins keep being read for 24 h after graduating, so the last
+        # two finished days are recomputed too.
+        if d >= today - timedelta(days=2) or not await redis.exists(key):
             lo, hi = _day_bounds(d)
             rows = (await session.execute(_DAY_SQL, {"lo": lo, "hi": hi})).all()
             await redis.set(key, json.dumps({"date": d.isoformat(), **summarise(rows)}))
