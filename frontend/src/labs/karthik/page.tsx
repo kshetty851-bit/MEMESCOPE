@@ -385,6 +385,43 @@ export function Days({ days, judgeAt, trades, real = true }: {
   );
 }
 
+/** What the coins the rules refused would have made, per day (2026-10-22). */
+export function RefusedDays({ days, total }: {
+  days: NonNullable<KarthikBook["refused_days"]>; total?: string;
+}) {
+  const sum = Number(total ?? 0);
+  return (
+    <div data-testid="refused-days">
+      <div className="mb-1 flex items-baseline justify-between gap-2 text-[11px] uppercase tracking-wider text-ink-dim">
+        <span>Refused coins · what they would have made</span>
+        <span className={`tabular-nums ${sum >= 0 ? "text-up" : "text-down"}`}>
+          {sum >= 0 ? "+" : ""}{usd(String(sum))}
+        </span>
+      </div>
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(84px,1fr))] gap-1.5">
+        {days.map((d) => {
+          const pnl = Number(d.pnl_usd);
+          return (
+            <div key={d.n} data-testid={`refused-day-${d.n}`}
+                 className={`rounded-md border p-1.5 ${d.running ? "border-dashed border-line" : "border-line"} bg-ink/[0.02]`}>
+              <div className="text-[9px] uppercase tracking-wider text-ink-dim">Day {d.n}{d.running ? " · so far" : ""}</div>
+              <div className={`text-[13px] font-semibold tabular-nums ${pnl > 0 ? "text-up" : pnl < 0 ? "text-down" : "text-ink-dim"}`}>
+                {pnl > 0 ? "+" : ""}{usd(d.pnl_usd)}
+              </div>
+              <div className="text-[10px] tabular-nums text-ink-dim">
+                {d.trades} coins{d.rugs ? <span className="text-down"> · {d.rugs} rug{d.rugs === 1 ? "" : "s"}</span> : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-1 text-[10px] text-ink-faint">
+        $50k+ quiet coins the book&apos;s skips turned away, at its own stake, as if cash were always free.
+      </p>
+    </div>
+  );
+}
+
 /** One closed trade; the Pool Lab's $10k book has no real-wallet column. */
 /** Compact market cap: $46.7k, $3.2M. */
 export function mcap(n: number | null | undefined): string {
@@ -1134,11 +1171,16 @@ export function KarthikLabPage() {
 
       <RuleBook data={data} />
 
-      <div>
-        <div className="mb-1 text-[11px] uppercase tracking-wider text-ink-dim">
-          Every 24 hours · profit that day
+      {/* Karthik, 2026-10-22: the book's days on the left, what the coins its
+          rules refused would have made on the right, day by day. */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+        <div>
+          <div className="mb-1 text-[11px] uppercase tracking-wider text-ink-dim">
+            Every 24 hours · profit that day
+          </div>
+          <Days days={solDays} judgeAt={data.judge_at} trades={data.trades_list} />
         </div>
-        <Days days={solDays} judgeAt={data.judge_at} trades={data.trades_list} />
+        {data.refused_days?.length ? <RefusedDays days={data.refused_days} total={data.refused_pnl_usd} /> : null}
       </div>
       {data.start_dates?.length ? (
         <StartDates book="$50k book" lines={data.start_dates} capital={Number(data.capital_usd)} ticket={Number(data.ticket_usd)}
