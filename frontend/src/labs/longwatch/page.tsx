@@ -36,7 +36,7 @@ const tone = (v: number) => (v > 0 ? "text-up" : v < 0 ? "text-down" : "text-ink
 
 const RULES: Record<Book["book"], { title: string; kicker: string; buys: string; sells: string }> = {
   runner: {
-    title: "Runner", kicker: "Still climbing at 60 minutes",
+    title: "Runner", kicker: "Switched off 22 Oct · its backtest lost $745 on 181 trades",
     buys: "About an hour after graduating, a coin at 3x+ its first price, its pool 2x+ its first size, and more buyers than sellers in the last hour.",
     sells: "When it falls 40% from its highest reading, or after 6 hours.",
   },
