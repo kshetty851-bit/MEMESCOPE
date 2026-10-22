@@ -321,11 +321,12 @@ async def test_the_book_counts_only_its_pool_range_but_the_checks_see_every_size
     shallow.liq_open_usd = Decimal(40_000)
     deep = _Pos("DEEP", start + timedelta(hours=2), 0.10)            # $120k: the book's
     deep.liq_open_usd = Decimal(120_000)
-    huge = _Pos("HUGE", start + timedelta(hours=3), 0.02)            # $400k: over the cap
+    huge = _Pos("HUGE", start + timedelta(hours=3), 0.02)            # $400k, quiet: big pools need 15+ buys
     huge.liq_open_usd = Decimal(400_000)
     book = await karthik_book(db=_StubDb([shallow, deep, huge]))  # type: ignore[arg-type]
 
-    assert book["pools_usd"] == [50_000, 200_000]           # $200k+ skipped since 21 Oct
+    assert book["pools_usd"] == [50_000, None]              # big pools back, busy only (22 Oct)
+    assert (book["big_pool_usd"], book["big_min_buys"]) == (200_000, 15)
     assert (book["trades"], book["rugs"]) == (1, 0)
     assert [(t["symbol"], t["mint"]) for t in book["trades_list"]] == [("DEEP", "DEEPpump")]
     _, now = _grid(book)
@@ -372,8 +373,8 @@ async def test_the_grid_is_every_size_by_every_pool_floor() -> None:
     assert [(f["floor_usd"], f["cap_usd"]) for f in w["floors"]] == [
         (50_000, None), (75_000, None), (100_000, 150_000),
         (100_000, None), (150_000, None), (200_000, None)]
-    # The book is $50k-$200k since #378: no uncapped column is its own.
-    assert [f["floor_usd"] for f in w["floors"] if f["book"]] == []
+    # $50k and up again since 22 Oct (big pools only when busy).
+    assert [f["floor_usd"] for f in w["floors"] if f["book"]] == [50_000]
     assert [(r["ticket_usd"], r["capital_usd"]) for r in w["sizes"]] == [
         (10, 60), (20, 120), (25, 150), (50, 300), (100, 600), (200, 1200)]
     assert [r["current"] for r in w["sizes"]] == [False, False, False, True, False, False]
@@ -400,7 +401,8 @@ async def test_each_floor_buys_only_its_own_pools() -> None:
     deep.liq_open_usd = Decimal(600_000)
     book = await karthik_book(db=_StubDb([shallow, deep]))  # type: ignore[arg-type]
 
-    # The $600k rug is over the book's $200k cap (#378); the grid has none.
+    # The $600k rug is a quiet big pool (under 15 buys before): the book skips
+    # it (22 Oct); the grid, every size, keeps it.
     assert (book["trades"], book["rugs"], book["busy_skipped"]) == (1, 0, 0)
     _, now = _grid(book)
     assert (now[50_000]["trades"], now[50_000]["rugs"]) == (2, 1)

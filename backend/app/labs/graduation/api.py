@@ -2068,6 +2068,19 @@ async def _no_open_buy(db: AsyncSession, rows: Sequence[Any]) -> set[str]:
     return {f.mint for f in found if no_buy_at_open(f)}
 
 
+async def _busy_if_big(db: AsyncSession, rows: Sequence[Any]) -> list[Any]:
+    """Karthik's book less the big pools (`KARTHIK_BIG_POOL_USD`+) bought quiet:
+    fewer than `KARTHIK_BIG_MIN_BUYS` buys in the 5 minutes before, or unread."""
+    big = [r for r in rows if float(r.liq_open_usd or 0) >= config.KARTHIK_BIG_POOL_USD]
+    if not big:
+        return list(rows)
+    buys = dict((await db.execute(_BUYS_BEFORE_SQL, {
+        "ids": [p.id for p in big], "mints": [p.mint for p in big],
+        "ats": [p.opened_at for p in big]})).all())
+    return [r for r in rows if float(r.liq_open_usd or 0) < config.KARTHIK_BIG_POOL_USD
+            or (buys.get(r.id) or 0) >= config.KARTHIK_BIG_MIN_BUYS]
+
+
 def _unnamed_evening(row: Any) -> bool:
     """A coin with no name bought in `KARTHIK_SKIP_UNNAMED_DUBAI_HOURS` (Dubai)."""
     return config.unnamed_evening(row.symbol, row.opened_at)
@@ -2171,6 +2184,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     # on (Karthik, 2026-10-10, `moneyblock.CREW`), replayed from day 1.
     rows = await moneyblock.without_crew(db, every, datetime.now(UTC))
     crewless = len(rows)
+    rows = await _busy_if_big(db, rows)
     named = len(rows)
     rows = [r for r in rows if not _unnamed_evening(r)]
     unnamed_evening = named - len(rows)
@@ -2232,6 +2246,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         "pools_usd": list(config.KARTHIK_BOOK_POOLS),
         "skip_pools_usd": list(config.KARTHIK_SKIP_POOL_USD),
         "skip_ai_pools_usd": list(config.KARTHIK_SKIP_AI_POOL_USD),
+        "big_pool_usd": config.KARTHIK_BIG_POOL_USD, "big_min_buys": config.KARTHIK_BIG_MIN_BUYS,
         # What the page's rule book reads, so its words cannot drift from the rule.
         "max_entry_age_s": config.MAX_ENTRY_AGE_S,
         "max_entry_age_since": config.MAX_ENTRY_AGE_AT,

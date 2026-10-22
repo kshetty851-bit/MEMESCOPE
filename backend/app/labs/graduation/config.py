@@ -1116,7 +1116,17 @@ KARTHIK_MANY_AT_ONCE_AT = datetime(2026, 10, 3, 13, 15, tzinfo=UTC)
 #: +$109 and 5 of 15 rugs; without them 264 trades, 9 rugs, +$1,767 vs +$1,797
 #: (fixed dollars) and the two-wallet box +$92 better. Lab only: the real
 #: wallets keep their own pool settings.
-KARTHIK_BOOK_POOLS: tuple[int, int | None] = (50_000, 200_000)
+#: Back to no upper limit on 2026-10-22, with big pools bought only when busy
+#: (`KARTHIK_BIG_POOL_USD`).
+KARTHIK_BOOK_POOLS: tuple[int, int | None] = (50_000, None)
+#: Big pools only when busy (Karthik, 2026-10-22: "yes apply A since day 1"):
+#: a pool of this size or more is bought only if DexScreener counted at least
+#: `KARTHIK_BIG_MIN_BUYS` buys in the 5 minutes before the buy. Replayed from
+#: 1 Oct at $100 on $300: +$2,071 vs +$1,780 skipping all $200k+, one more rug,
+#: better on 21 of 22 days, never below $300. Busy big pools had real demand;
+#: quiet ones drifted and held the rugs. Below this size the quiet rule stands.
+KARTHIK_BIG_POOL_USD = 200_000
+KARTHIK_BIG_MIN_BUYS = 15
 KARTHIK_BOOK_POOLS_AT = datetime(2026, 10, 3, 12, 30, tzinfo=UTC)
 #: Pools the book skips inside its range (Karthik, 2026-10-12: "apply skip
 #: 150-200k pools to karthik lab since day 1 and also put this rule in main
