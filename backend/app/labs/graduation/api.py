@@ -2230,6 +2230,21 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     took = [(row, money) for row, money in zip(rows, walk.pnl, strict=True)
             if money is not None]
     pnl = [money for _, money in took]
+    # What the coins the rules refused would have made, day by day (Karthik,
+    # 2026-10-22: "show daily wise how much profit loss rejected coins would
+    # made"): every $50k+ quiet signal the book's skips turned away, at the
+    # book's own stake, as if there were always cash for it.
+    kept_ids = {p.id for p in rows}
+    refused = [r for r in sorted([*small, *signals], key=_opened_order)
+               if lo <= float(r.liq_open_usd or 0) and (hi is None or float(r.liq_open_usd or 0) < hi)
+               and r.id not in kept_ids]
+    refused_walk = _funded_walk(
+        [(p.opened_at, p.closed_at, float(p.net_return),
+          float(p.impact_open or 0), float(p.impact_close or 0)) for p in refused],
+        sol, ticket=float(spec.ticket_usd), start=1e9,
+        tickets=[config.karthik_ticket(p.liq_open_usd, None) for p in refused])
+    refused_took = [(row, money) for row, money in zip(refused, refused_walk.pnl, strict=True)
+                    if money is not None]
     # Every pump.fun graduation seen since the book opened, bought or not, at
     # any pool size (Karthik, 2026-09-27: "doesnt matter we took trade or not").
     seen = await db.scalar(select(func.count()).select_from(GradMigration)
@@ -2314,6 +2329,9 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         # question, so this one carries its own label on the page.
         "days": _karthik_days(took, spec.start, float(spec.capital_usd), cents,
                               float(sol) if sol else None),
+        "refused_days": [{k: d[k] for k in ("n", "running", "trades", "rugs", "pnl_usd")}
+                         for d in _karthik_days(refused_took, spec.start, 1e9, cents)],
+        "refused_pnl_usd": Decimal(str(sum(m for _, m in refused_took))).quantize(cents),
         "in_sol": _in_sol(took, float(spec.capital_usd), float(sol) if sol else None),
         # The same trades at other sizes, and on $150k+ pools only. A check,
         # shown beside the book; the book itself stays on its own rule.
