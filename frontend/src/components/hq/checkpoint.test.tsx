@@ -145,3 +145,13 @@ describe("the office talks", () => {
     }
   });
 });
+
+describe("classified", () => {
+  it("blacks out every figure in a rule or stop reason", async () => {
+    const { classified } = await import("./checkpoint");
+    expect(classified("pool $18,274, under $50,000")).toBe("pool ▮▮▮, under ▮▮▮");
+    expect(classified("The pool is still quiet: under 100 trades")).toBe("The pool is still quiet: under ▮▮▮");
+    expect(classified("No coin by this name rugged in the last 3 hours")).toBe("No coin by this name rugged in the last ▮▮▮");
+    expect(classified("Not linked to a recent rug")).toBe("Not linked to a recent rug");
+  });
+});

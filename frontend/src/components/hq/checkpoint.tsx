@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { api } from "@/lib/api-client";
 import { cleanName } from "@/lib/clean-name";
+import { Counter } from "@/components/alpha/journey";
 import { Character, RigDefs, portraitViewBox } from "@/components/hq/character-rig";
 import type { CharacterDefinition, Emotion, Pose } from "@/lib/hq/characters";
 import {
@@ -184,8 +185,8 @@ function who(coin: LiveCoin): string {
 /** One person, drawn with HQ's own character rig, feeling what their check
  *  is doing: curious while a coin is in front of them, cheering when it
  *  passes, cross when they stop it, and their own moods in between. */
-function PersonFigure({ index, state, now, talking }: {
-  index: number; state: BotState; now: number; talking?: Emotion;
+function PersonFigure({ index, state, now, talking, size = 64 }: {
+  index: number; state: BotState; now: number; talking?: Emotion; size?: number;
 }) {
   const look = lookOf(index);
   const mood: { emotion: Emotion; pose: Pose } =
@@ -197,7 +198,7 @@ function PersonFigure({ index, state, now, talking }: {
   const box = portraitViewBox(look as CharacterDefinition, "bust");
   const [x, y, w, h] = box.split(" ").map(Number) as [number, number, number, number];
   return (
-    <svg viewBox={box} width={64} height={72} aria-hidden="true" className="cp-person overflow-visible">
+    <svg viewBox={box} width={size} height={Math.round(size * 1.125)} aria-hidden="true" className="cp-person overflow-visible">
       <g className="cp-body">
         <circle className="cp-halo" cx={x + w / 2} cy={y + h / 2} r={w * 0.55} />
         <Character character={look} pose={mood.pose} stance="standing" emotion={mood.emotion} />
@@ -427,7 +428,7 @@ function ManagerDesk({ talk, data, now }: { talk: Line | null; data: Checkpoint 
 export function CheckpointOffice({ data, live, now: nowProp, motionOverride, money = {}, mode = "real" }: {
   /** "pool10k" (2026-10-05): the same thirty checking for the Pool Lab's $10k
    *  paper book — Diego's floor is $10,000 and a buy is the book's. */
-  mode?: "real" | "pool10k";
+  mode?: Mode;
   data: Checkpoint | undefined;
   live: LiveBelt | undefined;
   /** What Layla reads out (`useMoneyReports`); none in tests. */
@@ -533,7 +534,7 @@ export function CheckpointOffice({ data, live, now: nowProp, motionOverride, mon
                   c.status === "bought" ? "bg-up" : c.status === "stopped" ? "bg-down" : "bg-warn"}`} />
                 <b className="text-ink">{c.symbol ?? "?"}</b>
                 <span className="text-ink-2">{who(c)}</span>
-                <span className="min-w-0 truncate text-ink-3">{c.note}</span>
+                <span className="min-w-0 truncate text-ink-3">{mode === "public" ? classified(c.note) : c.note}</span>
                 <span className="ml-auto shrink-0 tabular-nums text-ink-3">{since(c.graduated_at, now)}</span>
               </li>
             ))}
@@ -576,7 +577,7 @@ export function CheckpointOffice({ data, live, now: nowProp, motionOverride, mon
 
 function Hall({ stage, stateOf, data, onBelt, stamp, recentStops, onPick, picked, now, talk, mode }: {
   now: number;
-  mode: "real" | "pool10k";
+  mode: Mode;
   talk: Line | null;
   stage: (typeof STAGES)[number];
   stateOf: (i: number) => BotState;
@@ -651,8 +652,19 @@ function Hall({ stage, stateOf, data, onBelt, stamp, recentStops, onPick, picked
   );
 }
 
+/** "public" (2026-10-22): the real office on the signed-out homepage, with the
+ *  rules' exact numbers blacked out so the filters cannot be copied. */
+type Mode = "real" | "pool10k" | "public";
+
+/** Every figure in a rule or a stop reason, blacked out: "pool $18,274, under
+ *  $50,000" → "pool ▮▮▮, under ▮▮▮". */
+export function classified(text: string): string {
+  return text.replace(/\$?\d(?:[\d,.]*\d)?\s?(k|%|hours?|minutes?|trades?|SOL)?/g, "▮▮▮");
+}
+
 /** A person's check in words; Diego's floor follows the office's mode. */
-function jobOf(r: (typeof ROBOTS)[number], mode: "real" | "pool10k"): string {
+function jobOf(r: (typeof ROBOTS)[number], mode: Mode): string {
+  if (mode === "public") return classified(r.job);
   return mode === "pool10k" && r.id === "depth" ? "The pool holds at least $10,000" : r.job;
 }
 
@@ -662,11 +674,11 @@ export function CheckpointPool10k({ money }: { money?: { lab?: LabSummary } }) {
   return <CheckpointOffice data={undefined} live={live.data} money={money} mode="pool10k" />;
 }
 
-export function CheckpointLive() {
+export function CheckpointLive({ mode = "real" }: { mode?: Mode } = {}) {
   const q = useCheckpoint();
   const live = useLive();
   const money = useMoneyReports();
-  return <CheckpointOffice data={q.data} live={live.data} money={money} />;
+  return <CheckpointOffice data={q.data} live={live.data} money={money} mode={mode} />;
 }
 
 /**
@@ -676,7 +688,7 @@ export function CheckpointLive() {
  * wallet gate's people own no refusal codes (their refusals are not recorded),
  * so they show what they do rather than a count nobody kept.
  */
-export function CheckpointRoster() {
+export function CheckpointRoster({ secret = false }: { secret?: boolean } = {}) {
   const { data } = useCheckpoint();
   const stops = data ? Object.values(data.stopped_by).reduce((a, b) => a + b, 0) : null;
   const rugBlocks = data
@@ -684,6 +696,8 @@ export function CheckpointRoster() {
         .reduce((n, r) => n + (stoppedBy(r, data) ?? 0), 0)
     : null;
   const num = (v: number | null | undefined) => (v == null ? "—" : v.toLocaleString("en-US"));
+  // Signed out, the four totals count up as they scroll in (2026-10-22).
+  const shown = (v: number | null | undefined) => (secret ? <Counter value={v ?? null} /> : num(v));
   return (
     <section className="cp mt-4 overflow-hidden rounded-xl border border-line p-4" data-testid="cp-roster">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -695,17 +709,24 @@ export function CheckpointRoster() {
       </div>
       <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {[
-          ["Coins stopped", num(stops), "text-down"],
-          ["Rug blocks", num(rugBlocks), "text-down"],
-          ["Safety-checked", num(data?.safety_checked), "text-ink"],
-          ["Passed all checks", num(data?.safety_allowed), "text-up"],
+          ["Coins stopped", shown(stops), "text-down"],
+          ["Rug blocks", shown(rugBlocks), "text-down"],
+          ["Safety-checked", shown(data?.safety_checked), "text-ink"],
+          ["Passed all checks", shown(data?.safety_allowed), "text-up"],
         ].map(([label, value, tone]) => (
-          <div key={label} className="rounded-lg border border-line bg-ink/[0.02] p-3">
+          <div key={label as string} className="rounded-lg border border-line bg-ink/[0.02] p-3">
             <div className="text-[10px] uppercase tracking-wider text-ink-3">{label}</div>
             <div className={`mt-0.5 text-xl font-semibold tabular-nums ${tone}`}>{value}</div>
           </div>
         ))}
       </div>
+      <details className="group mt-4" open={!secret}>
+      {/* On the homepage the thirty are already on the map above; the list
+          opens on a tap instead of doubling a phone's scroll (2026-10-22). */}
+      <summary className={secret ? "cursor-pointer text-[12px] text-accent hover:underline" : "hidden"}>
+        <span className="group-open:hidden">Show all 30 checks and what each has stopped</span>
+        <span className="hidden group-open:inline">Hide the list</span>
+      </summary>
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
         {STAGES.map((stage) => (
           <div key={stage.id} className="cp-hall rounded-lg border p-3" data-stage={stage.id}>
@@ -716,11 +737,13 @@ export function CheckpointRoster() {
                 const n = stoppedBy(r, data);
                 return (
                   <li key={r.id} className="flex items-start justify-between gap-3 py-1.5" data-testid={`cp-roster-${r.id}`}>
-                    <div className="min-w-0">
+                    {/* Each checker's own face (2026-10-22), so the names stick. */}
+                    <PersonFigure index={ROBOTS.indexOf(r)} state="idle" now={0} size={28} />
+                    <div className="min-w-0 flex-1">
                       <div className="text-[12px] font-semibold text-ink">
                         {r.first} <span className="font-normal text-ink-3">· {r.name}</span>
                       </div>
-                      <div className="text-[11px] leading-snug text-ink-2">{r.job}</div>
+                      <div className="text-[11px] leading-snug text-ink-2">{secret ? classified(r.job) : r.job}</div>
                     </div>
                     <div className="shrink-0 text-right text-[11px] tabular-nums">
                       {n == null ? (
@@ -738,16 +761,18 @@ export function CheckpointRoster() {
           </div>
         ))}
       </div>
+      </details>
     </section>
   );
 }
 
-/** The homepage's view: the office at work, then the roster under it. */
+/** The homepage's view: the office at work, then the roster under it, with
+ *  the rules' numbers blacked out for visitors who are not signed in. */
 export function CheckpointPublic() {
   return (
     <>
-      <CheckpointLive />
-      <CheckpointRoster />
+      <CheckpointLive mode="public" />
+      <CheckpointRoster secret />
     </>
   );
 }

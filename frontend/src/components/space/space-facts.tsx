@@ -37,7 +37,7 @@ export const FACTS: readonly string[] = [
   "Footprints on the Moon can last for millions of years — there is no wind to erase them.",
 ];
 
-const EVERY_MS = 8000;
+const EVERY_MS = 12000;
 
 /**
  * A holographic transmission card. `toFrog` adds the pointer on its right,
@@ -56,7 +56,9 @@ export function SpaceFacts({ className = "", toFrog = false }: { className?: str
   }, []);
 
   if (!order) return null;
-  const index = order[at % order.length]!;
+  // Captain Ribbit introduces himself first (2026-10-22), then the facts.
+  const greeting = at === 0;
+  const index = order[(at - 1 + order.length) % order.length]!;
   return (
     <div
       className={`space-facts ${toFrog ? "space-facts--to-frog" : ""} ${className}`}
@@ -67,13 +69,15 @@ export function SpaceFacts({ className = "", toFrog = false }: { className?: str
         <span className="space-facts__orbit" aria-hidden>
           <span />
         </span>
-        <span className="space-facts__label">Space fact</span>
-        <span className="space-facts__count">
-          {String((at % order.length) + 1).padStart(2, "0")} / {FACTS.length}
-        </span>
+        <span className="space-facts__label">Captain Ribbit{greeting ? "" : " · space fact"}</span>
+        {greeting ? null : (
+          <span className="space-facts__count">
+            {String(((at - 1) % order.length) + 1).padStart(2, "0")} / {FACTS.length}
+          </span>
+        )}
       </div>
       <p key={at} className="space-facts__text">
-        {FACTS[index]}
+        {greeting ? "Hi, I'm Captain Ribbit. Most new coins die fast, so we check 30 things before a cent goes in." : FACTS[index]}
       </p>
       <span key={`bar-${at}`} className="space-facts__bar" aria-hidden />
     </div>

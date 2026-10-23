@@ -98,3 +98,14 @@ async def test_a_refusal_part_way_keeps_what_was_read(fresh):
     days = await g.github_days(now + timedelta(minutes=31))
     assert sum(d["commits"] for d in days) == 250        # the backfill picked up where it stopped
     assert g.json.loads(r.kv[g.STATE_KEY])["backfill"] is None
+
+
+async def test_two_commits_at_one_instant_one_untitled_do_not_crash(fresh):
+    # 22 Oct: a titled and an untitled commit at the same second broke the sort
+    # (str vs None) and took the homepage's journey figures down with it.
+    _, _, r = fresh
+    at = "2026-10-22T10:00:00+00:00"
+    r.kv[g.STATE_KEY] = g.json.dumps({"at": datetime.now(UTC).isoformat(), "backfill": None})
+    r.h[g.COMMITS_KEY] = {"a": g.json.dumps([at, "Fix the board"]), "b": g.json.dumps([at, None])}
+    days = await g.github_days(datetime.now(UTC))
+    assert days[0]["commits"] == 2 and days[0]["titles"] == ["Fix the board"]

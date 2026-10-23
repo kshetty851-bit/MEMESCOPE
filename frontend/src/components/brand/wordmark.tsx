@@ -110,7 +110,7 @@ export function WordmarkSubtitle({ className }: { className?: string }) {
         className,
       )}
     >
-      Token Intelligence Command
+      Graduation research lab
     </span>
   );
 }

@@ -9,6 +9,8 @@ import { Wordmark, WordmarkSubtitle } from "@/components/brand/wordmark";
 import { AlphaAccess } from "@/components/alpha/alpha-access";
 import { HeroMascot, type MascotState } from "@/components/alpha/hero-mascot";
 import { Journey } from "@/components/alpha/journey";
+import { LiveTicker, type CoinReaction } from "@/components/alpha/live-ticker";
+import { api } from "@/lib/api-client";
 import { SiteFooter, WhatRunsHere } from "@/components/alpha/what-runs-here";
 import { HomeUniverse } from "@/components/space/home-universe";
 import { FloatingCrew, PerchedCrew } from "@/components/space/space-crew";
@@ -27,6 +29,24 @@ const CheckpointPublic = dynamic(
   { ssr: false },
 );
 const MoonIntro = dynamic(loadMoonIntro, { ssr: false });
+
+/** One line of proof under the headline, live (2026-10-22): numbers persuade
+ *  more than adjectives. Absent until it has read them. */
+function HeroProof() {
+  const [d, setD] = useState<{ graduations_watched: number; lab: { trades: number; rugs: number } } | null>(null);
+  useEffect(() => {
+    api.get<NonNullable<typeof d>>("/journey", { skipAuthRetry: true }).then(setD).catch(() => {});
+  }, []);
+  if (!d) return null;
+  const n = (v: number) => v.toLocaleString("en-US");
+  return (
+    <p className="hero-proof">
+      <span><b>{n(d.graduations_watched)}+</b> graduations studied</span>
+      <span><b>{n(d.lab.trades)}</b> paper trades</span>
+      <span><b>{n(d.lab.rugs)}</b> rugs</span>
+    </p>
+  );
+}
 
 /**
  * THE ALPHA GATE — now a landing.
@@ -94,7 +114,16 @@ export function LandingPage() {
     return () => window.clearTimeout(timer);
   }, [gate]);
 
-  const mascot: MascotState = gate === "denied" ? "denied" : "idle";
+  // Captain Ribbit reacts to each new coin (2026-10-22): a cheer when one
+  // passes every check, a head shake when one is stopped.
+  const [reaction, setReaction] = useState<CoinReaction | null>(null);
+  const onReact = useCallback((r: CoinReaction) => {
+    setReaction(r);
+    window.setTimeout(() => setReaction(null), r === "cheer" ? 900 : 480);
+  }, []);
+
+  const mascot: MascotState = gate === "denied" || reaction === "shake" ? "denied"
+    : reaction === "cheer" ? "approved" : "idle";
 
   return (
     <main
@@ -121,6 +150,9 @@ export function LandingPage() {
               for part of the launch sequence. */}
           <SpaceAudioToggle className="ml-auto" />
         </header>
+        <div data-alpha-content className="relative z-10 mt-4">
+          <LiveTicker onReact={onReact} />
+        </div>
 
         {/* The mascot lives behind the grid, not beside it. Below `lg` it is out
             of the idle composition — a figure behind a login form on a 375px
@@ -168,6 +200,7 @@ export function LandingPage() {
               <b>on paper</b> against a fair comparison, and lets <b>real money</b> follow
               only what earns it.
             </p>
+            <HeroProof />
           </div>
 
           <AlphaAccess
