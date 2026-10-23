@@ -533,7 +533,7 @@ class RealWalletDriver:
         traded = select(RealWalletLiveIntent.mint_address).where(
             RealWalletLiveIntent.wallet_public_key == wallet)
         rows = (await self._session.execute(
-            select(LabDecision.mint_address, LabDecision.features)
+            select(LabDecision.mint_address, LabDecision.features, LabDecision.checkpoint_at)
             .where(
                 LabDecision.strategy_id == strategy_id.upper(),
                 LabDecision.eligible.is_(True),
@@ -543,7 +543,7 @@ class RealWalletDriver:
             .order_by(LabDecision.checkpoint_at.desc())
             .limit(10)
         )).all()
-        for mint, features in rows:
+        for mint, features, picked_at in rows:
             if self._too_old(strategy_id, features, now):
                 continue
             if await self._bad_name(mint, strategy_id, now):
@@ -560,7 +560,11 @@ class RealWalletDriver:
                 continue
             if lab and await self._no_open_buy(mint):
                 continue
-            if lab and await self._quiet_big_pool(mint, pool, now):
+            # The buy count Karthik Lab judged, at the moment it picked the coin
+            # (Karthik, 2026-10-23: "do option 1"): the wallet buys 10-40 s
+            # later, when the count had often jumped past the line the lab
+            # refused at, so the two traded different coins.
+            if lab and await self._quiet_big_pool(mint, pool, picked_at or now):
                 continue
             return mint
         return None
@@ -723,7 +727,8 @@ class RealWalletDriver:
         "apply same rule to real and user wallets"): a pool of
         `KARTHIK_BIG_POOL_USD`+ is bought only with `KARTHIK_BIG_MIN_BUYS`+ buys
         in DexScreener's 5-minute count, last read in the three minutes before
-        `now`. An unread count is quiet, as the lab treats it."""
+        `now` (the lab's pick time since 2026-10-23). An unread count is quiet,
+        as the lab treats it."""
         from app.labs.graduation import config as grad_config
         from app.labs.graduation.models import GradPostgradSample
 

@@ -38,3 +38,22 @@ async def test_big_pools_need_buyers(pool, buys, skipped) -> None:
     d = _driver(buys)
     assert await d._quiet_big_pool("Mint", pool, NOW) is skipped
     assert d._session.asked == (0 if pool is None or pool < 200_000 else 1)
+
+
+async def test_the_count_is_read_at_the_time_given() -> None:
+    # 2026-10-23: the wallet passes the lab's pick time, not its own later
+    # clock, so it judges the same buy count the lab refused on.
+    from datetime import timedelta
+
+    asked: list[dict] = []
+
+    class Session:
+        async def scalar(self, query):
+            asked.append(query.compile().params)
+            return 20
+
+    d = RealWalletDriver.__new__(RealWalletDriver)
+    d._session = Session()
+    picked = NOW - timedelta(seconds=40)
+    await d._quiet_big_pool("Mint", 500_000, picked)
+    assert picked in asked[0].values() and NOW not in asked[0].values()

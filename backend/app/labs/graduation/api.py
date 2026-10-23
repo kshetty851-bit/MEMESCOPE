@@ -525,7 +525,11 @@ async def _size_trades(db: AsyncSession, *, rows: Sequence[Any],
     rate = await db.scalar(
         select(GradPostgradSample.price_usd / GradPostgradSample.price_native)
         .where(GradPostgradSample.price_usd > 0,
-               GradPostgradSample.price_native > 0)
+               GradPostgradSample.price_native > 0,
+               # A USDC-quoted pool reads 1.00 here, not SOL's price (2026-10-23:
+               # Karthik Lab's days were valued at $1 a SOL).
+               (GradPostgradSample.price_usd / GradPostgradSample.price_native)
+               .between(config.SOL_USD_MIN, config.SOL_USD_MAX))
         .order_by(GradPostgradSample.ts.desc()).limit(1))
     walk = _funded_walk(
         [(p.opened_at, p.closed_at, float(p.net_return),
@@ -1416,7 +1420,11 @@ async def fresh_held(book: str = "", db: AsyncSession = Depends(get_db)) -> Fres
                GradPaperPosition.mint.in_([r.mint for r in rows])))).all() if n}
     sol = await db.scalar(
         select(GradPostgradSample.price_usd / GradPostgradSample.price_native)
-        .where(GradPostgradSample.price_usd > 0, GradPostgradSample.price_native > 0)
+        # A USDC-quoted pool reads 1.00 here, not SOL's price (2026-10-23:
+        # Karthik Lab's days were valued at $1 a SOL).
+        .where(GradPostgradSample.price_usd > 0, GradPostgradSample.price_native > 0,
+               (GradPostgradSample.price_usd / GradPostgradSample.price_native)
+               .between(config.SOL_USD_MIN, config.SOL_USD_MAX))
         .order_by(GradPostgradSample.ts.desc()).limit(1))
     gate = asyncio.Semaphore(16)
 
@@ -2013,7 +2021,11 @@ async def pumpfun_days(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     first, today = (spec.start + DUBAI).date(), (now + DUBAI).date()
     sol_now = await db.scalar(
         select(GradPostgradSample.price_usd / GradPostgradSample.price_native)
-        .where(GradPostgradSample.price_usd > 0, GradPostgradSample.price_native > 0)
+        # A USDC-quoted pool reads 1.00 here, not SOL's price (2026-10-23:
+        # Karthik Lab's days were valued at $1 a SOL).
+        .where(GradPostgradSample.price_usd > 0, GradPostgradSample.price_native > 0,
+               (GradPostgradSample.price_usd / GradPostgradSample.price_native)
+               .between(config.SOL_USD_MIN, config.SOL_USD_MAX))
         .order_by(GradPostgradSample.ts.desc()).limit(1))
     days: list[dict[str, Any]] = []
     day = first
@@ -2156,7 +2168,11 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         .order_by(GradPaperPosition.opened_at))).all()
     sol = await db.scalar(
         select(GradPostgradSample.price_usd / GradPostgradSample.price_native)
-        .where(GradPostgradSample.price_usd > 0, GradPostgradSample.price_native > 0)
+        # A USDC-quoted pool reads 1.00 here, not SOL's price (2026-10-23:
+        # Karthik Lab's days were valued at $1 a SOL).
+        .where(GradPostgradSample.price_usd > 0, GradPostgradSample.price_native > 0,
+               (GradPostgradSample.price_usd / GradPostgradSample.price_native)
+               .between(config.SOL_USD_MIN, config.SOL_USD_MAX))
         .order_by(GradPostgradSample.ts.desc()).limit(1))
     # One trade at a time, from the first day (Karthik, 2026-09-25): chosen
     # after WOTF, which the rule would have let go because LESGO was still
@@ -2420,7 +2436,11 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
     sol_rate = await db.scalar(
         select(GradPostgradSample.price_usd / GradPostgradSample.price_native)
         .where(GradPostgradSample.price_usd > 0,
-               GradPostgradSample.price_native > 0)
+               GradPostgradSample.price_native > 0,
+               # A USDC-quoted pool reads 1.00 here, not SOL's price (2026-10-23:
+               # Karthik Lab's days were valued at $1 a SOL).
+               (GradPostgradSample.price_usd / GradPostgradSample.price_native)
+               .between(config.SOL_USD_MIN, config.SOL_USD_MAX))
         .order_by(GradPostgradSample.ts.desc()).limit(1))
 
     per_arm: dict[str, list[float]] = {}
@@ -3079,7 +3099,11 @@ async def _pool_lab_build(db: AsyncSession) -> dict[str, Any]:
     cents = Decimal("0.01")
     sol = await db.scalar(
         select(GradPostgradSample.price_usd / GradPostgradSample.price_native)
-        .where(GradPostgradSample.price_usd > 0, GradPostgradSample.price_native > 0)
+        # A USDC-quoted pool reads 1.00 here, not SOL's price (2026-10-23:
+        # Karthik Lab's days were valued at $1 a SOL).
+        .where(GradPostgradSample.price_usd > 0, GradPostgradSample.price_native > 0,
+               (GradPostgradSample.price_usd / GradPostgradSample.price_native)
+               .between(config.SOL_USD_MIN, config.SOL_USD_MAX))
         .order_by(GradPostgradSample.ts.desc()).limit(1))
 
     def sizes(rows: Sequence[Any]) -> list[dict[str, Any]]:
