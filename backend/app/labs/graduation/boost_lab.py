@@ -179,7 +179,11 @@ async def build(db: AsyncSession) -> dict[str, Any]:
     cents = Decimal("0.01")
     sol = await db.scalar(
         select(GradPostgradSample.price_usd / GradPostgradSample.price_native)
-        .where(GradPostgradSample.price_usd > 0, GradPostgradSample.price_native > 0)
+        # A USDC-quoted pool reads 1.00 here, not SOL's price (2026-10-23:
+        # Karthik Lab's days were valued at $1 a SOL).
+        .where(GradPostgradSample.price_usd > 0, GradPostgradSample.price_native > 0,
+               (GradPostgradSample.price_usd / GradPostgradSample.price_native)
+               .between(config.SOL_USD_MIN, config.SOL_USD_MAX))
         .order_by(GradPostgradSample.ts.desc()).limit(1))
     books = tuple((await db.execute(text(
         "select distinct book from grad_paper_positions where opened_at >= :f"),
