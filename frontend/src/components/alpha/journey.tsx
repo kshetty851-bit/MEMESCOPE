@@ -107,7 +107,7 @@ function Reveal({ children, className = "" }: { children: ReactNode; className?:
 }
 
 /** Counts up to `value` once on screen; a still number for reduced motion. */
-function Counter({ value }: { value: number | null }) {
+export function Counter({ value }: { value: number | null }) {
   const [ref, seen] = useSeen<HTMLSpanElement>();
   const [shown, setShown] = useState(0);
   useEffect(() => {

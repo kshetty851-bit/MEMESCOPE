@@ -1098,9 +1098,10 @@
   margin-top: 1rem;
   max-width: 28rem;
   padding-left: 1rem;
-  font-size: 0.95rem;
+  font-size: 1.05rem;
   line-height: 1.65;
-  color: var(--color-ink-2);
+  color: var(--color-ink);
+  opacity: 0.88;
 }
 .hero-lede::before {
   content: "";
@@ -1287,4 +1288,79 @@
   transform-box: fill-box;
   transform-origin: 50% 50%;
   animation: breathe 4s ease-in-out infinite;
+}
+
+/* Homepage: every live figure in fixed-width digits so counts do not jitter
+   as they update (2026-10-22). */
+.alpha-landing { font-variant-numeric: tabular-nums; }
+
+/* Homepage live strip (components/alpha/live-ticker.tsx, 2026-10-22). */
+.live-ticker {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  overflow: hidden;
+  border: 1px solid rgb(94 234 255 / 0.18);
+  border-radius: 999px;
+  background: rgb(10 12 28 / 0.55);
+  backdrop-filter: blur(6px);
+  padding: 0.35rem 0.4rem 0.35rem 0.75rem;
+  font-size: 0.75rem;
+}
+.live-ticker__tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-up);
+}
+.live-ticker__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-up);
+  box-shadow: 0 0 8px var(--color-up);
+  animation: live-ticker-pulse 1.6s ease-in-out infinite;
+}
+.live-ticker__window {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent, #000 4%, #000 96%, transparent);
+}
+.live-ticker__track {
+  display: flex;
+  width: max-content;
+  gap: 2.25rem;
+  white-space: nowrap;
+  animation: live-ticker-roll 60s linear infinite;
+}
+.live-ticker:hover .live-ticker__track { animation-play-state: paused; }
+.live-ticker__item { display: inline-flex; gap: 0.35rem; }
+@keyframes live-ticker-roll { to { transform: translateX(-50%); } }
+@keyframes live-ticker-pulse { 50% { opacity: 0.35; } }
+
+/* The proof line under the hero copy (2026-10-22). */
+.hero-proof {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.1rem;
+  margin-top: 1rem;
+  padding-left: 1rem;
+  font-size: 0.8rem;
+  color: var(--color-ink-3);
+}
+.hero-proof b {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-ticker__track { animation: none; }
+  .live-ticker__dot { animation: none; }
 }

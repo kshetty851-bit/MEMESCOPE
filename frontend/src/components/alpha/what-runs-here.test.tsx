@@ -23,11 +23,12 @@ const JUDGE = "2026-10-23T12:00:00Z";
 const at = (iso: string) => new Date(iso).getTime();
 
 describe("dayOf", () => {
-  it("counts the first day as day one and stops at the judge date", () => {
+  it("counts the first day as day one and keeps counting past the judge date", () => {
     expect(dayOf(START, JUDGE, at("2026-09-23T12:00:01Z"))).toBe("Day 1 of 30");
     expect(dayOf(START, JUDGE, at("2026-09-24T11:59:59Z"))).toBe("Day 1 of 30");
     expect(dayOf(START, JUDGE, at("2026-09-24T12:00:00Z"))).toBe("Day 2 of 30");
-    expect(dayOf(START, JUDGE, at("2026-11-30T00:00:00Z"))).toBe("Day 30 of 30");
+    expect(dayOf(START, JUDGE, at("2026-10-23T11:59:59Z"))).toBe("Day 30 of 30");
+    expect(dayOf(START, JUDGE, at("2026-11-30T00:00:00Z"))).toBe("Day 68 · test period done");
     expect(dayOf(START, JUDGE, at("2026-09-01T00:00:00Z"))).toBe("Day 1 of 30");
   });
 });

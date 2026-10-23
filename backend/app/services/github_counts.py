@@ -93,7 +93,7 @@ async def github_days(now: datetime) -> list[dict[str, object]]:
         at, title = json.loads(raw)
         days[(datetime.fromisoformat(at) + DUBAI).date().isoformat()].append((at, title))
     return [{"date": day, "commits": len(rows),
-             "titles": [t for _, t in sorted(rows, reverse=True) if t is not None][:6]}
+             "titles": [t for _, t in sorted(rows, key=lambda row: row[0], reverse=True) if t is not None][:6]}
             for day, rows in sorted(days.items(), reverse=True)]
 
 

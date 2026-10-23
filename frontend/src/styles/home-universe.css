@@ -784,7 +784,7 @@
   letter-spacing: -0.005em;
   color: var(--color-ink);
   text-shadow: 0 0 18px rgb(94 234 255 / 0.18);
-  animation: space-fact-in 700ms cubic-bezier(.2,.8,.2,1);
+  animation: space-fact-in 400ms cubic-bezier(.2,.8,.2,1);
 }
 @keyframes space-fact-in {
   from { opacity: 0; transform: translateY(8px); filter: blur(4px); }
@@ -799,7 +799,7 @@
   transform-origin: left;
   background: linear-gradient(90deg, #5eeaff, #c4a8ff, #ff8ed1);
   box-shadow: 0 0 8px rgb(94 234 255 / 0.6);
-  animation: space-facts-bar 8s linear forwards;
+  animation: space-facts-bar 12s linear forwards;
 }
 @keyframes space-facts-bar {
   from { transform: scaleX(0); }

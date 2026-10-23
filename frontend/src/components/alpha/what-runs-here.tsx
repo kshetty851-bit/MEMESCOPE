@@ -41,12 +41,14 @@ function usd(value: string): string {
   return `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-/** "Day 2 of 30": whole days since the start, counting the first as day one. */
+/** "Day 2 of 30": whole days since the start, counting the first as day one.
+ *  Past the judge date it keeps counting rather than sticking at the last day
+ *  ("Day 24 · test period done"), 2026-10-22. */
 export function dayOf(startIso: string, judgeIso: string, now = Date.now()): string {
   const start = new Date(startIso).getTime();
   const total = Math.round((new Date(judgeIso).getTime() - start) / DAY_MS);
-  const day = Math.min(total, Math.max(1, Math.floor((now - start) / DAY_MS) + 1));
-  return `Day ${day} of ${total}`;
+  const day = Math.max(1, Math.floor((now - start) / DAY_MS) + 1);
+  return day > total ? `Day ${day} · test period done` : `Day ${day} of ${total}`;
 }
 
 function LiveLab() {

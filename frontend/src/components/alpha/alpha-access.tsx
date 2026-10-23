@@ -154,7 +154,7 @@ export function AlphaAccess({ onPhase }: { onPhase: (phase: GatePhase | "approve
         id="alpha-access-heading"
         className="text-label font-medium uppercase tracking-[0.16em] text-accent"
       >
-        <span aria-hidden>🩸 </span>Alpha access
+        <span aria-hidden>🔑 </span>Alpha access
       </h2>
       <p className="mt-2 font-brand text-xl font-bold uppercase tracking-tight text-ink">
         Welcome, astronaut.
