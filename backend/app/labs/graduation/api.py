@@ -1670,7 +1670,9 @@ def _fresh_entry(row: Any) -> bool:
 def _pools_words() -> str:
     """The book's pool range in words: "$150k and up" or "$75k-$300k"."""
     lo, hi = config.KARTHIK_BOOK_POOLS
-    return f"${lo // 1000}k and up" if hi is None else f"${lo // 1000}k-${hi // 1000}k"
+    short_lo, letters = config.KARTHIK_SHORT_NAME_POOL
+    words = f"${lo // 1000}k and up" if hi is None else f"${lo // 1000}k-${hi // 1000}k"
+    return f"{words} (${short_lo // 1000}k and up for names of {letters} letters or fewer)"
 
 
 def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
@@ -2202,8 +2204,10 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     # Since 2026-10-03 it reaches below $75k, so it reads his $50-75k arm too.
     lo, hi = config.KARTHIK_BOOK_POOLS
     skip_lo, skip_hi = config.KARTHIK_SKIP_POOL_USD
+    short_lo = config.KARTHIK_SHORT_NAME_POOL[0]
     every = [r for r in sorted([*small, *signals], key=_opened_order)
-             if lo <= float(r.liq_open_usd or 0)
+             if (lo <= float(r.liq_open_usd or 0)
+                 or (short_lo <= float(r.liq_open_usd or 0) and config.karthik_short_name(r.symbol)))
              and (hi is None or float(r.liq_open_usd or 0) < hi)
              and not skip_lo <= float(r.liq_open_usd or 0) < skip_hi
              and not (config.KARTHIK_SKIP_AI_POOL_USD[0] <= float(r.liq_open_usd or 0)

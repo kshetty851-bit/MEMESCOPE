@@ -1131,6 +1131,20 @@ KARTHIK_BOOK_POOLS: tuple[int, int | None] = (50_000, None)
 KARTHIK_BIG_POOL_USD = 200_000
 KARTHIK_BIG_MIN_BUYS = 15
 KARTHIK_BOOK_POOLS_AT = datetime(2026, 10, 3, 12, 30, tzinfo=UTC)
+#: Short names reach lower (Karthik, 2026-10-24: "implement this on karthik lab
+#: since day 1, 40k+ pool"): a pool from the first figure up to the book's
+#: floor is bought when the coin has a name of at most the second figure's
+#: letters (spaces not counted; an unnamed coin is not short). Found on the
+#: $30k-$50k quiet coins of 3-16 Oct (+$527 on 82) and held on 16-24 Oct
+#: (+$502 on 113) against -$4,295 for the band as a whole; the Pool Lab's $10k
+#: book found short names win on its own coins (2026-10-22). Lab only.
+KARTHIK_SHORT_NAME_POOL: tuple[int, int] = (40_000, 5)
+
+
+def karthik_short_name(symbol: str | None) -> bool:
+    """A name of at most `KARTHIK_SHORT_NAME_POOL[1]` letters, spaces not counted."""
+    letters = "".join((symbol or "").split())
+    return 0 < len(letters) <= KARTHIK_SHORT_NAME_POOL[1]
 #: Pools the book skips inside its range (Karthik, 2026-10-12: "apply skip
 #: 150-200k pools to karthik lab since day 1 and also put this rule in main
 #: wallet"). In the Astra backtest the band lost money in every split (its 89
