@@ -3,8 +3,11 @@
 
 Karthik Lab's own trades, the same coins and rules, with one other exit: sell
 at the first price reading at or above +30% (filled at the reading after it,
-never at the trigger), otherwise at the first reading 10 minutes after the
-buy. Measured on 807 of the book's coins (1-24 Oct, $50 a trade): +$2,064 vs
+never at the trigger); a coin still held at 5 minutes and DOWN there (the
+book's own 5-minute result below zero) is sold at 5 minutes; anything else at
+the first reading 10 minutes after the buy. The 5-minute check (24 Oct, after
+a test of 10 variants on 812 coins): +$2,306 vs +$2,042 and 51 big losses vs
+60, ahead in both halves of the month. Measured on 807 of the book's coins (1-24 Oct, $50 a trade): +$2,064 vs
 +$1,529 selling at 5 minutes, ahead in both halves of the month, but 58 big
 losses against 22 -- chosen after looking at about 55 exits, so its own new
 trades are the test.
@@ -29,7 +32,11 @@ TARGET, HOLD_S, MISMATCH = 0.30, 600, 0.35
 #: Its own starting balance (Karthik, 2026-10-24: "500$ looks okay, can we change
 #: that since day 1 and all the tables too"); Karthik Lab stays at $300.
 CAPITAL = Decimal(500)
-KEY = "pumpcatcher:exit:v1"
+#: v2 (2026-10-24, Karthik: "yes great add it since day 1"): a coin that is down
+#: at 5 minutes is sold then, like Karthik Lab; only coins up at 5 minutes stay
+#: for the +30% target or 10 minutes. Every position re-priced under v2.
+KEY = "pumpcatcher:exit:v2"
+CHECK_S = 300
 BATCH = 250
 #: Wait this long after the buy before deciding: the 10-minute reading plus slack.
 SETTLE = timedelta(seconds=HOLD_S + 120)
@@ -56,6 +63,8 @@ def decide(path: list[tuple[float, float]], net5: float) -> dict[str, Any]:
     for i, (s, x) in enumerate(path):
         if s > HOLD_S:
             break
+        if s > CHECK_S and net5 < 0:                 # down at 5 minutes: out, like Karthik Lab
+            return {"net": net5, "held_s": 300, "gross": None, "how": "5m-down"}
         if x >= 1 + TARGET:
             ns, nx = path[i + 1] if i + 1 < len(path) else (s, x)
             return {"net": nx - 1 - cost, "held_s": ns, "gross": nx, "how": "target"}

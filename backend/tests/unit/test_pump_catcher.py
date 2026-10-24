@@ -10,11 +10,22 @@ def test_target_hit_fills_at_the_next_reading_not_the_trigger():
     assert round(out["net"], 4) == round(1.25 - 1 - 0.02, 4)
 
 
-def test_no_target_sells_at_ten_minutes():
-    path = [(60, 1.0), (300, 0.98), (590, 0.9), (610, 0.4), (900, 0.1)]
-    out = decide(path, net5=-0.03)                      # cost = -0.02 + 0.03 = 0.01
+def test_up_at_five_minutes_without_the_target_sells_at_ten_minutes():
+    path = [(60, 1.0), (300, 1.05), (590, 1.1), (610, 0.4), (900, 0.1)]
+    out = decide(path, net5=0.03)                       # cost = 0.05 - 0.03 = 0.02
     assert out["how"] == "10m" and out["held_s"] == 610
-    assert round(out["net"], 4) == round(0.4 - 1 - 0.01, 4)
+    assert round(out["net"], 4) == round(0.4 - 1 - 0.02, 4)
+
+
+def test_down_at_five_minutes_sells_at_five_like_karthik_lab():
+    path = [(60, 1.0), (300, 0.95), (420, 0.9), (610, 0.3)]
+    assert decide(path, net5=-0.07) == {"net": -0.07, "held_s": 300, "gross": None, "how": "5m-down"}
+
+
+def test_a_target_hit_before_five_minutes_still_sells_at_the_target():
+    path = [(60, 1.35), (90, 1.3), (300, 0.9), (610, 0.5)]
+    out = decide(path, net5=-0.12)                      # down at 5, but sold at the target first
+    assert out["how"] == "target" and out["held_s"] == 90
 
 
 def test_readings_that_disagree_with_the_book_keep_the_five_minute_result():
