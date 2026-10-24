@@ -26,6 +26,9 @@ from typing import Any
 from sqlalchemy import select, text
 
 TARGET, HOLD_S, MISMATCH = 0.30, 600, 0.35
+#: Its own starting balance (Karthik, 2026-10-24: "500$ looks okay, can we change
+#: that since day 1 and all the tables too"); Karthik Lab stays at $300.
+CAPITAL = Decimal(500)
 KEY = "pumpcatcher:exit:v1"
 BATCH = 250
 #: Wait this long after the buy before deciding: the 10-minute reading plus slack.
