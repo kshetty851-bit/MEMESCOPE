@@ -1083,8 +1083,10 @@ FRESH_BOOKS: tuple[FreshBookSpec, ...] = (
                   # $100 since 2026-10-20 ($100 flat on every coin): the size
                   # grid scales each row by stake / ticket, and a stale $50 here
                   # made every row trade double its label (Karthik, 2026-10-22).
-                  # $500 from 2026-10-24 (Karthik: "start balance should be 500$").
-                  Decimal(500), Decimal(100)),
+                  # $500 from 2026-10-24 (Karthik: "start balance should be 500$"); $300 at
+                  # $50 later that day ("show revised profits as per 50$ per trade with
+                  # 300$ balance since day 1").
+                  Decimal(300), Decimal(50)),
 )
 
 #: When Karthik's book changed size, and what it was before. The new size was
@@ -1221,7 +1223,8 @@ def unnamed_evening(symbol: str | None, at: datetime) -> bool:
 #: day 1: +$1,595 -> +$1,725 on $300, same 897 trades and 14 rugs.
 #: Karthik, 2026-10-20 ("apply $100 flat to karthik lab since day 1"): $100 on
 #: every coin, any pool. Replayed: same 932 trades; on $500 it read $2,314.
-KARTHIK_TICKETS_BY_POOL: tuple[tuple[int | None, float], ...] = ((None, 100.0),)
+#: Karthik, 2026-10-24: $50 on every coin, from day 1, on a $300 book.
+KARTHIK_TICKETS_BY_POOL: tuple[tuple[int | None, float], ...] = ((None, 50.0),)
 #: USER1 is real money and keeps the 19 Oct lab table until Karthik says
 #: otherwise (a lab-only change never moves a real wallet).
 USER1_TICKETS_BY_POOL: tuple[tuple[int | None, float], ...] = (

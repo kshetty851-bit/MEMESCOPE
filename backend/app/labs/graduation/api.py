@@ -1597,13 +1597,14 @@ def _karthik_line(rows: Sequence[Any], sol: Decimal | None, *, size: float,
 #: wise". Karthik, same day: "shud show profit based on the karthik lab rule" -
 #: so each stakes exactly what the lab stakes ($100 under $150k, $25 above),
 #: every wallet in every coin one after another, the later ones paying the
-#: queue's impact. Karthik, 2026-10-20: "change to 2 wallets".
-FAMILY_WALLETS, FAMILY_START = 2, 500.0
+#: queue's impact. Karthik, 2026-10-20: "change to 2 wallets"; 2026-10-24: "change this
+#: 3 user wallets x 300$".
+FAMILY_WALLETS, FAMILY_START = 3, 300.0
 
 
 def _family_months(rows: Sequence[Any], buys_before: dict,
                    sol: Decimal | None) -> dict[str, Any]:
-    """Karthik Lab's own trades on three $500 user wallets, profit by Dubai month."""
+    """Karthik Lab's own trades on `FAMILY_WALLETS` user wallets of `FAMILY_START`, profit by Dubai month."""
     from app.labs.graduation import pool_lab as pl
 
     wallets = [pl.Wallet(f"USER {i}", cash=FAMILY_START, low=FAMILY_START)
@@ -2048,7 +2049,7 @@ async def pumpfun_days(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
 
 #: FLOOR TEST (Karthik, 2026-10-11: "yes start the comparison", after three
 #: weak days of small-pool rugs). The book's own trades from this moment on,
-#: re-weighted per variant at $100 a trade (was $50 until 2026-10-24): forward only, so nothing here is
+#: re-weighted per variant at the book's stake: forward only, so nothing here is
 #: chosen with hindsight. Since 1 Oct (hindsight) the plain $50k+ rule led:
 #: +$435 vs +$329 ($55k), +$250 ($60k), +$343 (half size on $50-60k).
 FLOOR_TEST_FROM = datetime(2026, 10, 11, 20, 0, tzinfo=UTC)   # 00:00 Dubai, 12 Oct
@@ -2069,7 +2070,7 @@ def _floor_test(rows: Sequence[Any]) -> dict[str, Any]:
                     "trades": sum(1 for k, _ in xs if k > 0),
                     "rugs": sum(1 for k, r in xs
                                 if k > 0 and r <= float(config.OPERATOR_RUG_MOVE)),
-                    "usd": round(sum(100 * k * r for k, r in xs), 2)})
+                    "usd": round(sum(config.KARTHIK_TICKETS_BY_POOL[-1][1] * k * r for k, r in xs), 2)})
     return {"since": FLOOR_TEST_FROM, "lines": out}
 
 async def _no_open_buy(db: AsyncSession, rows: Sequence[Any]) -> set[str]:

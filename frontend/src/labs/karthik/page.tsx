@@ -269,7 +269,7 @@ export function FloorTest({ data }: { data: KarthikBook }) {
         </table>
         <p className="mt-2 text-[11px] text-ink-dim">
           Counts only coins bought from {new Date(t.since).toLocaleString("en-GB", { timeZone: "Asia/Dubai", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })} Dubai,
-          so no line was picked with hindsight, at $100 a trade. The $40k floor for short names joined on 24 Oct; the
+          so no line was picked with hindsight, at the book&apos;s stake. The $40k floor for short names joined on 24 Oct; the
           “Floor $50k” line is the rule before it. Paper only; the real wallets are unchanged.
         </p>
       </div>
@@ -617,7 +617,7 @@ function GridPanel({ data, title, rows, value = false, from, testId = "size-grid
         <p className="mt-2 text-[11px] leading-relaxed text-ink-dim">
           Each cell is its own book from {day(from ?? data.started_at)} at that size, buying every
           coin on pools at or above that floor while its balance has money free. Every size follows the book’s
-          rules — the same skips, and stakes in the book’s proportions ($100 under $150k / $25 above, at $50 = $100), so the
+          rules — the same skips, and the same stake on every coin (the book’s $50 is the “now” row), so the
           “now” row in the “this book” column is the book itself. Hover a cell for its trades, rugs and lowest
           balance. A look back, not a test.
           {w.floors.some((f) => f.replayed_below)
