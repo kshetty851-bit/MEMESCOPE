@@ -470,3 +470,13 @@ def test_each_trade_says_what_the_real_wallet_did() -> None:
         == "order guard"
     assert _real_status("blocked", "safety:SELL_ROUTE_UNAVAILABLE", False)["why"] \
         == "safety check: sell route unavailable"
+
+
+def test_short_names_reach_down_to_40k():
+    # Karthik, 2026-10-24: $40k+ pools for names of at most 5 letters.
+    from app.labs.graduation import config
+
+    assert config.KARTHIK_SHORT_NAME_POOL == (40_000, 5)
+    assert config.karthik_short_name("GTA6") and config.karthik_short_name("GTA 6")
+    assert config.karthik_short_name("Nike") and not config.karthik_short_name("Coca Cola")
+    assert not config.karthik_short_name(None) and not config.karthik_short_name("  ")
