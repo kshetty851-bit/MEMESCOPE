@@ -43,7 +43,7 @@ async def test_each_dubai_day_counts_launches_graduations_and_new_pool_money(db_
     out = await api.pumpfun_days(db_session)
     days = {d["day"]: d for d in out["days"]}
     d24 = days["2026-09-24"]
-    assert (d24["launches"], d24["graduations"], d24["pools_50k"]) == (4, 2, 1)
+    assert (d24["launches"], d24["graduations"], d24["pools_40k"]) == (4, 2, 1)
     assert d24["pools_usd"] == "150000"
     # No book trade that day: priced at the latest SOL rate, 0.01 / 0.0001 = $100.
     assert d24["into_curves_usd"] == str(2 * api.GRADUATION_SOL * 100)
