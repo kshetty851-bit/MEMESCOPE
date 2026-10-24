@@ -641,7 +641,9 @@ export function RuleBook({ data }: { data: KarthikBook }) {
   const rugEvery = data.rugs > 0 ? Math.round(data.trades / data.rugs) : null;
   const rules: [string, string][] = [
     ["What it buys", "New pump.fun coins right after they “graduate” — finish their launch and open a real trading pool. About 1,000 do that every day."],
-    ...(pool ? [["Only big pools", top ? `The pool must hold between ${usd(pool).replace(".00", "")} and ${usd(top).replace(".00", "")}.` : `The pool must hold ${usd(pool).replace(".00", "")} or more.`] as [string, string]] : []),
+    ...(pool ? [["Only big pools", (top ? `The pool must hold between ${usd(pool).replace(".00", "")} and ${usd(top).replace(".00", "")}.` : `The pool must hold ${usd(pool).replace(".00", "")} or more.`)
+      + (data.short_name_pool && data.short_name_pool[0] > pool
+        ? ` Below ${usd(data.short_name_pool[0]).replace(".00", "")} only coins with a name of ${data.short_name_pool[1]} letters or fewer (spaces not counted).` : "")] as [string, string]] : []),
     ...(data.big_pool_usd ? [["Big pools only when busy", `A pool of ${usd(data.big_pool_usd).replace(".00", "")} or more is bought only if it already had ${data.big_min_buys} or more buys in the 5 minutes before. Busy big pools kept rising; quiet ones drifted and held the rugs. Applied from the first trade.`] as [string, string]] : []),
     ...(data.skip_pools_usd ? [["Skips $150k–$200k pools", `No pools between ${usd(data.skip_pools_usd[0]).replace(".00", "")} and ${usd(data.skip_pools_usd[1]).replace(".00", "")}: they lost money in every period tested, and on the real wallet too. Applied from the first trade.`] as [string, string]] : []),
     ...(data.rugged_name_hours ? [["No rebuying a rugged name", `A name is not bought again for ${data.rugged_name_hours} hours after one of this book's coins with that name rugged.${data.rugged_name_skipped ? ` ${data.rugged_name_skipped} skipped so far.` : ""}`] as [string, string]] : []),
@@ -656,11 +658,15 @@ export function RuleBook({ data }: { data: KarthikBook }) {
       ? ["Several at once", `It buys every coin that passes while at least ${usd(data.ticket_usd)} of the balance is free, so it can hold several at once.`]
       : ["One at a time", "While it holds a coin, the next one is skipped. It can never be caught in two bad coins at once."],
     ["Trade size", data.tickets_by_pool?.length
-      ? `${sizeWords(data.tickets_by_pool)}, from a ${usd(data.capital_usd)} balance: more where the profit is (small pools), less where it is thin.${data.quiet_stake && data.quiet_stake[1] !== data.tickets_by_pool[0]?.[1] ? ` A quiet small-pool coin (at most ${data.quiet_stake[0]} buys in the 5 minutes before) gets $${data.quiet_stake[1]}: those earned about five times more.` : ""}`
+      ? `${sizeWords(data.tickets_by_pool)}${data.tickets_by_pool.length === 1 ? " on every coin" : ""}, from a ${usd(data.capital_usd)} balance${data.tickets_by_pool.length > 1 ? ": more where the profit is (small pools), less where it is thin" : ""}.${data.quiet_stake && data.quiet_stake[1] !== data.tickets_by_pool[0]?.[1] ? ` A quiet small-pool coin (at most ${data.quiet_stake[0]} buys in the 5 minutes before) gets $${data.quiet_stake[1]}: those earned about five times more.` : ""}`
       : `${usd(data.ticket_usd)} per trade, from a ${usd(data.capital_usd)} balance.`],
-    ["Always sells", `Exactly ${data.hold_minutes} minutes after buying. No price targets, no stop-loss — the clock decides.`],
+    data.pump_catcher
+      ? ["Sells", `The moment it is up ${data.pump_catcher.target_pct}% (at the next price reading), otherwise ${data.pump_catcher.hold_min} minutes after buying. No stop-loss.`]
+      : ["Always sells", `Exactly ${data.hold_minutes} minutes after buying. No price targets, no stop-loss — the clock decides.`],
     ["The risk", `If a coin's creator drains the pool (a “rug”), that trade loses almost all of it.${rugEvery ? ` So far about 1 in ${rugEvery} trades.` : ""}`],
-    ["Paper money", "A simulation on real market prices. The real wallet follows the same rules on its own."],
+    ["Paper money", data.pump_catcher
+      ? "A simulation on real market prices. No real wallet follows this lab."
+      : "A simulation on real market prices. The real wallets run their own settings ($50k+ pools, their own trade sizes) and do not follow this book's newer rules."],
   ];
   return (
     <Panel>

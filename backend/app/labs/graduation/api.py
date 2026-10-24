@@ -2319,6 +2319,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
                  + (f"out at +{pump['target_pct']}% or {pump['hold_min']}m" if pump else f"out at {arm.hold}m")),
         "pump_catcher": pump,
         "pools_usd": list(config.KARTHIK_BOOK_POOLS),
+        "short_name_pool": list(config.KARTHIK_SHORT_NAME_POOL),
         "skip_pools_usd": list(config.KARTHIK_SKIP_POOL_USD),
         "skip_ai_pools_usd": list(config.KARTHIK_SKIP_AI_POOL_USD),
         "big_pool_usd": config.KARTHIK_BIG_POOL_USD, "big_min_buys": config.KARTHIK_BIG_MIN_BUYS,

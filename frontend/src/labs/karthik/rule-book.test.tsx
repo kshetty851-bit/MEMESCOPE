@@ -37,4 +37,18 @@ describe("Karthik's Lab rule book", () => {
     expect(screen.getByText(/\$100 a trade in pools under \$150k, \$25 above/)).toBeInTheDocument();
     expect(screen.queryByText(/quiet small-pool coin/)).not.toBeInTheDocument();
   });
+
+  it("states today's book truthfully: $40k with short names, flat $50, and the Pump Catcher's exit (24 Oct)", () => {
+    const base = { pools_usd: [40000, null], short_name_pool: [50000, 5], tickets_by_pool: [[null, 50]],
+      capital_usd: "300", hold_minutes: 5, rugs: 30, trades: 829 };
+    const { unmount } = render(<RuleBook data={base as unknown as KarthikBook} />);
+    expect(screen.getByText(/Below \$50,000 only coins with a name of 5 letters or fewer/)).toBeInTheDocument();
+    expect(screen.getByText(/\$50 a trade on every coin, from a \$300\.00 balance\./)).toBeInTheDocument();
+    expect(screen.getByText(/do not follow this book's newer rules/)).toBeInTheDocument();
+    unmount();
+    render(<RuleBook data={{ ...base, capital_usd: "500", pump_catcher: { target_pct: 30, hold_min: 10, priced: 1, settling: 0 } } as unknown as KarthikBook} />);
+    expect(screen.getByText(/up 30% \(at the next price reading\), otherwise 10 minutes/)).toBeInTheDocument();
+    expect(screen.queryByText(/Exactly 5 minutes/)).not.toBeInTheDocument();
+    expect(screen.getByText(/No real wallet follows this lab/)).toBeInTheDocument();
+  });
 });
