@@ -52,7 +52,6 @@ celery_app = Celery(
         "app.security.lab_scheduler",
         "app.social.scheduler",
         "app.copycontrol.scheduler",
-        "app.labs.fomo.scheduler",
         # Graduation Lab. Gated by LAB_GRADUATION_ENABLED (default off):
         # with the flag down its beat tasks return before opening a session.
         "app.labs.graduation.scheduler",
@@ -243,25 +242,12 @@ celery_app.conf.beat_schedule = {
         "task": "app.pumpfun.scheduler.pumpfun_tick",
         "schedule": crontab(minute="*"),
     },
-    # FOMO Lab (2026-10-18): fomo.family's 24h top 20, paper only. Returns at
-    # once unless FEATURE_FOMO_LAB_ENABLED and both feed keys are set.
     # Long-watch Lab (2026-10-22): every graduation of the last 48 h read once,
     # then the Runner and Second Wind paper books. Paper only.
     "longwatch-tick": {
         "task": "app.labs.longwatch.scheduler.longwatch_tick",
         "schedule": crontab(minute="*/10"),
         "options": {"expires": 540},
-    },
-    "fomo-tick": {
-        "task": "app.labs.fomo.scheduler.fomo_tick",
-        "schedule": crontab(minute="*/2"),
-    },
-    # FOMO Crowd book (2026-10-20): listens ~90s to fomo's app feed, then buys a
-    # fresh graduation on its second fomo buyer and sells 5 min later.
-    "fomo-crowd-tick": {
-        "task": "app.labs.fomo.scheduler.fomo_crowd_tick",
-        "schedule": crontab(minute="*/2"),
-        "options": {"expires": 110},
     },
     # Momentum V2: twenty wallets on a 3x6 entry grid, each ratcheting at +10%.
     # Same cadence as the tournaments it shares an engine with — the cycle

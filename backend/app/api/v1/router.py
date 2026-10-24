@@ -31,7 +31,6 @@ from app.hq_ops import api as hq_ops
 from app.karthik import api as karthik
 from app.karthik_ops import api as karthik_ops
 from app.lab import api as lab
-from app.labs.fomo import api as fomo_lab
 from app.labs.graduation import api as graduation_lab
 from app.momentum import api as momentum
 from app.news import api as news
@@ -136,7 +135,6 @@ api_router.include_router(karthik_ops.router)
 # Graduation Lab. Read-only status board; every route answers
 # `running: false` without a query when LAB_GRADUATION_ENABLED is off.
 api_router.include_router(graduation_lab.router)
-api_router.include_router(fomo_lab.router)
 # BTC Range Lab. Paper only: two GETs and one POST that computes a backtest
 # and writes nothing; /status answers `running: false` without a query when off.
 # The homepage journey section (public, counts only; see the module).
