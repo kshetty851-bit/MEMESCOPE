@@ -80,7 +80,7 @@ describe("AlphaAccess", () => {
     render(<AlphaAccess onPhase={onPhase} />);
 
     fireEvent.change(screen.getByLabelText("Access code"), {
-      target: { value: "619554" },
+      target: { value: "123456" },
     });
     fireEvent.click(screen.getByRole("button", { name: "[ UNLOCK ]" }));
 
@@ -89,7 +89,7 @@ describe("AlphaAccess", () => {
     });
     expect(api.post).toHaveBeenCalledWith(
       "/alpha/unlock",
-      { code: "619554" },
+      { code: "123456" },
       { skipAuthRetry: true },
     );
     expect(onPhase).toHaveBeenCalledWith("validating");
@@ -105,7 +105,7 @@ describe("AlphaAccess", () => {
 
     render(<AlphaAccess onPhase={vi.fn()} />);
     fireEvent.change(screen.getByLabelText("Access code"), {
-      target: { value: "619554" },
+      target: { value: "123456" },
     });
     fireEvent.click(screen.getByRole("button", { name: "[ UNLOCK ]" }));
 

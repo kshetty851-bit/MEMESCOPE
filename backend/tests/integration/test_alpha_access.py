@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import pytest
 from httpx import AsyncClient
+from pydantic import SecretStr
 from sqlalchemy import select
 
 from app.core.config import settings
 from app.models.alpha_session import AlphaSession
 
 API = settings.API_V1_PREFIX
+CODE = settings.ALPHA_ACCESS_CODE.get_secret_value()
 
 
 async def test_alpha_session_starts_anonymous(client: AsyncClient) -> None:
@@ -27,7 +30,7 @@ async def test_alpha_unlock_rejects_wrong_code(client: AsyncClient) -> None:
 
 
 async def test_alpha_unlock_sets_http_only_cookie(client: AsyncClient) -> None:
-    response = await client.post(f"{API}/alpha/unlock", json={"code": "619554"})
+    response = await client.post(f"{API}/alpha/unlock", json={"code": CODE})
 
     assert response.status_code == 201
     assert response.json()["authenticated"] is True
@@ -100,10 +103,21 @@ async def test_activity_read_requires_account_admin(client: AsyncClient) -> None
 
 
 async def test_alpha_logout_clears_cookie(client: AsyncClient) -> None:
-    await client.post(f"{API}/alpha/unlock", json={"code": "619554"})
+    await client.post(f"{API}/alpha/unlock", json={"code": CODE})
 
     response = await client.post(f"{API}/alpha/logout")
 
     assert response.status_code == 200
     assert response.json()["message"] == "Alpha access cleared."
     assert settings.ALPHA_ACCESS_COOKIE_NAME in response.headers["set-cookie"]
+
+
+async def test_alpha_unlock_fails_closed_without_configured_code(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings, "ALPHA_ACCESS_CODE", SecretStr(""))
+
+    for code in ("   ", CODE):
+        response = await client.post(f"{API}/alpha/unlock", json={"code": code})
+        assert response.status_code == 401
+        assert settings.ALPHA_ACCESS_COOKIE_NAME not in response.cookies

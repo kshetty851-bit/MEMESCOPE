@@ -170,7 +170,7 @@ openssl rand -base64 48
 
 Use different values for `SECRET_KEY`, `POSTGRES_PASSWORD`, and `REDIS_PASSWORD`.
 
-The temporary alpha code remains `619554` until you change it, but it now belongs only in backend/server configuration. Do not create a `NEXT_PUBLIC_*` alpha code.
+Set `ALPHA_ACCESS_CODE` yourself in `~/.env.production` (there is no default; if it is empty nobody can unlock). It belongs only in backend/server configuration. Do not create a `NEXT_PUBLIC_*` alpha code.
 
 ## 10. Point DNS
 
