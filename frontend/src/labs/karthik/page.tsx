@@ -1107,8 +1107,10 @@ function RealWalletsLive() {
   return <RealWallets wallets={q.data?.wallets} totalValue={q.data?.total_value_usd} />;
 }
 
-export function KarthikLabPage() {
-  const { data, isLoading, isError, refetch } = useKarthikBook();
+/** `variant="pump"`: Pump Catcher Lab (2026-10-24) -- the same page on the same
+ *  coins and rules, every trade sold at +30% or 10 minutes instead of 5. */
+export function KarthikLabPage({ variant = "karthik" }: { variant?: "karthik" | "pump" } = {}) {
+  const { data, isLoading, isError, refetch } = useKarthikBook(variant);
   // Before the early returns: a hook may not sit behind a condition, and the
   // loading and error branches below are exactly that.
   const elapsed = useElapsed(data?.started_at);
@@ -1117,7 +1119,7 @@ export function KarthikLabPage() {
   if (isError || !data) {
     return (
       <ErrorState
-        title="Could not load Karthik's book"
+        title={variant === "pump" ? "Could not load the Pump Catcher Lab" : "Could not load Karthik's book"}
         body="The book is a walk over the arm's own closed trades, so this failing means the page could not reach the API — not that the arm has stopped trading."
         onRetry={() => void refetch()}
       />
@@ -1149,7 +1151,7 @@ export function KarthikLabPage() {
           the header grows to fit them rather than lying over the rule book. */}
       <div className="grid gap-x-8 gap-y-2 min-[1150px]:grid-cols-[minmax(0,1fr)_auto]">
         <h1 className="text-xl font-semibold min-[1150px]:col-start-1 min-[1150px]:row-start-1">
-          Karthik&apos;s Lab
+          {variant === "pump" ? "Pump Catcher Lab" : <>Karthik&apos;s Lab</>}
         </h1>
         <div className="min-[1150px]:col-start-2 min-[1150px]:row-span-2 min-[1150px]:row-start-1">
           <div className="flex items-baseline justify-end gap-6">
@@ -1165,6 +1167,14 @@ export function KarthikLabPage() {
           <MoneyIn flows={data.flows} />
         </div>
         <div className="min-[1150px]:col-start-1 min-[1150px]:row-start-2">
+        {data.pump_catcher ? (
+          <p className="mt-1 max-w-[78ch] rounded-lg border border-accent/40 bg-accent/[0.06] px-3 py-2 text-[13px] leading-relaxed text-ink-2">
+            <b className="text-ink">The same coins and rules as Karthik&apos;s Lab, one difference:</b> each trade is sold the moment
+            it is up {data.pump_catcher.target_pct}% (at the next price reading), otherwise at {data.pump_catcher.hold_min} minutes,
+            instead of always at 5. Chosen on 24 Oct after testing about 55 exits on these coins, so only trades from 24 Oct on
+            test it. {data.pump_catcher.settling ? `${data.pump_catcher.settling} newest trades are still settling.` : ""}
+          </p>
+        ) : null}
         <p className="mt-1 max-w-[78ch] text-[13px] leading-relaxed text-ink-dim">
           {usd(data.capital_usd)} at {data.tickets_by_pool?.length ? sizeWords(data.tickets_by_pool) : `${usd(data.ticket_usd)} a trade`} on one
           rule: <b>{data.rule}</b>. Started {day(data.started_at)},{" "}

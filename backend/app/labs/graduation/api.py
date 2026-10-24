@@ -2142,7 +2142,20 @@ async def karthik_book_cached(db: AsyncSession = Depends(get_db)) -> dict[str, A
     return _KARTHIK_BOOK[1]
 
 
-async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+_PUMP_BOOK: tuple[datetime, dict[str, Any]] | None = None
+
+
+@router.get("/karthik/pump-catcher",
+            summary="Karthik Lab's trades sold at +30% or 10 minutes (Pump Catcher Lab)")
+async def pump_catcher_book_cached(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    global _PUMP_BOOK
+    now = datetime.now(UTC)
+    if _PUMP_BOOK is None or (now - _PUMP_BOOK[0]).total_seconds() >= _KARTHIK_PUBLIC_TTL_S:
+        _PUMP_BOOK = (now, await karthik_book(db, exit_rule="pump"))
+    return _PUMP_BOOK[1]
+
+
+async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m") -> dict[str, Any]:
     """His book alone, with the two things a balance cannot say.
 
     `judge_at` is fixed in config and reported rather than computed, because a
@@ -2193,6 +2206,18 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
                # kind. So these pools count from the day their arm went live.
                GradPaperPosition.close_reason.is_distinct_from("replayed"))
         .order_by(GradPaperPosition.opened_at))).all() if _fresh_entry(r)]
+    # Pump Catcher Lab (2026-10-24): the same trades, each sold at +30% or at
+    # 10 minutes instead of at 5; positions not yet priced are still settling.
+    pump: dict[str, Any] | None = None
+    if exit_rule == "pump":
+        from app.core.redis import init_redis
+        from app.labs.graduation import pump_catcher
+
+        priced = await pump_catcher.exits(await init_redis())
+        before = len(rows) + len(small)
+        rows, small = pump_catcher.reprice(rows, priced), pump_catcher.reprice(small, priced)
+        pump = {"target_pct": round(100 * pump_catcher.TARGET), "hold_min": pump_catcher.HOLD_S // 60,
+                "priced": len(rows) + len(small), "settling": before - len(rows) - len(small)}
     # Every $75k+ signal his arm took: what the grid beside the book reads.
     signals = rows
     # The book counts only its pool range (KARTHIK_BOOK_POOLS, 2026-09-26).
@@ -2285,9 +2310,11 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         "graduations_rugged": await _graduation_rugs(db, spec.start),
         # Who put money into the coins the book bought, graduation to its sell.
         "flows": _flows(took, flow_rows),
-        "rule": (f"Karthik's book — every graduation with a {_pools_words()} pool that is "
+        "rule": (("Pump Catcher — Karthik's coins" if pump else "Karthik's book")
+                 + f" — every graduation with a {_pools_words()} pool that is "
                  f"still quiet (under {config.QUIET_MAX_POOL_TXS} trades) when it is bought, "
-                 f"out at {arm.hold}m"),
+                 + (f"out at +{pump['target_pct']}% or {pump['hold_min']}m" if pump else f"out at {arm.hold}m")),
+        "pump_catcher": pump,
         "pools_usd": list(config.KARTHIK_BOOK_POOLS),
         "skip_pools_usd": list(config.KARTHIK_SKIP_POOL_USD),
         "skip_ai_pools_usd": list(config.KARTHIK_SKIP_AI_POOL_USD),

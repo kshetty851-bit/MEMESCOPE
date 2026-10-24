@@ -2,13 +2,13 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-import { fetchKarthikBook, fetchPumpfunDays, fetchWalletsProfit } from "./api";
+import { fetchKarthikBook, fetchPumpCatcherBook, fetchPumpfunDays, fetchWalletsProfit } from "./api";
 
 /** The book closes a trade every few minutes, so the page follows at a minute. */
-export function useKarthikBook() {
+export function useKarthikBook(variant: "karthik" | "pump" = "karthik") {
   return useQuery({
-    queryKey: ["karthik-lab", "book"],
-    queryFn: fetchKarthikBook,
+    queryKey: ["karthik-lab", "book", variant],
+    queryFn: variant === "pump" ? fetchPumpCatcherBook : fetchKarthikBook,
     refetchInterval: 60_000,
     staleTime: 30_000,
   });
