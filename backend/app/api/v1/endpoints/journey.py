@@ -27,6 +27,9 @@ router = APIRouter(tags=["homepage"])
 DUBAI = timedelta(hours=4)
 TTL_S = 60
 _CACHE: tuple[datetime, dict[str, Any]] | None = None
+#: Built every minute by `journey_refresh` (2026-10-24: a cold read took ~6 s,
+#: the Karthik book alone ~3 s), so a visitor never waits for the build.
+REDIS_KEY, STORED_FRESH_S = "journey:v1", 300
 
 
 @router.get("/journey", summary="The homepage journey section's live figures")
@@ -35,6 +38,41 @@ async def journey(db: DbSession) -> dict[str, Any]:
     now = datetime.now(UTC)
     if _CACHE is not None and (now - _CACHE[0]).total_seconds() < TTL_S:
         return _CACHE[1]
+    stored = await _stored(now)
+    out = stored if stored is not None else await build(db, now)
+    _CACHE = (now, out)
+    return out
+
+
+async def _stored(now: datetime) -> dict[str, Any] | None:
+    import json
+
+    from app.core.redis import init_redis
+
+    try:
+        raw = await (await init_redis()).get(REDIS_KEY)
+    except Exception:  # noqa: BLE001 - no Redis: build it in the request instead
+        return None
+    if not raw:
+        return None
+    payload = json.loads(raw)
+    if (now - datetime.fromisoformat(payload["built_at"])).total_seconds() > STORED_FRESH_S:
+        return None
+    return payload["data"]
+
+
+async def store(db, now: datetime | None = None) -> None:
+    """Build the figures and keep them in Redis (the beat's half)."""
+    import json
+
+    from app.core.redis import init_redis
+
+    now = now or datetime.now(UTC)
+    data = await build(db, now)
+    await (await init_redis()).set(REDIS_KEY, json.dumps({"built_at": now.isoformat(), "data": data}, default=str))
+
+
+async def build(db, now: datetime) -> dict[str, Any]:
     book = await karthik_book(db)
     finished = [d for d in book["days"] if not d["running"]]
     last = finished[0] if finished else None      # days come newest first
@@ -67,5 +105,4 @@ async def journey(db: DbSession) -> dict[str, Any]:
         # The day-by-day log: every day with a commit, and what it built.
         "days": await github_days(now),
     }
-    _CACHE = (now, out)
     return out

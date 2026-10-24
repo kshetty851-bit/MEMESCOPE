@@ -42,6 +42,9 @@ EXIT_LOCK_KEY = 0x45584954
 FAST_EXIT_LOCK_KEY = 0x46415354
 #: And the empty-account sweep's.
 CLOSE_LOCK_KEY = 0x434C4F53
+#: Pause between user wallets in the empty-account sweep: the public RPC
+#: refuses getTokenAccountsByOwner when it is asked in a burst.
+CLOSE_MEMBER_SPACING_S = 1.5
 
 #: States that still have somewhere to go. Terminal ones are skipped rather than
 #: queried, so a finished book does not grow the work every minute.
@@ -544,9 +547,25 @@ async def _real_wallet_close_empty_accounts() -> dict[str, Any]:
             # same lock. A member with no wallet has nothing to sweep.
             from app.real_wallet import family_wallets
 
+            # Only wallets that ever held a position can hold an empty account,
+            # and each one is contained: the public RPC refuses
+            # getTokenAccountsByOwner in a burst (HTTP 403), and one refusal used
+            # to abort every later member and drop the owner's result too
+            # (2026-10-24, Karthik: "fix all 3").
+            traded = set((await session.scalars(
+                select(RealWalletPosition.wallet_public_key).where(
+                    RealWalletPosition.wallet_public_key.is_not(None)).distinct())).all())
             family: dict[str, object] = {}
             for account in await family_wallets.accounts(session):
-                done = await account_close.sweep(session, wallet=account.wallet)
+                if account.wallet not in traded:
+                    continue
+                await asyncio.sleep(CLOSE_MEMBER_SPACING_S)
+                try:
+                    done = await account_close.sweep(session, wallet=account.wallet)
+                except Exception as exc:  # noqa: BLE001 - the next sweep retries
+                    logger.warning("real_wallet_close_member_skipped", member=account.member,
+                                   error=type(exc).__name__)
+                    continue
                 if done.closed or done.refused:
                     family[account.member] = done.as_dict()
             await session.rollback()
