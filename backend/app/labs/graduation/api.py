@@ -1563,6 +1563,15 @@ def _opened_order(row: Any) -> tuple[datetime, str]:
 
 
 
+def _row_walk(rows: Sequence[Any], sol: Decimal | None, **kwargs: Any) -> Walk:
+    if rows and hasattr(rows[0], "return_at"):
+        from app.labs.graduation import pump_revised
+        return pump_revised.walk(list(rows), **kwargs)
+    return _funded_walk([(r.opened_at, r.closed_at, float(r.net_return),
+                          float(r.impact_open or 0), float(r.impact_close or 0))
+                         for r in rows], sol, **kwargs)
+
+
 def _karthik_line(rows: Sequence[Any], sol: Decimal | None, *, size: float,
                   capital: float, cents: Decimal,
                   tickets: Sequence[float] | None = None,
@@ -1570,9 +1579,7 @@ def _karthik_line(rows: Sequence[Any], sol: Decimal | None, *, size: float,
     """One way of trading the book: the book's own walk (`_funded_walk`) over
     these rows, so skips, pool impact at that size and the cash limit are all
     the real book's."""
-    w = _funded_walk([(r.opened_at, r.closed_at, float(r.net_return),
-                       float(r.impact_open or 0), float(r.impact_close or 0))
-                      for r in rows], sol, ticket=size, start=capital, tickets=tickets,
+    w = _row_walk(rows, sol, ticket=size, start=capital, tickets=tickets,
                      loss_streak_limit=loss_streak_limit, cooldown_minutes=cooldown_minutes)
     took = [(r, m) for r, m in zip(rows, w.pnl, strict=True) if m is not None]
     return {
@@ -1584,8 +1591,10 @@ def _karthik_line(rows: Sequence[Any], sol: Decimal | None, *, size: float,
         "skipped": w.skipped,
         "paused": w.paused,
         "wins": sum(1 for _, m in took if m > 0),
-        "rugs": sum(1 for r, _ in took
-                    if float(r.net_return) <= float(config.OPERATOR_RUG_MOVE)),
+        "rugs": (sum(m is not None and m/(tickets[i] if tickets is not None else size) <= -.5
+                     for i, m in enumerate(w.pnl)) if rows and hasattr(rows[0], "return_at")
+                 else sum(1 for r, _ in took
+                          if float(r.net_return) <= float(config.OPERATOR_RUG_MOVE))),
         "lowest_usd": Decimal(str(w.low)).quantize(cents),
         # How many of the trades taken were rebuilt by replay, not taken live.
         "replayed": sum(1 for r, _ in took
@@ -1608,6 +1617,9 @@ def _wallet_run(rows: Sequence[Any], buys_before: dict, sol: Decimal | None,
     profit, in the order the queue reaches them (USER 1 buys first)."""
     from app.labs.graduation import pool_lab as pl
 
+    if rows and hasattr(rows[0], "return_at"):
+        from app.labs.graduation import pump_revised
+        return pump_revised.wallet_run(list(rows), n, start_usd)
     wallets = [pl.Wallet(f"USER {i}", cash=start_usd, low=start_usd) for i in range(1, n + 1)]
     rugs = {w.name: 0 for w in wallets}
     base = float(config.PAPER_NOTIONAL_USD)
@@ -1744,9 +1756,7 @@ def _start_dates(rows: Sequence[Any], rate: Decimal | None, *, ticket: float, ca
     rug = float(config.OPERATOR_RUG_MOVE)
     while day <= now:
         xs = [r for r in rows if r.opened_at >= day]
-        w = _funded_walk([(r.opened_at, r.closed_at, float(r.net_return),
-                           float(r.impact_open or 0), float(r.impact_close or 0)) for r in xs],
-                         rate, ticket=ticket, start=capital,
+        w = _row_walk(xs, rate, ticket=ticket, start=capital,
                          tickets=[ticket_of(r) for r in xs] if ticket_of else None,
                          loss_streak_limit=loss_streak_limit,
                          cooldown_minutes=cooldown_minutes)
@@ -2060,6 +2070,15 @@ def _floor_test(rows: Sequence[Any]) -> dict[str, Any]:
     fresh = [r for r in rows if r.opened_at >= FLOOR_TEST_FROM]
     out = []
     for key, label, weight in FLOOR_TEST:
+        if rows and hasattr(rows[0], "return_at"):
+            xs = [r for r in fresh if weight(float(r.liq_open_usd or 0)) > 0]
+            sizes = [50*weight(float(r.liq_open_usd or 0)) for r in xs]
+            w = _row_walk(xs, None, ticket=50, start=500, tickets=sizes)
+            out.append({"key": key, "label": label, "trades": w.funded,
+                        "rugs": sum(m is not None and m/size <= -.5
+                                    for m, size in zip(w.pnl, sizes, strict=True)),
+                        "usd": round(w.cash-500, 2)})
+            continue
         xs = [(weight(float(r.liq_open_usd or 0)), float(r.net_return)) for r in fresh]
         out.append({"key": key, "label": label,
                     "trades": sum(1 for k, _ in xs if k > 0),
@@ -2144,15 +2163,20 @@ async def karthik_book_cached(db: AsyncSession = Depends(get_db)) -> dict[str, A
 
 
 _PUMP_BOOK: tuple[datetime, dict[str, Any]] | None = None
+_PUMP_BOOK_LOCK = asyncio.Lock()
 
 
 @router.get("/karthik/pump-catcher",
-            summary="Karthik Lab's trades sold at +30% or 10 minutes (Pump Catcher Lab)")
+            summary="Pump Catcher revised paper strategy, replayed from 1 October")
 async def pump_catcher_book_cached(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     global _PUMP_BOOK
     now = datetime.now(UTC)
     if _PUMP_BOOK is None or (now - _PUMP_BOOK[0]).total_seconds() >= _KARTHIK_PUBLIC_TTL_S:
-        _PUMP_BOOK = (now, await karthik_book(db, exit_rule="pump"))
+        async with _PUMP_BOOK_LOCK:
+            now = datetime.now(UTC)
+            if _PUMP_BOOK is None or (now - _PUMP_BOOK[0]).total_seconds() >= _KARTHIK_PUBLIC_TTL_S:
+                result = await karthik_book(db, exit_rule="pump")
+                _PUMP_BOOK = (datetime.now(UTC), result)
     return _PUMP_BOOK[1]
 
 
@@ -2212,16 +2236,22 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
     pump: dict[str, Any] | None = None
     capital = spec.capital_usd          # Pump Catcher Lab has its own (2026-10-24)
     if exit_rule == "pump":
-        from app.core.redis import init_redis
-        from app.labs.graduation import pump_catcher
+        from app.labs.graduation import pump_revised
+        candidates = [r for r in [*rows, *small]
+                      if config.karthik_book_pool(r.liq_open_usd, r.symbol)]
+        priced, settling = await pump_revised.prepare(db, candidates)
+        main_ids = {r.id for r in rows}
+        rows = [r for r in priced if r.id in main_ids]
+        small = [r for r in priced if r.id not in main_ids]
+        capital = Decimal(500)
+        pump = {"model": pump_revised.MODEL, "target_pct": 100, "hold_min": 10,
+                "check_min": 5, "signal_age_s": pump_revised.AGE_S,
+                "trail_arm_pct": 50, "trail_drawdown_pct": 20,
+                "priced": len(priced), "settling": settling}
 
-        priced = await pump_catcher.exits(await init_redis())
-        before = len(rows) + len(small)
-        rows, small = pump_catcher.reprice(rows, priced), pump_catcher.reprice(small, priced)
-        capital = pump_catcher.CAPITAL
-        pump = {"target_pct": round(100 * pump_catcher.TARGET), "hold_min": pump_catcher.HOLD_S // 60,
-                "check_min": pump_catcher.CHECK_S // 60,
-                "priced": len(rows) + len(small), "settling": before - len(rows) - len(small)}
+    def override(r: Any) -> bool:
+        return bool(pump and r.selected)
+
     # Every $75k+ signal his arm took: what the grid beside the book reads.
     signals = rows
     # The book counts only its pool range (KARTHIK_BOOK_POOLS, 2026-09-26).
@@ -2230,9 +2260,9 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
     skip_lo, skip_hi = config.KARTHIK_SKIP_POOL_USD
     every = [r for r in sorted([*small, *signals], key=_opened_order)
              if config.karthik_book_pool(r.liq_open_usd, r.symbol)
-             and not skip_lo <= float(r.liq_open_usd or 0) < skip_hi
-             and not (config.KARTHIK_SKIP_AI_POOL_USD[0] <= float(r.liq_open_usd or 0)
-                      < config.KARTHIK_SKIP_AI_POOL_USD[1] and pl.ai_name(r.symbol))]
+             and (override(r) or not skip_lo <= float(r.liq_open_usd or 0) < skip_hi)
+             and (override(r) or not (config.KARTHIK_SKIP_AI_POOL_USD[0] <= float(r.liq_open_usd or 0)
+                      < config.KARTHIK_SKIP_AI_POOL_USD[1] and pl.ai_name(r.symbol)))]
     # Repeat creators are bought again since 2026-10-06, here and on the real
     # wallets (Karthik: "remove repeat creator block from 50k pool ... assume we
     # had rule since day 1"): the block refused 57 coins, 54 winners, 1 rug.
@@ -2241,22 +2271,31 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
     # on (Karthik, 2026-10-10, `moneyblock.CREW`), replayed from day 1.
     rows = await moneyblock.without_crew(db, every, datetime.now(UTC))
     crewless = len(rows)
-    rows = await _busy_if_big(db, rows)
+    busy = {r.id for r in await _busy_if_big(db, rows)}
+    rows = [r for r in rows if override(r) or r.id in busy]
     named = len(rows)
-    rows = [r for r in rows if not _unnamed_evening(r)]
+    rows = [r for r in rows if override(r) or not _unnamed_evening(r)]
     unnamed_evening = named - len(rows)
     no_open_buy = await _no_open_buy(db, [*rows, *small, *signals])
     opened = len(rows)
-    rows = [r for r in rows if r.mint not in no_open_buy]
+    rows = [r for r in rows if override(r) or r.mint not in no_open_buy]
     no_open_buy_skipped = opened - len(rows)
-    rows, rugged_names, blocked_names, spaced_names = _without_bad_names(rows)
+    if pump:
+        # Permanent blocks remain hard. Rugged names are checked inside each
+        # funded walk, using only that account's already closed trades.
+        before_names = len(rows)
+        rows = [r for r in rows if pl.name_key(r.symbol) not in config.KARTHIK_BLOCKED_NAMES]
+        blocked_names = before_names-len(rows)
+        before_names = len(rows)
+        rows = [r for r in rows if override(r) or not config.spaced_name(r.symbol)]
+        spaced_names = before_names-len(rows)
+        rugged_names = 0
+    else:
+        rows, rugged_names, blocked_names, spaced_names = _without_bad_names(rows)
     buys_before = dict((await db.execute(_BUYS_BEFORE_SQL, {
         "ids": [p.id for p in rows], "mints": [p.mint for p in rows],
         "ats": [p.opened_at for p in rows]})).all()) if rows else {}
-    walk = _funded_walk(
-        [(p.opened_at, p.closed_at, float(p.net_return),
-          float(p.impact_open or 0), float(p.impact_close or 0)) for p in rows],
-        sol, ticket=float(spec.ticket_usd), start=float(capital),
+    walk = _row_walk(rows, sol, ticket=float(spec.ticket_usd), start=float(capital),
         tickets=[config.karthik_ticket(p.liq_open_usd, buys_before.get(p.id)) for p in rows])
     # The size grid follows the book's rules too (Karthik, 2026-10-16: "fix this
     # in 50k pool lab as per new rules"): the book's skips on every pool size,
@@ -2264,13 +2303,18 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
     grid = [r for r in sorted([*small, *signals], key=_opened_order)
             if (float(r.liq_open_usd or 0) >= config.KARTHIK_SHORT_NAME_POOL[0]
                 or config.karthik_short_name(r.symbol))
-            and not skip_lo <= float(r.liq_open_usd or 0) < skip_hi
-            and not (config.KARTHIK_SKIP_AI_POOL_USD[0] <= float(r.liq_open_usd or 0)
-                     < config.KARTHIK_SKIP_AI_POOL_USD[1] and pl.ai_name(r.symbol))]
+            and (override(r) or not skip_lo <= float(r.liq_open_usd or 0) < skip_hi)
+            and (override(r) or not (config.KARTHIK_SKIP_AI_POOL_USD[0] <= float(r.liq_open_usd or 0)
+                     < config.KARTHIK_SKIP_AI_POOL_USD[1] and pl.ai_name(r.symbol)))]
     grid = [r for r in await moneyblock.without_crew(db, grid, datetime.now(UTC))
-            if not _unnamed_evening(r) and r.mint not in no_open_buy]
-    grid = _without_bad_names(grid)[0]
-    grid = await _busy_if_big(db, grid)     # the book's big-pool rule, every column
+            if override(r) or (not _unnamed_evening(r) and r.mint not in no_open_buy)]
+    if pump:
+        grid = [r for r in grid if pl.name_key(r.symbol) not in config.KARTHIK_BLOCKED_NAMES
+                and (override(r) or not config.spaced_name(r.symbol))]
+    else:
+        grid = _without_bad_names(grid)[0]
+    busy_grid = {r.id for r in await _busy_if_big(db, grid)}
+    grid = [r for r in grid if override(r) or r.id in busy_grid]     # the book's big-pool rule, every column
     grid_buys = dict((await db.execute(_BUYS_BEFORE_SQL, {
         "ids": [p.id for p in grid], "mints": [p.mint for p in grid],
         "ats": [p.opened_at for p in grid]})).all()) if grid else {}
@@ -2282,7 +2326,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
     # populations on one line -- it read "0 rugs of 11 trades, 12 wins" -- and
     # would have credited the book with dodging a rug it simply had no money
     # for, or blamed it for one it never bought.
-    real, real_from = await _real_did(db, rows)
+    real, real_from = ({}, datetime.max.replace(tzinfo=UTC)) if pump else await _real_did(db, rows)
     took = [(row, money) for row, money in zip(rows, walk.pnl, strict=True)
             if money is not None]
     pnl = [money for _, money in took]
@@ -2290,16 +2334,18 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
     # 2026-10-22: "show daily wise how much profit loss rejected coins would
     # made"): every $50k+ quiet signal the book's skips turned away, at the
     # book's own stake, as if there were always cash for it.
-    kept_ids = {p.id for p in rows}
+    if pump:
+        rugged_names = sum(m is None for m in walk.pnl)-walk.skipped-walk.paused
+    kept_ids = {p.id for p, _ in took} if pump else {p.id for p in rows}
     refused = [r for r in sorted([*small, *signals], key=_opened_order)
                if config.karthik_book_pool(r.liq_open_usd, r.symbol) and r.id not in kept_ids]
-    refused_walk = _funded_walk(
-        [(p.opened_at, p.closed_at, float(p.net_return),
-          float(p.impact_open or 0), float(p.impact_close or 0)) for p in refused],
-        sol, ticket=float(spec.ticket_usd), start=1e9,
+    # Refused figures are an unfunded opportunity diagnostic, not another
+    # name-blocked strategy; every refused source trade counts once.
+    refused_walk = _row_walk(refused, sol, ticket=float(spec.ticket_usd), start=1e9,
         tickets=[config.karthik_ticket(p.liq_open_usd, None) for p in refused])
-    refused_took = [(row, money) for row, money in zip(refused, refused_walk.pnl, strict=True)
-                    if money is not None]
+    refused_took = ([(r, 50*float(r.net_return)) for r in refused] if pump else
+                    [(row, money) for row, money in zip(refused, refused_walk.pnl, strict=True)
+                     if money is not None])
     # Every pump.fun graduation seen since the book opened, bought or not, at
     # any pool size (Karthik, 2026-09-27: "doesnt matter we took trade or not").
     seen = await db.scalar(select(func.count()).select_from(GradMigration)
@@ -2314,10 +2360,12 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
         "graduations_rugged": await _graduation_rugs(db, spec.start),
         # Who put money into the coins the book bought, graduation to its sell.
         "flows": _flows(took, flow_rows),
-        "rule": (("Pump Catcher — Karthik's coins" if pump else "Karthik's book")
+        "rule": (("Pump Catcher revised paper strategy" if pump else "Karthik's book")
                  + f" — every graduation with a {_pools_words()} pool that is "
                  f"still quiet (under {config.QUIET_MAX_POOL_TXS} trades) when it is bought, "
-                 + (f"out at +{pump['target_pct']}%, at {pump['check_min']}m if down there, else {pump['hold_min']}m"
+                 + ("signals older than about 55 seconds use relaxed entry checks, a +100% target, "
+                    "20% trailing exit after +50%, or 10 minutes; younger signals use +30%, "
+                    "5 minutes if down, otherwise 10 minutes; fills at later readings"
                     if pump else f"out at {arm.hold}m")),
         "pump_catcher": pump,
         "pools_usd": list(config.KARTHIK_BOOK_POOLS),
@@ -2339,7 +2387,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
                                     now=datetime.now(UTC), cents=Decimal("0.01"),
                                     ticket_of=lambda r: config.karthik_ticket(
                                         r.liq_open_usd, buys_before.get(r.id))),
-        "hold_minutes": arm.hold,
+        "hold_minutes": 10 if pump else arm.hold,
         "started_at": spec.start,
         "judge_at": config.KARTHIK_JUDGE_AT,
         "resized_at": config.KARTHIK_RESIZED_AT,
@@ -2388,11 +2436,11 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
         # of the starting $500, a different denominator for a different
         # question, so this one carries its own label on the page.
         "days": _karthik_days(took, spec.start, float(capital), cents,
-                              float(sol) if sol else None),
+                              None if pump else (float(sol) if sol else None)),
         "refused_days": [{k: d[k] for k in ("n", "running", "trades", "rugs", "pnl_usd")}
                          for d in _karthik_days(refused_took, spec.start, 1e9, cents)],
         "refused_pnl_usd": Decimal(str(sum(m for _, m in refused_took))).quantize(cents),
-        "in_sol": _in_sol(took, float(capital), float(sol) if sol else None),
+        "in_sol": None if pump else _in_sol(took, float(capital), float(sol) if sol else None),
         # The same trades at other sizes, and on $150k+ pools only. A check,
         # shown beside the book; the book itself stays on its own rule.
         "whatif": _karthik_whatif(grid, sol, capital=float(capital),

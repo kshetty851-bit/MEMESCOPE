@@ -51,4 +51,15 @@ describe("Karthik's Lab rule book", () => {
     expect(screen.queryByText(/Exactly 5 minutes/)).not.toBeInTheDocument();
     expect(screen.getByText(/No real wallet follows this lab/)).toBeInTheDocument();
   });
+  it("explains the revised paper-only entry exception and both exits", () => {
+    render(<RuleBook data={{ capital_usd: "500", ticket_usd: "50", rugs: 57, trades: 899,
+      hold_minutes: 10, pump_catcher: { model: "independent-v3", target_pct: 100,
+        hold_min: 10, priced: 899, settling: 0 } } as KarthikBook} />);
+    expect(screen.getByText(/original paper entry is more than about 55 seconds/)).toBeInTheDocument();
+    expect(screen.getByText(/Older signals: \+100% target/)).toBeInTheDocument();
+    expect(screen.getByText(/20% fall from the observed peak once up at least 50%/)).toBeInTheDocument();
+    expect(screen.getByText(/Younger signals: \+30% target/)).toBeInTheDocument();
+    expect(screen.getByText(/No real wallet follows this lab/)).toBeInTheDocument();
+  });
+
 });

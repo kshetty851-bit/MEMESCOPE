@@ -639,19 +639,21 @@ export function RuleBook({ data }: { data: KarthikBook }) {
   const top = data.pools_usd?.[1];
   const ageMin = data.max_entry_age_s ? data.max_entry_age_s / 60 : null;
   const rugEvery = data.rugs > 0 ? Math.round(data.trades / data.rugs) : null;
+  const revised = data.pump_catcher?.model === "independent-v3";
+  const exception = revised ? " These checks apply to signals at most about 55 seconds old; older signals waive this check." : "";
   const rules: [string, string][] = [
     ["What it buys", "New pump.fun coins right after they “graduate” — finish their launch and open a real trading pool. About 1,000 do that every day."],
     ...(pool ? [["Only big pools", (top ? `The pool must hold between ${usd(pool).replace(".00", "")} and ${usd(top).replace(".00", "")}.` : `The pool must hold ${usd(pool).replace(".00", "")} or more.`)
       + (data.short_name_pool && data.short_name_pool[0] > pool
         ? ` Below ${usd(data.short_name_pool[0]).replace(".00", "")} only coins with a name of ${data.short_name_pool[1]} letters or fewer (spaces not counted).` : "")] as [string, string]] : []),
-    ...(data.big_pool_usd ? [["Big pools only when busy", `A pool of ${usd(data.big_pool_usd).replace(".00", "")} or more is bought only if it already had ${data.big_min_buys} or more buys in the 5 minutes before. Busy big pools kept rising; quiet ones drifted and held the rugs. Applied from the first trade.`] as [string, string]] : []),
-    ...(data.skip_pools_usd ? [["Skips $150k–$200k pools", `No pools between ${usd(data.skip_pools_usd[0]).replace(".00", "")} and ${usd(data.skip_pools_usd[1]).replace(".00", "")}: they lost money in every period tested, and on the real wallet too. Applied from the first trade.`] as [string, string]] : []),
+    ...(data.big_pool_usd ? [["Big pools only when busy", `A pool of ${usd(data.big_pool_usd).replace(".00", "")} or more is bought only if it already had ${data.big_min_buys} or more buys in the 5 minutes before. Busy big pools kept rising; quiet ones drifted and held the rugs. Applied from the first trade.${exception}`] as [string, string]] : []),
+    ...(data.skip_pools_usd ? [["Skips $150k–$200k pools", `No pools between ${usd(data.skip_pools_usd[0]).replace(".00", "")} and ${usd(data.skip_pools_usd[1]).replace(".00", "")}: they lost money in every period tested, and on the real wallet too. Applied from the first trade.${exception}`] as [string, string]] : []),
     ...(data.rugged_name_hours ? [["No rebuying a rugged name", `A name is not bought again for ${data.rugged_name_hours} hours after one of this book's coins with that name rugged.${data.rugged_name_skipped ? ` ${data.rugged_name_skipped} skipped so far.` : ""}`] as [string, string]] : []),
-    ...(data.skip_spaced_names ? [["No spaced names", `It skips coins whose name has a space (“GTA 6 Coin”, “Riot Games”): about one in five of them rugged.${data.spaced_name_skipped ? ` ${data.spaced_name_skipped} skipped so far.` : ""}`] as [string, string]] : []),
-    ...(data.skip_unnamed_dubai_hours ? [["No unnamed coins in the evening", `It skips coins with no name bought from ${data.skip_unnamed_dubai_hours[0]}:00 to midnight Dubai: they rugged far more often.${data.unnamed_evening_skipped ? ` ${data.unnamed_evening_skipped} skipped so far.` : ""}`] as [string, string]] : []),
-    ...(data.skip_no_open_buy ? [["Needs a buy at the open", `It skips a coin whose pool nobody bought when it opened (no pump.fun BOOST buy): about one in four of them rugged.${data.no_open_buy_skipped ? ` ${data.no_open_buy_skipped} skipped so far.` : ""}`] as [string, string]] : []),
+    ...(data.skip_spaced_names ? [["No spaced names", `It skips coins whose name has a space (“GTA 6 Coin”, “Riot Games”): about one in five of them rugged.${data.spaced_name_skipped ? ` ${data.spaced_name_skipped} skipped so far.` : ""}${exception}`] as [string, string]] : []),
+    ...(data.skip_unnamed_dubai_hours ? [["No unnamed coins in the evening", `It skips coins with no name bought from ${data.skip_unnamed_dubai_hours[0]}:00 to midnight Dubai: they rugged far more often.${data.unnamed_evening_skipped ? ` ${data.unnamed_evening_skipped} skipped so far.` : ""}${exception}`] as [string, string]] : []),
+    ...(data.skip_no_open_buy ? [["Needs a buy at the open", `It skips a coin whose pool nobody bought when it opened (no pump.fun BOOST buy): about one in four of them rugged.${data.no_open_buy_skipped ? ` ${data.no_open_buy_skipped} skipped so far.` : ""}${exception}`] as [string, string]] : []),
     ...(data.blocked_names?.length ? [["Blocked names", `Never buys coins named ${data.blocked_names.join(", ")} (any spacing or capitals).${data.blocked_name_skipped ? ` ${data.blocked_name_skipped} skipped so far.` : ""}`] as [string, string]] : []),
-    ...(data.skip_ai_pools_usd ? [["No AI fakes in small pools", `It skips coins named after AI products (DeepSeek, OpenAI, Grok…) in pools between ${usd(data.skip_ai_pools_usd[0]).replace(".00", "")} and ${usd(data.skip_ai_pools_usd[1]).replace(".00", "")}: since 9 Oct about one in four of them rugged. A rule for the current wave, reviewed weekly.`] as [string, string]] : []),
+    ...(data.skip_ai_pools_usd ? [["No AI fakes in small pools", `It skips coins named after AI products (DeepSeek, OpenAI, Grok…) in pools between ${usd(data.skip_ai_pools_usd[0]).replace(".00", "")} and ${usd(data.skip_ai_pools_usd[1]).replace(".00", "")}: since 9 Oct about one in four of them rugged. A rule for the current wave, reviewed weekly.${exception}`] as [string, string]] : []),
     ...(data.quiet_max_txs ? [["Only quiet pools", `Fewer than ${data.quiet_max_txs} trades in the pool so far when it buys. A busy start is skipped.`] as [string, string]] : []),
     ...(ageMin ? [["Only fresh coins", `It buys within ${ageMin} minutes of the coin graduating, or not at all. A late buy sits in the danger zone when creators sell.`] as [string, string]] : []),
     data.many_at_once_since
@@ -660,7 +662,12 @@ export function RuleBook({ data }: { data: KarthikBook }) {
     ["Trade size", data.tickets_by_pool?.length
       ? `${sizeWords(data.tickets_by_pool)}${data.tickets_by_pool.length === 1 ? " on every coin" : ""}, from a ${usd(data.capital_usd)} balance${data.tickets_by_pool.length > 1 ? ": more where the profit is (small pools), less where it is thin" : ""}.${data.quiet_stake && data.quiet_stake[1] !== data.tickets_by_pool[0]?.[1] ? ` A quiet small-pool coin (at most ${data.quiet_stake[0]} buys in the 5 minutes before) gets $${data.quiet_stake[1]}: those earned about five times more.` : ""}`
       : `${usd(data.ticket_usd)} per trade, from a ${usd(data.capital_usd)} balance.`],
-    data.pump_catcher
+    revised
+      ? ["Older signals", "If the original paper entry is more than about 55 seconds after graduation, it waives the spaced-name, unnamed-evening, AI-pool, $150k–$200k-pool, opening-buy and busy-big-pool checks. Crew blocks, permanently blocked names, the 12-hour rugged-name block, pool/name limits and available cash still apply. It does not wait then reuse an earlier entry price."]
+      : ["Entry checks", "The entry checks above apply to every signal."],
+    revised
+      ? ["Sells", "Older signals: +100% target, or a 20% fall from the observed peak once up at least 50%, otherwise 10 minutes. Younger signals: +30% target, or at 5 minutes if the last known net price is down, otherwise 10 minutes. Targets and trailing exits fill at the next distinct price reading; gaps can increase the loss."]
+      : data.pump_catcher
       ? ["Sells", `The moment it is up ${data.pump_catcher.target_pct}% (at the next price reading).${data.pump_catcher.check_min ? ` If it is down at ${data.pump_catcher.check_min} minutes it sells then, like Karthik's Lab;` : ""} otherwise ${data.pump_catcher.hold_min} minutes after buying. No stop-loss.`]
       : ["Always sells", `Exactly ${data.hold_minutes} minutes after buying. No price targets, no stop-loss — the clock decides.`],
     ["The risk", `If a coin's creator drains the pool (a “rug”), that trade loses almost all of it.${rugEvery ? ` So far about 1 in ${rugEvery} trades.` : ""}`],
@@ -1173,7 +1180,15 @@ export function KarthikLabPage({ variant = "karthik" }: { variant?: "karthik" | 
           <MoneyIn flows={data.flows} />
         </div>
         <div className="min-[1150px]:col-start-1 min-[1150px]:row-start-2">
-        {data.pump_catcher ? (
+        {data.pump_catcher?.model === "independent-v3" ? (
+          <p className="mt-1 max-w-[78ch] rounded-lg border border-accent/40 bg-accent/[0.06] px-3 py-2 text-[13px] leading-relaxed text-ink-2">
+            <b className="text-ink">Revised paper strategy from 1 October:</b> original entry signals older than about 55 seconds use relaxed entry checks,
+            a +100% target, a 20% trailing exit armed at +50%, or a 10-minute exit. Younger signals keep the +30% / five-minute-down / ten-minute exit.
+            Same-pool native prices, estimated fees and pool impact are used throughout. Dollar profits are fixed at each trade; they are not revalued at today&apos;s SOL price.
+            Selected after thousands of October tests; October is a historical replay, and only future trades test the revised rule.
+            {data.pump_catcher.settling ? ` ${data.pump_catcher.settling} newest trades are still settling.` : ""}
+          </p>
+        ) : data.pump_catcher ? (
           <p className="mt-1 max-w-[78ch] rounded-lg border border-accent/40 bg-accent/[0.06] px-3 py-2 text-[13px] leading-relaxed text-ink-2">
             <b className="text-ink">The same coins and rules as Karthik&apos;s Lab, one difference:</b> each trade is sold the moment
             it is up {data.pump_catcher.target_pct}% (at the next price reading); one that is down at {data.pump_catcher.check_min ?? 5} minutes
@@ -1257,7 +1272,7 @@ export function KarthikLabPage({ variant = "karthik" }: { variant?: "karthik" | 
           label="Lowest it has been"
           value={`${usd(data.lowest_usd)}  ${pctOfCapital(
             Number(data.lowest_usd) - Number(data.capital_usd), data.capital_usd)}`}
-          hint="what holding it actually felt like"
+          hint={data.pump_catcher?.model === "independent-v3" ? "lowest realized equity; open positions counted at cost" : "what holding it actually felt like"}
         />
         <Figure
           label="Rugs"
