@@ -11,7 +11,7 @@ import { WorldClocks } from "./world-clocks";
 
 import { useKarthikBook, usePumpfunDays, useWalletsProfit } from "./hooks";
 import type {
-  FamilyMonths, KarthikBook, KarthikDay, KarthikFlows, KarthikTrade, KarthikWhatIfLine, PumpfunDay,
+  WalletCounts, KarthikBook, KarthikDay, KarthikFlows, KarthikTrade, KarthikWhatIfLine, PumpfunDay,
   StartDate, WalletProfit,
 } from "./types";
 
@@ -892,42 +892,83 @@ function short(value: string | number): string {
   return `$${Math.round(n)}`;
 }
 
-/** "3 user wallets with $500 each ... month wise" (Karthik, 2026-10-20): the
-    book's own trades on three wallets, the later ones paying the queue's price. */
-export function FamilyBox({ f }: { f: FamilyMonths }) {
-  const tone = (v: number) => (v > 0 ? "text-up" : v < 0 ? "text-down" : "text-ink-dim");
-  const signed = (v: number) => `${v >= 0 ? "+" : "-"}${usd(Math.abs(v))}`;
-  const atSol = (m: FamilyMonths["months"][number]) =>
-    m.pnl_sol != null && f.sol_usd_now != null ? m.pnl_sol * f.sol_usd_now : m.pnl_usd;
+/** "What if we have 2, 3, 4 user wallets etc upto 10, in one big box, and day 30"
+    (Karthik, 2026-10-24): every wallet buys every coin the book buys, the later
+    ones paying more price impact, so each extra wallet adds a little less. */
+export function WalletCountsBox({ w }: { w: WalletCounts }) {
+  const money = (v: number) => `${v < 0 ? "−" : ""}$${Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+  const signed = (v: number) => `${v >= 0 ? "+" : ""}${money(v)}`;
+  const best = w.counts.reduce((a, c) => (c.pnl_usd > a.pnl_usd ? c : a), w.counts[0]!);
+  const top = Math.max(...w.counts.map((c) => Math.max(c.day30_pnl_usd, c.pnl_usd)), 1);
   return (
-    <div className="mt-2 rounded-lg border border-line bg-surface px-3 py-2 text-right" data-testid="family-box">
-      <div className="text-[11px] uppercase tracking-wider text-ink-dim">
-        If {f.wallets} user wallets × {usd(f.start_usd)} had traded it
-      </div>
-      {/* At SOL's price now (2026-10-20), the fixed-dollar figure underneath. */}
-      <div className={`text-lg font-semibold tabular-nums ${tone(f.pnl_usd_now ?? f.pnl_usd)}`}>{signed(f.pnl_usd_now ?? f.pnl_usd)}</div>
-      {f.pnl_sol != null && f.sol_usd_now != null ? (
-        <div className="text-[11px] tabular-nums text-ink-dim" data-testid="family-sol">
-          {sol(f.pnl_sol)} at SOL {usd(f.sol_usd_now)} · fixed-dollar {signed(f.pnl_usd)}
+    <section className="wallet-counts" data-testid="wallet-counts">
+      <div className="wallet-counts__glow" aria-hidden />
+      <header className="relative flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">What if · user wallets</p>
+          <h3 className="mt-1 font-brand text-xl font-semibold text-ink sm:text-2xl">1 to {w.counts.length} wallets on this book</h3>
+          <p className="mt-1 max-w-[70ch] text-[12px] leading-relaxed text-ink-2">
+            Each wallet starts with {money(w.start_usd)} at {sizeWords(w.tickets_by_pool)} and buys every coin the book buys.
+            They buy one after another, so each extra wallet pays a little more price impact and adds a little less.
+          </p>
         </div>
-      ) : null}
-      <table className="ml-auto text-[12px] tabular-nums">
-        <tbody>
-          {f.months.map((m) => (
-            <tr key={m.month}>
-              <td className="pr-3 text-left text-ink-dim">
-                {new Date(`${m.month}-01T00:00:00`).toLocaleDateString("en-GB", { month: "short", year: "numeric" })}
-              </td>
-              <td className={`text-right font-medium ${tone(atSol(m))}`}>{signed(atSol(m))}</td>
-              {m.pnl_sol != null ? <td className="pl-3 text-right text-ink-2">{sol(m.pnl_sol)}</td> : null}
+        <div className="rounded-xl border border-line bg-ink/[0.03] px-3 py-2 text-right">
+          <div className="text-[10px] uppercase tracking-wider text-ink-3">Most profit</div>
+          <div className="font-brand text-lg font-semibold text-up tabular-nums">{signed(best.pnl_usd)}</div>
+          <div className="text-[11px] text-ink-3">with {best.wallets} wallets</div>
+        </div>
+      </header>
+      <div className="relative mt-4 overflow-x-auto">
+        <table className="w-full min-w-[46rem] text-[13px] tabular-nums">
+          <thead className="text-[10px] uppercase tracking-wider text-ink-3">
+            <tr>
+              <th className="py-1.5 pr-3 text-left font-normal">Wallets</th>
+              <th className="py-1.5 pr-3 text-right font-normal">Money in</th>
+              <th className="py-1.5 pr-3 text-left font-normal">Profit now · {w.days_elapsed} days</th>
+              <th className="py-1.5 pr-3 text-right font-normal">Return</th>
+              <th className="py-1.5 pr-3 text-right font-normal">Day {w.days_target} expected</th>
+              <th className="py-1.5 text-left font-normal">Each wallet</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="mt-1 text-[10px] text-ink-dim">
-        Karthik Lab rule: {sizeWords(f.tickets_by_pool)} · paper estimate, not real fills
+          </thead>
+          <tbody>
+            {w.counts.map((c) => (
+              <tr key={c.wallets} data-testid={`wallets-${c.wallets}`}
+                  className={`wallet-counts__row ${c.wallets === best.wallets ? "is-best" : ""}`}>
+                <td className="py-2 pr-3">
+                  <span className="wallet-counts__n">{c.wallets}</span>
+                </td>
+                <td className="py-2 pr-3 text-right text-ink-2">{money(c.put_in_usd)}</td>
+                <td className="py-2 pr-3">
+                  <div className="flex items-center gap-2">
+                    <div className="wallet-counts__track">
+                      <span className="wallet-counts__bar" style={{ width: `${Math.max(2, (100 * Math.max(c.pnl_usd, 0)) / top)}%` }} />
+                    </div>
+                    <span className={`min-w-[5.5rem] text-right font-semibold ${c.pnl_usd >= 0 ? "text-up" : "text-down"}`}>{signed(c.pnl_usd)}</span>
+                  </div>
+                </td>
+                <td className="py-2 pr-3 text-right text-ink-2">{c.return_pct.toFixed(0)}%</td>
+                <td className="py-2 pr-3 text-right">
+                  <span className={`font-semibold ${c.day30_pnl_usd >= 0 ? "text-accent" : "text-down"}`}>{signed(c.day30_pnl_usd)}</span>
+                  <div className="text-[10px] text-ink-3">balance {money(c.day30_balance_usd)}</div>
+                </td>
+                <td className="py-2">
+                  <div className="flex flex-wrap gap-1">
+                    {c.per_wallet.map((p, i) => (
+                      <span key={i} title={`USER ${i + 1}: ${p.trades} trades, ${p.rugs} rugs`}
+                            className={`wallet-counts__chip ${p.pnl_usd < 0 ? "is-down" : ""}`}>{signed(p.pnl_usd)}</span>
+                    ))}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
-    </div>
+      <p className="relative mt-3 text-[11px] leading-relaxed text-ink-3">
+        Day {w.days_target} expected = profit so far ÷ {w.days_elapsed} days × {w.days_target}: the pace so far carried forward, not a promise.
+        Paper estimate on the book&apos;s own trades — real fills, and several wallets buying the same small pool within seconds, can do worse.
+      </p>
+    </section>
   );
 }
 
@@ -1120,7 +1161,6 @@ export function KarthikLabPage() {
               </div>
             </div>
           </div>
-          {data.family ? <FamilyBox f={data.family} /> : null}
           <PoolTrades trades={data.trades_list} />
           <MoneyIn flows={data.flows} />
         </div>
@@ -1186,6 +1226,7 @@ export function KarthikLabPage() {
         <StartDates book="$40k book" lines={data.start_dates} capital={Number(data.capital_usd)} ticket={Number(data.ticket_usd)}
                     sizeText={data.tickets_by_pool?.length ? sizeWords(data.tickets_by_pool) : undefined} />
       ) : null}
+      {data.wallet_counts?.counts.length ? <WalletCountsBox w={data.wallet_counts} /> : null}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
         <Figure

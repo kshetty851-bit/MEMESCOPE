@@ -14,20 +14,23 @@ export interface KarthikTrade {
   real?: { status: "bought" | "skipped"; why: string | null } | null;
 }
 
-export interface FamilyMonths {
-  wallets: number;
+/** 1-10 user wallets on the book's trades, now and at day 30 (2026-10-24). */
+export interface WalletCounts {
   start_usd: number;
-  /** The lab's own stake table, (pool below, stake); last limit null. */
+  days_elapsed: number;
+  days_target: number;
   tickets_by_pool: [number | null, number][];
-  balance_usd: number;
-  pnl_usd: number;
-  months: { month: string; trades: number; rugs: number; pnl_usd: number; pnl_sol?: number }[];
-  /** As SOL, valued at SOL's price now (2026-10-20). */
-  pnl_sol?: number;
-  balance_sol?: number;
-  sol_usd_now?: number;
-  worth_usd_now?: number;
-  pnl_usd_now?: number;
+  counts: {
+    wallets: number;
+    put_in_usd: number;
+    /** Each wallet's own profit, highest first (the first in the queue pays least impact). */
+    per_wallet: { pnl_usd: number; trades: number; rugs: number }[];
+    pnl_usd: number;
+    balance_usd: number;
+    return_pct: number;
+    day30_pnl_usd: number;
+    day30_balance_usd: number;
+  }[];
 }
 
 /** The book as if its money had stayed in SOL (Karthik, 2026-10-20). */
@@ -43,7 +46,7 @@ export interface InSol {
 
 export interface KarthikBook {
   /** The book's trades on three $500 user wallets, month by month (2026-10-20). */
-  family?: FamilyMonths;
+  wallet_counts?: WalletCounts;
   /** Big pools bought only when busy (2026-10-22). */
   big_pool_usd?: number;
   big_min_buys?: number;
