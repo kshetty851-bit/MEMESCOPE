@@ -86,7 +86,7 @@ export const NAV_GROUPS: NavGroup[] = [
         label: "Karthik's Lab",
         icon: IconSpark,
         status: "ready",
-        note: "Paper only. $500 at $100 a trade on $40k+ quiet pools (short names under $50k).",
+        note: "Paper only. $300 at $50 a trade on $40k+ quiet pools (short names under $50k).",
       },
       // Karthik, 2026-10-05: small pools at every size, and ten user wallets
       // sharing the same coins.

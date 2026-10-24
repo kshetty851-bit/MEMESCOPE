@@ -70,7 +70,7 @@ def test_the_page_shows_the_quiet_book_and_the_other_books() -> None:
     # and says so: the size and the moment it changed are both recorded, so
     # the page can mark what came before as in sample.
     assert (by_book["KARTHIK_QUIET_5M"].capital_usd,
-            by_book["KARTHIK_QUIET_5M"].ticket_usd) == (Decimal(500), Decimal(100))   # $500 from 24 Oct
+            by_book["KARTHIK_QUIET_5M"].ticket_usd) == (Decimal(300), Decimal(50))   # $300 at $50 from 24 Oct
     # ...and on 2026-10-03 to $500 at $50, when it moved to $50k+ pools.
     assert (Decimal(500), Decimal(50)) == config.KARTHIK_PREVIOUS_SIZE
     assert (by_book["KARTHIK_QUIET_5M"].start < config.KARTHIK_RESIZED_AT
@@ -254,9 +254,9 @@ async def test_karthik_book_buys_as_many_as_the_balance_allows() -> None:
 
     book = await karthik_book(db=_StubDb(rows))  # type: ignore[arg-type]
 
-    assert (book["trades"], book["skipped"], book["busy_skipped"]) == (6, 7, 0)   # $500 funds six $100 tickets
+    assert (book["trades"], book["skipped"], book["busy_skipped"]) == (7, 6, 0)   # $300 funds six $50 tickets, then a seventh once one closes
     assert book["trades_list"][0]["symbol"] == "LATER"
-    assert (book["wins"], book["rugs"]) == (5, 1)
+    assert (book["wins"], book["rugs"]) == (6, 1)
     assert book["one_at_a_time_since"] is None and book["many_at_once_since"]
 
 
@@ -286,13 +286,13 @@ async def test_karthik_days_are_24h_from_the_open_not_calendar_days() -> None:
     assert days[1]["trades"] == 2                      # not 3: C closed on day 2
     assert (days[1]["rugs"], days[2]["rugs"]) == (0, 1)  # D, -50%, is on the rug line
     assert days[2]["trades"] == 2
-    # Day 1: two $100 tickets at +10% on a $500 book.
-    assert days[1]["pnl_usd"] == Decimal("20.00")
-    assert days[1]["pct"] == Decimal("4.00")           # 20 of the 500 it opened with
-    assert days[1]["balance_usd"] == Decimal("520.00")
-    # Day 2 is measured off 520, the balance it inherited -- not off 500.
-    assert days[2]["pnl_usd"] == Decimal("-40.00")     # +10 then -50
-    assert days[2]["pct"] == Decimal("-7.69")
+    # Day 1: two $50 tickets at +10% on a $300 book.
+    assert days[1]["pnl_usd"] == Decimal("10.00")
+    assert days[1]["pct"] == Decimal("3.33")           # 10 of the 300 it opened with
+    assert days[1]["balance_usd"] == Decimal("310.00")
+    # Day 2 is measured off 310, the balance it inherited -- not off 300.
+    assert days[2]["pnl_usd"] == Decimal("-20.00")     # +5 then -25
+    assert days[2]["pct"] == Decimal("-6.45")
     # The days reconcile to the book: last day's balance is the book's balance.
     assert days[max(days)]["balance_usd"] == book["balance_usd"]
 
@@ -309,8 +309,8 @@ async def test_the_public_summary_gives_headline_figures_and_nothing_else() -> N
     out = await _api.karthik_summary(db=_StubDb(rows))  # type: ignore[arg-type]
     assert set(out) == {"started_at", "judge_at", "capital_usd", "ticket_usd", "balance_usd",
                         "pnl_usd", "pnl_pct", "trades", "wins", "rugs"}
-    assert out["pnl_usd"] == Decimal("10.00")          # one $100 ticket at +10%
-    assert out["pnl_pct"] == Decimal("2.00")           # of the $500 it started with
+    assert out["pnl_usd"] == Decimal("5.00")           # one $50 ticket at +10%
+    assert out["pnl_pct"] == Decimal("1.67")           # of the $300 it started with
     # Only that one path opens; the full book and anything beside it stay shut.
     exempt = AlphaAccessMiddleware._is_exempt
     assert exempt("/api/v1/labs/graduation/karthik/summary")
@@ -388,14 +388,14 @@ async def test_the_grid_is_every_size_by_every_pool_floor() -> None:
     assert [f["floor_usd"] for f in w["floors"] if f["book"]] == [40_000]
     assert [(r["ticket_usd"], r["capital_usd"]) for r in w["sizes"]] == [
         (10, 50), (20, 100), (25, 125), (50, 250), (100, 500), (200, 1000)]
-    assert [r["current"] for r in w["sizes"]] == [False, False, False, False, True, False]  # $100
+    assert [r["current"] for r in w["sizes"]] == [False, False, False, True, False, False]  # $50
     assert all(len(r["cells"]) == 7 for r in w["sizes"])
     # A $200k pool at +10%: every floor up to $200k took it.
     floors, now = _grid(book)
     # A $200k pool: every floor up to $200k took it; the $100k-$150k band did not.
     assert [now[f]["trades"] for f in floors] == [1, 1, 1, 0, 1, 1, 1]   # $40k column first (24 Oct)
-    # Each row stakes exactly its label (22 Oct: the book's ticket is its real $100).
-    assert now[50_000]["pnl_usd"] == Decimal("10.00")                # $100 at +10%
+    # Each row stakes exactly its label (the book's ticket is its real $50 since 24 Oct).
+    assert now[50_000]["pnl_usd"] == Decimal("5.00")                 # $50 at +10%
     assert w["sizes"][-1]["cells"][0]["pnl_usd"] == Decimal("20.00")  # $200 at +10%
     # $25k+ and $50k+ include the arms' replayed rows, and say so.
 
@@ -454,7 +454,7 @@ async def test_coins_opened_in_the_same_instant_are_always_taken_in_one_order() 
     one = await karthik_book(db=_StubDb(coins))  # type: ignore[arg-type]
     two = await karthik_book(db=_StubDb(list(reversed(coins))))  # type: ignore[arg-type]
     taken = sorted(t["symbol"] for t in one["trades_list"])
-    assert taken == [f"C{i:02d}" for i in range(5)]       # $500 holds five at once
+    assert taken == [f"C{i:02d}" for i in range(6)]       # $300 holds six $50 tickets at once
     assert taken == sorted(t["symbol"] for t in two["trades_list"])
     assert one["balance_usd"] == two["balance_usd"]
 
