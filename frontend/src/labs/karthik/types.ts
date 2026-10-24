@@ -47,6 +47,8 @@ export interface InSol {
 export interface KarthikBook {
   /** The book's trades on three $500 user wallets, month by month (2026-10-20). */
   wallet_counts?: WalletCounts;
+  /** Pump Catcher Lab only: its exit, and how many positions are priced / still settling. */
+  pump_catcher?: { target_pct: number; hold_min: number; priced: number; settling: number } | null;
   /** Big pools bought only when busy (2026-10-22). */
   big_pool_usd?: number;
   big_min_buys?: number;

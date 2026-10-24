@@ -88,6 +88,13 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Paper only. $300 at $50 a trade on $40k+ quiet pools (short names under $50k).",
       },
+      {
+        href: "/pump-catcher-lab",
+        label: "Pump Catcher Lab",
+        icon: IconSpark,
+        status: "ready",
+        note: "Paper only. Karthik Lab's coins and rules, sold at +30% or 10 minutes instead of 5.",
+      },
       // Karthik, 2026-10-05: small pools at every size, and ten user wallets
       // sharing the same coins.
       {

@@ -1,5 +1,9 @@
 /**
- * Karthik's lab route. One re-export, the way the other labs' are — the page
- * lives in `src/labs/karthik/`.
+ * Karthik's lab route. The page lives in `src/labs/karthik/`; the Pump Catcher
+ * Lab shows the same page with `variant="pump"`.
  */
-export { KarthikLabPage as default } from "@/labs/karthik/page";
+import { KarthikLabPage } from "@/labs/karthik/page";
+
+export default function KarthikLab() {
+  return <KarthikLabPage />;
+}

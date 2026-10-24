@@ -7,6 +7,11 @@ export function fetchKarthikBook(): Promise<KarthikBook> {
   return api.get<KarthikBook>("/labs/graduation/karthik");
 }
 
+/** Pump Catcher Lab (2026-10-24): the same book, sold at +30% or 10 minutes. */
+export function fetchPumpCatcherBook(): Promise<KarthikBook> {
+  return api.get<KarthikBook>("/labs/graduation/karthik/pump-catcher");
+}
+
 /** Pump.fun day by day. Past days are fixed; today refreshes every ten minutes. */
 export function fetchPumpfunDays(): Promise<PumpfunDays> {
   return api.get<PumpfunDays>("/labs/graduation/karthik/pumpfun-days");
