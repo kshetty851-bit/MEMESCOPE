@@ -110,8 +110,9 @@ async def session(request: Request) -> AlphaSessionStatus:
 async def unlock(
     payload: AlphaUnlockRequest, response: Response, session: DbSession
 ) -> AlphaSessionStatus:
-    expected = settings.ALPHA_ACCESS_CODE.get_secret_value()
-    if not secrets.compare_digest(payload.code.strip(), expected):
+    expected = settings.ALPHA_ACCESS_CODE.get_secret_value().strip()
+    # No configured code fails closed: "" would otherwise match a blank submission.
+    if not expected or not secrets.compare_digest(payload.code.strip(), expected):
         raise AuthenticationError(
             "Access code not recognised.",
             code="alpha_access_denied",

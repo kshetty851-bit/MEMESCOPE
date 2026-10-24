@@ -84,7 +84,7 @@ class Settings(BaseSettings):
     # This is not user authentication. It is a server-side deployment gate used
     # while the product is private: a shared code creates an httpOnly cookie,
     # and the frontend/dashboard checks that cookie through the API.
-    ALPHA_ACCESS_CODE: SecretStr = SecretStr("619554")
+    ALPHA_ACCESS_CODE: SecretStr = SecretStr("")  # set from the environment; empty = nobody can unlock
     ALPHA_ACCESS_REQUIRED: bool = False
     ALPHA_ACCESS_COOKIE_NAME: str = "memescope_alpha"
     ALPHA_ACCESS_COOKIE_PATH: str = "/"
@@ -1685,7 +1685,7 @@ class Settings(BaseSettings):
                 raise ValueError("REFRESH_COOKIE_SECURE must be true in production")
             if not self.ALPHA_ACCESS_REQUIRED:
                 raise ValueError("ALPHA_ACCESS_REQUIRED must be true in production")
-            if len(self.ALPHA_ACCESS_CODE.get_secret_value()) < 1:
+            if not self.ALPHA_ACCESS_CODE.get_secret_value().strip():
                 raise ValueError("ALPHA_ACCESS_CODE is required in production")
             if not self.ALPHA_ACCESS_COOKIE_SECURE:
                 raise ValueError("ALPHA_ACCESS_COOKIE_SECURE must be true in production")
