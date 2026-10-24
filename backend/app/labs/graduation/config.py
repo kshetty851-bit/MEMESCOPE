@@ -1172,18 +1172,17 @@ KARTHIK_SKIP_POOL_USD: tuple[int, int] = (150_000, 200_000)
 #: better on 9-13 Oct (+$128) but slightly worse on 1-8 Oct (-$18), so a
 #: rule for the current wave, to review after a week, not a proven edge.
 KARTHIK_SKIP_AI_POOL_USD: tuple[int, int] = (50_000, 60_000)
-#: Karthik, 2026-10-15 ("apply 48 hour rule to 50k pool since day 1 and block
-#: mrbeast name"): a name is not rebought within this many hours of one of the
-#: book's coins with that name closing at a rug's loss, and these names (letters
-#: and digits, lower case) are never bought. Re-run from 1 Oct: $840.70 ->
-#: $856.94 for the 48 h rule, resting on one coin (MrBeast, 15 Oct).
-KARTHIK_RUGGED_NAME_HOURS = 48
-#: Karthik, 2026-10-16 ("apply 48h removal to karthik lab since day 1"): the
-#: 48 h ban is OFF on Karthik Lab. It cost profit in both months: -$6 on the
-#: unseen 23-30 Sep, -$32 on Oct (it skipped 40 winners, avoided 2 rugs). The
-#: real wallets dropped it too the same day ("yes build it for real wallets";
-#: driver._bad_name reads this flag), so the two cannot drift.
-KARTHIK_LAB_RUGGED_NAME_BAN = False
+#: Karthik, 2026-10-24: after an own-book rug, do not rebuy that normalized
+#: name for 12 hours. Applied from day 1 to BOTH paper labs; each lab uses its
+#: own realized exits. Chosen after comparing historical windows, so future
+#: paper trades are the test. These settings must not govern real wallets.
+KARTHIK_RUGGED_NAME_HOURS = 12
+KARTHIK_LAB_RUGGED_NAME_BAN = True
+#: Preserve the real wallets' previous optional Karthik-book name check:
+#: disabled since 2026-10-16, with its original 48-hour window if enabled.
+#: Their separate safety/three-hour same-name checks are unaffected.
+KARTHIK_WALLET_RUGGED_NAME_HOURS = 48
+KARTHIK_WALLET_RUGGED_NAME_BAN = False
 KARTHIK_BLOCKED_NAMES: frozenset[str] = frozenset({"mrbeast"})
 #: Karthik, 2026-10-16 ("apply this since day 1"): a coin whose name has a
 #: space ("GTA 6 Coin", "Riot Games", "Muse AI") is not bought - 24 trades, 5
