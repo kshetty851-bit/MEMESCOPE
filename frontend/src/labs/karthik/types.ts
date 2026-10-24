@@ -192,7 +192,7 @@ export interface PumpfunDay {
   into_curves_usd: string | null;
   /** Money in the new pools two minutes after graduating. */
   pools_usd: string;
-  pools_50k: number;
+  pools_40k: number;
 }
 
 export interface PumpfunDays {

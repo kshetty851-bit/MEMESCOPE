@@ -65,7 +65,7 @@ function LiveLab() {
       live = false;
     };
   }, []);
-  if (!lab) return <p className="mt-3 text-sm text-ink-3">A $300 paper book, $100 a trade, judged after 30 days.</p>;
+  if (!lab) return <p className="mt-3 text-sm text-ink-3">A $500 paper book, $100 a trade, judged after 30 days.</p>;
   const up = Number(lab.pnl_usd) >= 0;
   return (
     <div className="mt-3">

@@ -269,8 +269,8 @@ export function FloorTest({ data }: { data: KarthikBook }) {
         </table>
         <p className="mt-2 text-[11px] text-ink-dim">
           Counts only coins bought from {new Date(t.since).toLocaleString("en-GB", { timeZone: "Asia/Dubai", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })} Dubai,
-          so no line was picked with hindsight. Since 1 Oct (hindsight) the plain $50k+ rule led: +$435, against +$329 ($55k),
-          +$250 ($60k) and +$343 (half size). Paper only; the real wallets are unchanged.
+          so no line was picked with hindsight, at $100 a trade. The $40k floor for short names joined on 24 Oct; the
+          “Floor $50k” line is the rule before it. Paper only; the real wallets are unchanged.
         </p>
       </div>
     </Panel>
@@ -416,7 +416,7 @@ export function RefusedDays({ days, total }: {
         })}
       </div>
       <p className="mt-1 text-[10px] text-ink-faint">
-        $50k+ quiet coins the book&apos;s skips turned away, at its own stake, as if cash were always free.
+        $40k+ quiet coins (short names under $50k) the book&apos;s skips turned away, at its own stake, as if cash were always free.
       </p>
     </div>
   );
@@ -621,7 +621,7 @@ function GridPanel({ data, title, rows, value = false, from, testId = "size-grid
           “now” row in the “this book” column is the book itself. Hover a cell for its trades, rugs and lowest
           balance. A look back, not a test.
           {w.floors.some((f) => f.replayed_below)
-            ? " * real-time trades only: the $50k–$75k pools count from 26 Sep, when their paper arm went live. Before that this column holds only the $75k+ trades."
+            ? " * real-time trades only: the $40k–$50k pools count from 3 Oct and the $50k–$75k pools from 26 Sep, when their paper arms went live. Below $50k only names of 5 letters or fewer are bought."
             : null}
         </p>
       </div>
@@ -740,7 +740,7 @@ export function TradeList({ data }: { data: KarthikBook }) {
           {data.trades_list.length === 0 ? (
             <EmptyState
               title="No trades yet"
-              body="The rule buys a graduation over $50k whose pool is still quiet. On the arm it copies that is about sixty a day, so the first one usually arrives within the hour."
+              body="The rule buys a graduation over $40k (short names under $50k) whose pool is still quiet. On the arm it copies that is about sixty a day, so the first one usually arrives within the hour."
             />
           ) : (
             <div className="overflow-x-auto p-3">
@@ -846,7 +846,7 @@ export function MoneyIn({ flows }: { flows: KarthikFlows | undefined }) {
 }
 
 /** Pool floors, as the grid below uses them: each counts every trade at or above it. */
-const POOL_FLOORS = [50_000, 75_000, 100_000, 150_000, 200_000];
+const POOL_FLOORS = [40_000, 50_000, 75_000, 100_000, 150_000, 200_000];
 
 /** Under the count: how many of the book's trades each pool floor took, and
     what they made (Karthik, 2026-09-27: "75k+, 100k+ like this", not bands).
@@ -952,7 +952,7 @@ export function PumpfunMoneyTable({ days, graduationSol }: {
               <th className="px-2 text-right font-normal">Graduated</th>
               <th className="px-2 text-right font-normal">Paid into graduated coins</th>
               <th className="px-2 text-right font-normal">In new pools at 2 min</th>
-              <th className="pl-2 text-right font-normal">$50k+ pools</th>
+              <th className="pl-2 text-right font-normal">$40k+ pools</th>
             </tr>
           </thead>
           <tbody>
@@ -968,7 +968,7 @@ export function PumpfunMoneyTable({ days, graduationSol }: {
                 <td className="px-2 text-right text-ink-2">{d.graduations.toLocaleString()}</td>
                 <td className="px-2 text-right text-ink">{d.into_curves_usd ? short(d.into_curves_usd) : "—"}</td>
                 <td className="px-2 text-right text-ink">{short(d.pools_usd)}</td>
-                <td className="pl-2 text-right text-accent">{d.pools_50k}</td>
+                <td className="pl-2 text-right text-accent">{d.pools_40k}</td>
               </tr>
             ))}
           </tbody>
@@ -1143,8 +1143,8 @@ export function KarthikLabPage() {
             <b className="text-ink-2">
               Pools {bandLabel(data.pools_usd[0], data.pools_usd[1])} only:
             </b>{" "}
-            real-time trades only, so the $50k–$75k pools count from 26 Sep, when their
-            paper arm went live; before that the book holds only $75k+ trades. Chosen on{" "}
+            names of 5 letters or fewer below $50k. Real-time trades only, so the $40k–$50k pools count
+            from 3 Oct and the $50k–$75k pools from 26 Sep, when their paper arms went live. Chosen on{" "}
             {day(data.pools_since)} and replayed from day 1, so every figure
             here is a look back until then. The table below shows every other floor.
           </p>
@@ -1183,7 +1183,7 @@ export function KarthikLabPage() {
         {data.refused_days?.length ? <RefusedDays days={data.refused_days} total={data.refused_pnl_usd} /> : null}
       </div>
       {data.start_dates?.length ? (
-        <StartDates book="$50k book" lines={data.start_dates} capital={Number(data.capital_usd)} ticket={Number(data.ticket_usd)}
+        <StartDates book="$40k book" lines={data.start_dates} capital={Number(data.capital_usd)} ticket={Number(data.ticket_usd)}
                     sizeText={data.tickets_by_pool?.length ? sizeWords(data.tickets_by_pool) : undefined} />
       ) : null}
 

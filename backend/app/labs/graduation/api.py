@@ -1480,7 +1480,7 @@ KARTHIK_WHATIF_SIZES = tuple((t, KARTHIK_WHATIF_RATIO * t) for t in (10, 20, 25,
 #: 2026-10-03: the $100k-$150k band beside $75k, the best pool size since
 #: 18 Sep by every graduation's 5-minute return. Karthik, 2026-10-20: "remove
 #: 25k, keep the rest" (the book starts at $50k).
-KARTHIK_GRID_COLUMNS = ((50_000, None), (75_000, None),
+KARTHIK_GRID_COLUMNS = ((40_000, None), (50_000, None), (75_000, None),
                         (100_000, 150_000), (100_000, None), (150_000, None),
                         (200_000, None))
 #: The $25k+ and $50k+ columns (Karthik, 2026-10-03: "add 50k pool too",
@@ -1670,9 +1670,9 @@ def _fresh_entry(row: Any) -> bool:
 def _pools_words() -> str:
     """The book's pool range in words: "$150k and up" or "$75k-$300k"."""
     lo, hi = config.KARTHIK_BOOK_POOLS
-    short_lo, letters = config.KARTHIK_SHORT_NAME_POOL
+    short_hi, letters = config.KARTHIK_SHORT_NAME_POOL
     words = f"${lo // 1000}k and up" if hi is None else f"${lo // 1000}k-${hi // 1000}k"
-    return f"{words} (${short_lo // 1000}k and up for names of {letters} letters or fewer)"
+    return f"{words} (names of {letters} letters or fewer below ${short_hi // 1000}k)"
 
 
 def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
@@ -1914,7 +1914,7 @@ _PUMPFUN_DAY_SQL = text("""
         where first_seen_at >= :a and first_seen_at < :b) as launches,
       count(m.mint) as graduations,
       coalesce(sum(p.liq), 0) as pools_usd,
-      count(*) filter (where p.liq >= 50000) as pools_50k,
+      count(*) filter (where p.liq >= 40000) as pools_40k,
       (select avg(sol_usd_at_open) from grad_paper_positions
         where book = 'KARTHIK_QUIET_5M' and opened_at >= :a and opened_at < :b) as sol_usd
     from grad_migrations m
@@ -1938,7 +1938,7 @@ async def _pumpfun_day(db: AsyncSession, day: date, sol_now: Decimal | None) -> 
                             str((Decimal(row.graduations * GRADUATION_SOL) * Decimal(sol))
                                 .quantize(Decimal(1)))),
         "pools_usd": str(Decimal(row.pools_usd).quantize(Decimal(1))),
-        "pools_50k": int(row.pools_50k),
+        "pools_40k": int(row.pools_40k),
     }
 
 
@@ -2048,15 +2048,15 @@ async def pumpfun_days(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
 
 #: FLOOR TEST (Karthik, 2026-10-11: "yes start the comparison", after three
 #: weak days of small-pool rugs). The book's own trades from this moment on,
-#: re-weighted per variant at $50 a trade: forward only, so nothing here is
+#: re-weighted per variant at $100 a trade (was $50 until 2026-10-24): forward only, so nothing here is
 #: chosen with hindsight. Since 1 Oct (hindsight) the plain $50k+ rule led:
 #: +$435 vs +$329 ($55k), +$250 ($60k), +$343 (half size on $50-60k).
 FLOOR_TEST_FROM = datetime(2026, 10, 11, 20, 0, tzinfo=UTC)   # 00:00 Dubai, 12 Oct
 FLOOR_TEST = (
-    ("today", "Today's rule: $50k+", lambda pool: 1.0),
-    ("floor55", "Floor $55k", lambda pool: 0.0 if pool < 55_000 else 1.0),
+    ("today", "Today's rule: $40k+ (short names under $50k)", lambda pool: 1.0),
+    ("floor50", "Floor $50k (the rule before 24 Oct)", lambda pool: 0.0 if pool < 50_000 else 1.0),
     ("floor60", "Floor $60k", lambda pool: 0.0 if pool < 60_000 else 1.0),
-    ("half_small", "Half size on $50-60k", lambda pool: 0.5 if pool < 60_000 else 1.0),
+    ("half_small", "Half size on $40-50k", lambda pool: 0.5 if pool < 50_000 else 1.0),
 )
 
 
@@ -2069,7 +2069,7 @@ def _floor_test(rows: Sequence[Any]) -> dict[str, Any]:
                     "trades": sum(1 for k, _ in xs if k > 0),
                     "rugs": sum(1 for k, r in xs
                                 if k > 0 and r <= float(config.OPERATOR_RUG_MOVE)),
-                    "usd": round(sum(50 * k * r for k, r in xs), 2)})
+                    "usd": round(sum(100 * k * r for k, r in xs), 2)})
     return {"since": FLOOR_TEST_FROM, "lines": out}
 
 async def _no_open_buy(db: AsyncSession, rows: Sequence[Any]) -> set[str]:
@@ -2204,11 +2204,8 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     # Since 2026-10-03 it reaches below $75k, so it reads his $50-75k arm too.
     lo, hi = config.KARTHIK_BOOK_POOLS
     skip_lo, skip_hi = config.KARTHIK_SKIP_POOL_USD
-    short_lo = config.KARTHIK_SHORT_NAME_POOL[0]
     every = [r for r in sorted([*small, *signals], key=_opened_order)
-             if (lo <= float(r.liq_open_usd or 0)
-                 or (short_lo <= float(r.liq_open_usd or 0) and config.karthik_short_name(r.symbol)))
-             and (hi is None or float(r.liq_open_usd or 0) < hi)
+             if config.karthik_book_pool(r.liq_open_usd, r.symbol)
              and not skip_lo <= float(r.liq_open_usd or 0) < skip_hi
              and not (config.KARTHIK_SKIP_AI_POOL_USD[0] <= float(r.liq_open_usd or 0)
                       < config.KARTHIK_SKIP_AI_POOL_USD[1] and pl.ai_name(r.symbol))]
@@ -2241,7 +2238,9 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     # in 50k pool lab as per new rules"): the book's skips on every pool size,
     # in the book's order, and each size staking like the book.
     grid = [r for r in sorted([*small, *signals], key=_opened_order)
-            if not skip_lo <= float(r.liq_open_usd or 0) < skip_hi
+            if (float(r.liq_open_usd or 0) >= config.KARTHIK_SHORT_NAME_POOL[0]
+                or config.karthik_short_name(r.symbol))
+            and not skip_lo <= float(r.liq_open_usd or 0) < skip_hi
             and not (config.KARTHIK_SKIP_AI_POOL_USD[0] <= float(r.liq_open_usd or 0)
                      < config.KARTHIK_SKIP_AI_POOL_USD[1] and pl.ai_name(r.symbol))]
     grid = [r for r in await moneyblock.without_crew(db, grid, datetime.now(UTC))
@@ -2269,8 +2268,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     # book's own stake, as if there were always cash for it.
     kept_ids = {p.id for p in rows}
     refused = [r for r in sorted([*small, *signals], key=_opened_order)
-               if lo <= float(r.liq_open_usd or 0) and (hi is None or float(r.liq_open_usd or 0) < hi)
-               and r.id not in kept_ids]
+               if config.karthik_book_pool(r.liq_open_usd, r.symbol) and r.id not in kept_ids]
     refused_walk = _funded_walk(
         [(p.opened_at, p.closed_at, float(p.net_return),
           float(p.impact_open or 0), float(p.impact_close or 0)) for p in refused],

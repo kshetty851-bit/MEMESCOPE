@@ -10,9 +10,9 @@ describe("money into pump.fun, day by day", () => {
         graduationSol={85}
         days={[
           { day: "2026-09-30", running: true, launches: 24916, graduations: 739,
-            into_curves_usd: "7487688", pools_usd: "45733826", pools_50k: 44 },
+            into_curves_usd: "7487688", pools_usd: "45733826", pools_40k: 44 },
           { day: "2026-09-29", running: false, launches: 36717, graduations: 1048,
-            into_curves_usd: "10565641", pools_usd: "59638802", pools_50k: 89 },
+            into_curves_usd: "10565641", pools_usd: "59638802", pools_40k: 89 },
         ]}
       />,
     );
