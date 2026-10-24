@@ -661,7 +661,7 @@ export function RuleBook({ data }: { data: KarthikBook }) {
       ? `${sizeWords(data.tickets_by_pool)}${data.tickets_by_pool.length === 1 ? " on every coin" : ""}, from a ${usd(data.capital_usd)} balance${data.tickets_by_pool.length > 1 ? ": more where the profit is (small pools), less where it is thin" : ""}.${data.quiet_stake && data.quiet_stake[1] !== data.tickets_by_pool[0]?.[1] ? ` A quiet small-pool coin (at most ${data.quiet_stake[0]} buys in the 5 minutes before) gets $${data.quiet_stake[1]}: those earned about five times more.` : ""}`
       : `${usd(data.ticket_usd)} per trade, from a ${usd(data.capital_usd)} balance.`],
     data.pump_catcher
-      ? ["Sells", `The moment it is up ${data.pump_catcher.target_pct}% (at the next price reading), otherwise ${data.pump_catcher.hold_min} minutes after buying. No stop-loss.`]
+      ? ["Sells", `The moment it is up ${data.pump_catcher.target_pct}% (at the next price reading).${data.pump_catcher.check_min ? ` If it is down at ${data.pump_catcher.check_min} minutes it sells then, like Karthik's Lab;` : ""} otherwise ${data.pump_catcher.hold_min} minutes after buying. No stop-loss.`]
       : ["Always sells", `Exactly ${data.hold_minutes} minutes after buying. No price targets, no stop-loss — the clock decides.`],
     ["The risk", `If a coin's creator drains the pool (a “rug”), that trade loses almost all of it.${rugEvery ? ` So far about 1 in ${rugEvery} trades.` : ""}`],
     ["Paper money", data.pump_catcher
@@ -1176,8 +1176,8 @@ export function KarthikLabPage({ variant = "karthik" }: { variant?: "karthik" | 
         {data.pump_catcher ? (
           <p className="mt-1 max-w-[78ch] rounded-lg border border-accent/40 bg-accent/[0.06] px-3 py-2 text-[13px] leading-relaxed text-ink-2">
             <b className="text-ink">The same coins and rules as Karthik&apos;s Lab, one difference:</b> each trade is sold the moment
-            it is up {data.pump_catcher.target_pct}% (at the next price reading), otherwise at {data.pump_catcher.hold_min} minutes,
-            instead of always at 5. Chosen on 24 Oct after testing about 55 exits on these coins, so only trades from 24 Oct on
+            it is up {data.pump_catcher.target_pct}% (at the next price reading); one that is down at {data.pump_catcher.check_min ?? 5} minutes
+            sells then, and anything else at {data.pump_catcher.hold_min} minutes, instead of always at 5. Chosen on 24 Oct after testing about 55 exits on these coins, so only trades from 24 Oct on
             test it. {data.pump_catcher.settling ? `${data.pump_catcher.settling} newest trades are still settling.` : ""}
           </p>
         ) : null}

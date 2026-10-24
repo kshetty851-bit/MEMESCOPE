@@ -2220,6 +2220,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
         rows, small = pump_catcher.reprice(rows, priced), pump_catcher.reprice(small, priced)
         capital = pump_catcher.CAPITAL
         pump = {"target_pct": round(100 * pump_catcher.TARGET), "hold_min": pump_catcher.HOLD_S // 60,
+                "check_min": pump_catcher.CHECK_S // 60,
                 "priced": len(rows) + len(small), "settling": before - len(rows) - len(small)}
     # Every $75k+ signal his arm took: what the grid beside the book reads.
     signals = rows
@@ -2316,7 +2317,8 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
         "rule": (("Pump Catcher — Karthik's coins" if pump else "Karthik's book")
                  + f" — every graduation with a {_pools_words()} pool that is "
                  f"still quiet (under {config.QUIET_MAX_POOL_TXS} trades) when it is bought, "
-                 + (f"out at +{pump['target_pct']}% or {pump['hold_min']}m" if pump else f"out at {arm.hold}m")),
+                 + (f"out at +{pump['target_pct']}%, at {pump['check_min']}m if down there, else {pump['hold_min']}m"
+                    if pump else f"out at {arm.hold}m")),
         "pump_catcher": pump,
         "pools_usd": list(config.KARTHIK_BOOK_POOLS),
         "short_name_pool": list(config.KARTHIK_SHORT_NAME_POOL),
