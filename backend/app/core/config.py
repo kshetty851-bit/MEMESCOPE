@@ -687,11 +687,6 @@ class Settings(BaseSettings):
     #: actionable. Off by default: a copy lab that began at deploy time would
     #: have no honest start date.
     FEATURE_PUMPFUN_LAB_ENABLED: bool = False
-    #: FOMO Lab: fomo.family's 24h top 20, one shared $500 paper book. Its own
-    #: flag only (not FEATURE_LAB_ENABLED, which revives the retired labs), and
-    #: it also needs FOMO_API_KEY. Swaps come from the free public node.
-    FEATURE_FOMO_LAB_ENABLED: bool = False
-    FOMO_API_KEY: SecretStr = SecretStr("")
     #: OpenAI text-to-speech for the newsroom TV's anchor (2026-10-20). Empty
     #: means the TV shows "off air" and nothing is called.
     OPENAI_API_KEY: SecretStr = SecretStr("")
