@@ -70,13 +70,8 @@ export const NAV_GROUPS: NavGroup[] = [
       // pump.fun launches climbing the bonding curve. Watch only, like the
       // NSE tracker below — no book, nothing ranked — so it is named for what
       // it records rather than for a strategy it does not have.
-      {
-        href: "/pretrade-ai",
-        label: "Pre-trade AI Lab",
-        icon: IconSpark,
-        status: "ready",
-        note: "Advisory score review. Isolated from strategies and wallets.",
-      },
+      // Pre-trade AI Lab: off the menu 2026-10-24 (Karthik: "fix all 3") -- its
+      // container is stopped (0 trades in 4 weeks); the page and its data stay.
       // Karthik's own book: his money on one rule, judged thirty days after it
       // started. Its own destination rather than a ninth panel on the
       // graduation board, so that his money's record and a pre-registered

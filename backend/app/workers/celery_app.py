@@ -63,6 +63,7 @@ celery_app = Celery(
         # The track record page (2026-10-22).
         "app.track_record.scheduler",
         "app.labs.graduation.pump_catcher_scheduler",
+        "app.services.journey_refresh",
         # Long-watch Lab (2026-10-22): 48-hour readings + Runner / Second Wind books.
         "app.labs.longwatch.scheduler",
     ],

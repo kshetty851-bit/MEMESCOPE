@@ -250,3 +250,42 @@ def test_the_sweep_is_scheduled_and_cannot_take_the_beat_down():
     assert handlers
     assert not any(isinstance(n, ast.Raise) for h in handlers for n in ast.walk(h))
     assert "pg_try_advisory_xact_lock" in ast.unparse(fn)
+
+
+async def test_one_member_refused_does_not_stop_the_others(monkeypatch):
+    """2026-10-24: the public RPC 403s getTokenAccountsByOwner in a burst; one
+    refusal used to abort every later member and drop the owner's result."""
+    from types import SimpleNamespace
+
+    from app.real_wallet import account_close, family_wallets
+    from app.real_wallet import scheduler as rw_scheduler
+
+    class Session:
+        async def scalar(self, _q): return True                       # the lock
+        async def scalars(self, _q): return SimpleNamespace(all=lambda: ["A", "B"])
+        async def rollback(self): return None
+
+    class Factory:
+        async def __aenter__(self): return Session()
+        async def __aexit__(self, *a): return False
+
+    swept: list[str | None] = []
+
+    async def sweep(session, wallet=None):
+        swept.append(wallet)
+        if wallet == "A":
+            raise RuntimeError("403")
+        return SimpleNamespace(closed=["x"] if wallet == "B" else [], refused=[],
+                               as_dict=lambda: {"closed": 1})
+
+    async def accounts(_s):
+        return [SimpleNamespace(member="USER1", wallet="A"), SimpleNamespace(member="USER2", wallet="B"),
+                SimpleNamespace(member="USER3", wallet="C")]
+
+    monkeypatch.setattr(rw_scheduler, "SessionFactory", Factory)
+    monkeypatch.setattr(rw_scheduler, "CLOSE_MEMBER_SPACING_S", 0)
+    monkeypatch.setattr(account_close, "sweep", sweep)
+    monkeypatch.setattr(family_wallets, "accounts", accounts)
+    out = await rw_scheduler._real_wallet_close_empty_accounts()
+    assert swept == [None, "A", "B"]                  # owner, A refused, B still swept, C never traded
+    assert out["family"] == {"USER2": {"closed": 1}} and "failed" not in out
