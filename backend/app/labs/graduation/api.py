@@ -1593,33 +1593,29 @@ def _karthik_line(rows: Sequence[Any], sol: Decimal | None, *, size: float,
     }
 
 
-#: Karthik, 2026-10-20: "if we used 3 user wallets with 500$ each ... month
-#: wise". Karthik, same day: "shud show profit based on the karthik lab rule" -
-#: so each stakes exactly what the lab stakes ($100 under $150k, $25 above),
-#: every wallet in every coin one after another, the later ones paying the
-#: queue's impact. Karthik, 2026-10-20: "change to 2 wallets"; 2026-10-24: "change this
-#: 3 user wallets x 300$".
-FAMILY_WALLETS, FAMILY_START = 3, 300.0
+#: Karthik, 2026-10-20: "if we used 3 user wallets with 500$ each": each wallet
+#: stakes exactly what the lab stakes, every wallet in every coin one after
+#: another, the later ones paying the queue's impact. 2026-10-24: "show profit
+#: of all wallets wat if we have 2, 3, 4 user wallets etc upto 10 in one big box
+#: and also show day 30 expected value" -- one row per count, $300 each.
+FAMILY_START, FAMILY_MAX = 300.0, 10
+FAMILY_DAYS = 30
 
 
-def _family_months(rows: Sequence[Any], buys_before: dict,
-                   sol: Decimal | None) -> dict[str, Any]:
-    """Karthik Lab's own trades on `FAMILY_WALLETS` user wallets of `FAMILY_START`, profit by Dubai month."""
+def _wallet_run(rows: Sequence[Any], buys_before: dict, sol: Decimal | None,
+                n: int) -> list[dict[str, Any]]:
+    """`n` user wallets of `FAMILY_START` on the book's trades: each wallet's
+    profit, in the order the queue reaches them (USER 1 buys first)."""
     from app.labs.graduation import pool_lab as pl
 
-    wallets = [pl.Wallet(f"USER {i}", cash=FAMILY_START, low=FAMILY_START)
-               for i in range(1, FAMILY_WALLETS + 1)]
-    months: dict[str, dict[str, Any]] = {}
+    wallets = [pl.Wallet(f"USER {i}", cash=FAMILY_START, low=FAMILY_START) for i in range(1, n + 1)]
+    rugs = {w.name: 0 for w in wallets}
     base = float(config.PAPER_NOTIONAL_USD)
     for r in sorted(rows, key=_opened_order):
         stake = config.karthik_ticket(r.liq_open_usd, buys_before.get(r.id))
         for w in wallets:
             w.settle_until(r.opened_at)
-        ready = sorted((w for w in wallets if w.cash >= stake),
-                       key=lambda w: (w.last_buy, w.name))
-        month = (r.closed_at + DUBAI).strftime("%Y-%m")
-        m = months.setdefault(month, {"month": month, "trades": 0, "rugs": 0, "pnl_usd": 0.0,
-                                      "pnl_sol": 0.0})
+        ready = sorted((w for w in wallets if w.cash >= stake), key=lambda w: (w.last_buy, w.name))
         for place, w in enumerate(ready):
             k = pl.queue_k(place, stake)
             multiple = (pl.legs_multiple(float(r.net_return), (float(r.impact_open or 0),
@@ -1629,35 +1625,33 @@ def _family_months(rows: Sequence[Any], buys_before: dict,
             w.held.append((r.closed_at, multiple, stake))
             w.trades += 1
             w.last_buy = r.opened_at
-            m["trades"] += 1
-            m["rugs"] += float(r.net_return) <= float(config.OPERATOR_RUG_MOVE)
-            m["pnl_usd"] += stake * (multiple - 1)
-            if sol:
-                m["pnl_sol"] += stake * (multiple - 1) / _sol_of(r, float(sol))
+            rugs[w.name] += float(r.net_return) <= float(config.OPERATOR_RUG_MOVE)
     for w in wallets:
         w.settle_until(datetime.max.replace(tzinfo=UTC))
-    total = sum(w.cash for w in wallets)
-    return {
-        "wallets": FAMILY_WALLETS, "start_usd": FAMILY_START,
-        "tickets_by_pool": [list(t) for t in config.KARTHIK_TICKETS_BY_POOL],
-        "balance_usd": round(total, 2),
-        "pnl_usd": round(total - FAMILY_START * FAMILY_WALLETS, 2),
-        "months": [{**m, "pnl_usd": round(m["pnl_usd"], 2), "pnl_sol": round(m["pnl_sol"], 4)}
-                   for m in sorted(months.values(), key=lambda m: m["month"])],
-        **(_family_in_sol(rows, months, float(sol)) if sol and rows else {}),
-    }
+    out = [{"pnl_usd": round(w.cash - FAMILY_START, 2), "trades": w.trades, "rugs": rugs[w.name]}
+           for w in wallets]
+    return sorted(out, key=lambda x: -x["pnl_usd"])
 
 
-def _family_in_sol(rows: Sequence[Any], months: dict[str, dict[str, Any]],
-                   sol_now: float) -> dict[str, Any]:
-    """The wallets' total as SOL, valued at SOL's price now (see `_in_sol`)."""
-    first = _sol_of(min(rows, key=_opened_order), sol_now)
-    start_sol = FAMILY_START * FAMILY_WALLETS / first
-    pnl_sol = sum(m["pnl_sol"] for m in months.values())
-    worth = (start_sol + pnl_sol) * sol_now
-    return {"pnl_sol": round(pnl_sol, 4), "balance_sol": round(start_sol + pnl_sol, 4),
-            "sol_usd_now": round(sol_now, 2), "worth_usd_now": round(worth, 2),
-            "pnl_usd_now": round(worth - FAMILY_START * FAMILY_WALLETS, 2)}
+def _wallet_counts(rows: Sequence[Any], buys_before: dict, sol: Decimal | None,
+                   start: datetime, now: datetime) -> dict[str, Any]:
+    """1 to `FAMILY_MAX` user wallets on the book's trades, now and at day 30.
+
+    Day 30 is the pace so far carried forward: profit per elapsed day x 30.
+    """
+    elapsed = max((now - start).total_seconds() / 86400, 1.0)
+    counts = []
+    for n in range(1, FAMILY_MAX + 1):
+        each = _wallet_run(rows, buys_before, sol, n)
+        pnl = sum(w["pnl_usd"] for w in each)
+        put_in = FAMILY_START * n
+        day30 = pnl / elapsed * FAMILY_DAYS
+        counts.append({"wallets": n, "put_in_usd": put_in, "per_wallet": each,
+                       "pnl_usd": round(pnl, 2), "balance_usd": round(put_in + pnl, 2),
+                       "return_pct": round(100 * pnl / put_in, 1),
+                       "day30_pnl_usd": round(day30, 2), "day30_balance_usd": round(put_in + day30, 2)})
+    return {"start_usd": FAMILY_START, "days_elapsed": round(elapsed, 1), "days_target": FAMILY_DAYS,
+            "tickets_by_pool": [list(t) for t in config.KARTHIK_TICKETS_BY_POOL], "counts": counts}
 
 
 def _fresh_entry(row: Any) -> bool:
@@ -2305,7 +2299,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
         "pools_since": config.KARTHIK_BOOK_POOLS_AT,
         "floor_test": _floor_test(rows),
         # Three $500 user wallets on the same trades, month by month (2026-10-20).
-        "family": _family_months(rows, buys_before, sol),
+        "wallet_counts": _wallet_counts(rows, buys_before, sol, spec.start, datetime.now(UTC)),
         "start_dates": _start_dates(rows, sol, ticket=float(spec.ticket_usd),
                                     capital=float(spec.capital_usd),
                                     now=datetime.now(UTC), cents=Decimal("0.01"),

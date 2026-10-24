@@ -1364,3 +1364,64 @@
   .live-ticker__track { animation: none; }
   .live-ticker__dot { animation: none; }
 }
+
+/* Karthik Lab: 1-10 user wallets box (2026-10-24). */
+.wallet-counts {
+  position: relative;
+  overflow: hidden;
+  border-radius: 1rem;
+  border: 1px solid var(--color-line);
+  background: linear-gradient(160deg, rgb(94 234 255 / 0.06), transparent 45%), var(--color-surface);
+  padding: 1.1rem 1.1rem 0.9rem;
+}
+.wallet-counts__glow {
+  position: absolute;
+  right: -6rem;
+  top: -7rem;
+  width: 18rem;
+  height: 18rem;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgb(167 139 250 / 0.18), transparent 70%);
+  pointer-events: none;
+}
+.wallet-counts__row { border-top: 1px solid rgb(127 127 127 / 0.14); transition: background 160ms ease; }
+.wallet-counts__row:hover { background: rgb(127 127 127 / 0.06); }
+.wallet-counts__row.is-best { background: rgb(52 211 153 / 0.08); }
+.wallet-counts__n {
+  display: inline-grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 999px;
+  border: 1px solid var(--color-line);
+  font-weight: 600;
+  color: var(--color-ink);
+}
+.wallet-counts__row.is-best .wallet-counts__n { border-color: var(--color-up); color: var(--color-up); }
+.wallet-counts__track {
+  position: relative;
+  flex: 1;
+  min-width: 6rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: rgb(127 127 127 / 0.12);
+  overflow: hidden;
+}
+.wallet-counts__bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #22b8d6, #7c5cff 60%, #e2559b);
+  animation: wallet-bar-grow 900ms cubic-bezier(.2,.8,.2,1) both;
+}
+@keyframes wallet-bar-grow { from { width: 0 !important; } }
+.wallet-counts__chip {
+  border-radius: 0.375rem;
+  border: 1px solid rgb(52 211 153 / 0.35);
+  background: rgb(52 211 153 / 0.08);
+  padding: 0 0.35rem;
+  font-size: 11px;
+  color: var(--color-ink-2);
+}
+.wallet-counts__chip.is-down { border-color: rgb(248 113 113 / 0.45); background: rgb(248 113 113 / 0.08); }
+@media (prefers-reduced-motion: reduce) { .wallet-counts__bar { animation: none; } }
