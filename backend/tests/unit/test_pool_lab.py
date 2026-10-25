@@ -255,6 +255,6 @@ def test_labs_block_a_rugged_name_12h_but_real_wallets_keep_their_own_setting() 
     from app.labs.graduation import config
     from app.real_wallet.driver import RealWalletDriver
     assert config.KARTHIK_LAB_RUGGED_NAME_BAN is True and config.KARTHIK_RUGGED_NAME_HOURS == 12
-    assert config.REAL_WALLET_RUGGED_NAME_BAN is False
+    assert config.KARTHIK_WALLET_RUGGED_NAME_BAN is False
     src = inspect.getsource(RealWalletDriver._bad_name)
-    assert "REAL_WALLET_RUGGED_NAME_BAN" in src and "KARTHIK_LAB_RUGGED_NAME_BAN" not in src
+    assert "KARTHIK_WALLET_RUGGED_NAME_BAN" in src and "KARTHIK_LAB_RUGGED_NAME_BAN" not in src

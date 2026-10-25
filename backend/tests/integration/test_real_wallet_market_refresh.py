@@ -212,3 +212,200 @@ async def test_a_lab_reading_is_judged_by_the_providers_own_rule(db_session):
     snapshot = await MarketSnapshotRepository(db_session).latest_for_mint(MINT)
     assert snapshot is not None
     assert snapshot.trading_status is TradingStatus.INACTIVE
+
+# October 25 regression: an old pump.fun curve can still be listed while the
+# graduation lab already sees the real PumpSwap pool and its liquidity.
+class PoolProvider(Provider):
+    def __init__(self, *, pool="old-pump-curve", liquidity=None, price="0.00004168"):
+        super().__init__()
+        self.pool = pool
+        self.liquidity = liquidity
+        self.price = price
+
+    async def fetch_many(self, mint_addresses):
+        self.calls.append(list(mint_addresses))
+        return {
+            m: MarketData(
+                mint_address=m,
+                price_usd=Decimal(self.price),
+                liquidity_usd=None if self.liquidity is None else Decimal(self.liquidity),
+                dex_name="pumpfun" if self.pool != LAB_PAIR else "pumpswap",
+                pool_address=self.pool,
+                trading_status=TradingStatus.TRADING,
+                provider=self.name,
+                observed_at=NOW,
+            )
+            for m in mint_addresses
+        }
+
+
+async def test_old_curve_with_price_but_no_liquidity_uses_canonical_lab_pool(db_session):
+    await _token(db_session)
+    taken = await _lab_poll(db_session, age_s=7, liquidity="52425.49")
+    reading = await ensure_fresh(
+        db_session, MINT, now=NOW, provider=PoolProvider(), pool_address=LAB_PAIR
+    )
+    assert reading == ("refreshed_from_lab", taken)
+    row = await MarketSnapshotRepository(db_session).latest_for_mint(
+        MINT, pool_address=LAB_PAIR
+    )
+    assert row is not None and row.liquidity_usd == Decimal("52425.49")
+    assert row.provider == LAB_PROVIDER
+    assert (
+        await MarketSnapshotRepository(db_session).latest_for_mint(
+            MINT, pool_address="old-pump-curve"
+        )
+        is None
+    )
+
+
+async def test_wrong_pool_with_positive_liquidity_is_not_accepted(db_session):
+    await _token(db_session)
+    await _lab_poll(db_session, age_s=3)
+    reading = await ensure_fresh(
+        db_session,
+        MINT,
+        now=NOW,
+        provider=PoolProvider(liquidity="999999"),
+        pool_address=LAB_PAIR,
+    )
+    assert reading.status == "refreshed_from_lab"
+    row = await MarketSnapshotRepository(db_session).latest_for_mint(
+        MINT, pool_address=LAB_PAIR
+    )
+    assert row is not None and row.pool_address == LAB_PAIR
+
+
+async def test_no_valid_canonical_reading_cannot_write_a_wrong_pool(db_session):
+    await _token(db_session)
+    reading = await ensure_fresh(
+        db_session,
+        MINT,
+        now=NOW,
+        provider=PoolProvider(liquidity="999999"),
+        pool_address=LAB_PAIR,
+    )
+    assert reading.status == "no_reading"
+    assert await MarketSnapshotRepository(db_session).latest_for_mint(MINT) is None
+
+
+async def test_correct_provider_pool_still_wins(db_session):
+    await _token(db_session)
+    await _lab_poll(db_session, age_s=3)
+    reading = await ensure_fresh(
+        db_session,
+        MINT,
+        now=NOW,
+        provider=PoolProvider(pool=LAB_PAIR, liquidity="80000"),
+        pool_address=LAB_PAIR,
+    )
+    assert reading.status == "refreshed"
+    row = await MarketSnapshotRepository(db_session).latest_for_mint(
+        MINT, pool_address=LAB_PAIR
+    )
+    assert row is not None and row.provider == "fake"
+
+
+@pytest.mark.parametrize("liquidity", [None, "0"])
+async def test_current_but_unusable_cache_is_not_reused(db_session, liquidity):
+    from app.models.market import TokenMarketSnapshot
+
+    token = await _token(db_session)
+    db_session.add(
+        TokenMarketSnapshot(
+            token_id=token.id,
+            mint_address=MINT,
+            captured_at=NOW - timedelta(seconds=1),
+            price_usd=Decimal(".001227"),
+            liquidity_usd=None if liquidity is None else Decimal(liquidity),
+            pool_address=LAB_PAIR,
+            dex_name="pumpswap",
+            provider="test",
+            trading_status=TradingStatus.TRADING,
+        )
+    )
+    await db_session.flush()
+    provider = PoolProvider(pool=LAB_PAIR, liquidity="80000", price=".001227")
+    reading = await ensure_fresh(
+        db_session, MINT, now=NOW, provider=provider, pool_address=LAB_PAIR
+    )
+    assert provider.calls == [[MINT]]
+    assert reading.status == "refreshed"
+
+
+async def test_repository_selects_older_right_pool_over_newer_wrong_pool(db_session):
+    from app.models.market import TokenMarketSnapshot
+
+    token = await _token(db_session)
+    for age, pool in [(7, LAB_PAIR), (0, "old-pump-curve")]:
+        db_session.add(
+            TokenMarketSnapshot(
+                token_id=token.id,
+                mint_address=MINT,
+                captured_at=NOW - timedelta(seconds=age),
+                price_usd=Decimal(".001227"),
+                liquidity_usd=Decimal("52425.49"),
+                pool_address=pool,
+                dex_name="pumpswap",
+                provider="test",
+                trading_status=TradingStatus.TRADING,
+            )
+        )
+    await db_session.flush()
+    repo = MarketSnapshotRepository(db_session)
+    assert (await repo.latest_for_mint(MINT)).pool_address == "old-pump-curve"
+    assert (await repo.latest_for_mint(MINT, pool_address=LAB_PAIR)).pool_address == LAB_PAIR
+
+
+async def test_lab_fallback_ignores_other_pool_and_future_rows(db_session):
+    from app.real_wallet.market_refresh import _lab_reading
+
+    await _token(db_session)
+    good = await _lab_poll(db_session, age_s=10)
+    await _lab_poll(db_session, age_s=-1)
+    db_session.add(
+        GradPostgradSample(
+            ts=NOW - timedelta(seconds=1),
+            mint=MINT,
+            source="dexscreener",
+            pair_address="other",
+            dex_id="pumpswap",
+            price_usd=Decimal(".001227"),
+            liquidity_usd=Decimal("1000000"),
+        )
+    )
+    await db_session.flush()
+    result = await _lab_reading(db_session, MINT, now=NOW, pool_address=LAB_PAIR)
+    assert (
+        result is not None and result.observed_at == good and result.pool_address == LAB_PAIR
+    )
+
+
+async def test_suspect_pool_reading_is_not_unquarantined(db_session):
+    from app.models.market import TokenMarketSnapshot
+
+    token = await _token(db_session)
+    db_session.add(
+        TokenMarketSnapshot(
+            token_id=token.id,
+            mint_address=MINT,
+            captured_at=NOW,
+            price_usd=Decimal(".001227"),
+            liquidity_usd=Decimal("80000"),
+            pool_address=LAB_PAIR,
+            dex_name="pumpswap",
+            provider="test",
+            trading_status=TradingStatus.TRADING,
+            suspect=True,
+            suspect_reason="pair_switch",
+        )
+    )
+    await db_session.flush()
+    reading = await ensure_fresh(
+        db_session, MINT, now=NOW, provider=Provider(listed=False), pool_address=LAB_PAIR
+    )
+    assert reading.status == "no_reading"
+    assert (
+        await MarketSnapshotRepository(db_session).latest_for_mint(MINT, pool_address=LAB_PAIR)
+        is None
+    )
