@@ -46,6 +46,7 @@ class Observation:
     graduated_at: datetime | None = None
     entry_buys: int | None = None
     entry_sells: int | None = None
+    creator: str | None = None
 
     @property
     def fresh65(self) -> bool:
@@ -85,7 +86,7 @@ class Observation:
 def snapshot() -> tuple[datetime, tuple[Observation, ...]]:
     """An audited, immutable export keeps a cold API off a 7m-row history scan."""
     data = json.loads(gzip.decompress(SEED.read_bytes()))
-    if data["version"] != 3:
+    if data["version"] != 4:
         raise ValueError("Unsupported Pool Sprint snapshot")
     records = tuple(
         Observation(
@@ -106,6 +107,7 @@ def snapshot() -> tuple[datetime, tuple[Observation, ...]]:
             graduated_at=datetime.fromisoformat(r[14]) if r[14] else None,
             entry_buys=r[15],
             entry_sells=r[16],
+            creator=r[17],
         )
         for r in data["records"]
     )
@@ -123,6 +125,7 @@ def walk(
     ticket: Decimal = TICKET,
     cost: Decimal = D(0),
     details: bool = False,
+    creator_block: bool = True,
 ) -> dict[str, Any]:
     """Reinvest proceeds only WHEN received; an overdue unknown reserves its stake.
 
@@ -151,6 +154,10 @@ def walk(
     day_data: dict[str, dict[str, Any]] = {}
     trade_rows: dict[str, dict[str, Any]] = {}
     skipped_rows: list[dict[str, Any]] = []
+    creator_blocked_rows: list[dict[str, Any]] = []
+    blocked_creators: dict[str, datetime] = {}
+    block_events: list[tuple[datetime, str]] = []
+    blocked_entries = 0
 
     def day(at: datetime) -> dict[str, Any]:
         key = at.astimezone(DUBAI).date().isoformat()
@@ -164,6 +171,7 @@ def walk(
                 "unpriced": 0,
                 "rugs": 0,
                 "skipped": 0,
+                "creator_skipped": 0,
                 "pnl": D(0),
             },
         )
@@ -186,6 +194,15 @@ def walk(
                 priced_profit += pnl
                 wins += pnl > 0
                 rugs += pnl <= -ticket / 2
+                if creator_block and r.creator and pnl <= -ticket / 2:
+                    # A candle fallback is not selected until the deadline.
+                    # Never let that future decision blacklist an earlier buy.
+                    known_at = (
+                        max(at, r.opened_at + DEADLINE)
+                        if (r.source == "geckoterminal_candle_close")
+                        else at
+                    )
+                    heapq.heappush(block_events, (known_at, r.creator))
                 d["priced"] += 1
                 d["rugs"] += pnl <= -ticket / 2
                 dex += r.source == "dexscreener"
@@ -203,10 +220,31 @@ def walk(
                     source=r.source if priced else None,
                     exit_price=str(r.exit_price) if priced else None,
                 )
+        while block_events and block_events[0][0] <= until:
+            known_at, creator = heapq.heappop(block_events)
+            blocked_creators.setdefault(creator, known_at)
 
     for r in rows:
         settle(r.opened_at)
         d = day(r.opened_at)
+        if creator_block and r.creator and r.creator in blocked_creators:
+            blocked_entries += 1
+            d["creator_skipped"] += 1
+            if details:
+                creator_blocked_rows.append(
+                    {
+                        "mint": r.mint,
+                        "symbol": r.symbol,
+                        "name": r.name,
+                        "pair": r.pair,
+                        "creator": r.creator,
+                        "opened_at": r.opened_at.isoformat(),
+                        "pool_usd": str(r.liquidity),
+                        "blocked_since": blocked_creators[r.creator].isoformat(),
+                        "status": "creator_blocked",
+                    }
+                )
+            continue
         if cash < ticket + cost:
             skipped += 1
             d["skipped"] += 1
@@ -237,6 +275,7 @@ def walk(
                 "symbol": r.symbol,
                 "name": r.name,
                 "pair": r.pair,
+                "creator": r.creator,
                 "base_mint": r.base_mint,
                 "quote_mint": r.quote_mint,
                 "quote_symbol": "SOL",
@@ -283,6 +322,8 @@ def walk(
         "signals": len(rows),
         "trades": taken,
         "skipped": skipped,
+        "creator_skipped": blocked_entries,
+        "blocked_creators": len(blocked_creators),
         "closed": closed,
         "open": len(pending),
         "unpriced": reserved,
@@ -309,6 +350,7 @@ def walk(
             reverse=True,
         )
         result["skipped_list"] = list(reversed(skipped_rows))
+        result["creator_blocked_list"] = list(reversed(creator_blocked_rows))
     return result
 
 
@@ -331,6 +373,7 @@ def report(observations: list[Observation], as_of: datetime) -> dict[str, Any]:
                         "trades",
                         "rugs",
                         "skipped",
+                        "creator_skipped",
                     ]
                 },
             }
@@ -353,6 +396,7 @@ def report(observations: list[Observation], as_of: datetime) -> dict[str, Any]:
                         "trades",
                         "rugs",
                         "skipped",
+                        "creator_skipped",
                     ]
                 }
             )
@@ -369,6 +413,7 @@ def report(observations: list[Observation], as_of: datetime) -> dict[str, Any]:
                     "pnl_usd",
                     "trades",
                     "skipped",
+                    "creator_skipped",
                     "rugs",
                     "lowest_usd",
                 ]
@@ -397,11 +442,13 @@ def report(observations: list[Observation], as_of: datetime) -> dict[str, Any]:
         "unverified_pools": sum(not r.pair_evidence for r in observations),
         "excluded_entry_rule": sum(r.sol_pair and not r.fresh65 for r in observations),
         "entry_rule": "FRESH_30S_BUYS_65PCT",
+        "creator_rule": "BLOCK_AFTER_FIRST_OBSERVED_50PCT_LOSS",
         "name": "Pool Sprint Lab",
         "book": "POOL_SPRINT_5M",
         "rule": (
             "Verified token/SOL only; $10k-$40k at first recorded liquidity; "
             "first seen within 30s of graduation; at least 65% buy transactions; "
+            "block a creator after its first observed 50% loss; "
             "$50 per trade; sell after five minutes"
         ),
         "started_at": START.isoformat(),

@@ -27,7 +27,7 @@ async def isolated(monkeypatch):
             text(
                 "CREATE TABLE grad_tokens "
                 "(mint varchar PRIMARY KEY, symbol varchar, name varchar, "
-                "migrated_at timestamptz)"
+                "migrated_at timestamptz, creator varchar)"
             )
         )
         await c.execute(
@@ -65,14 +65,20 @@ async def isolated(monkeypatch):
         buys=65,
         sells=35,
         age=10,
+        creator=None,
     ):
         async with factory() as s:
             await s.execute(
                 text(
-                    "INSERT INTO grad_tokens (mint,migrated_at) VALUES (:mint,:at) "
+                    "INSERT INTO grad_tokens (mint,migrated_at,creator) "
+                    "VALUES (:mint,:at,:creator) "
                     "ON CONFLICT DO NOTHING"
                 ),
-                {"mint": mint, "at": START + timedelta(seconds=seconds - age)},
+                {
+                    "mint": mint,
+                    "at": START + timedelta(seconds=seconds - age),
+                    "creator": creator,
+                },
             )
             await s.execute(
                 text("""INSERT INTO grad_postgrad_samples
@@ -241,3 +247,25 @@ async def test_unverified_entry_is_not_traded_and_can_be_verified_later(isolated
     await api.refresh(START + timedelta(minutes=11))
     assert api._book["trades"] == 0 and api._book["excluded_non_sol"] == 1
     assert api._book["balance_usd"] == "500.00"
+
+
+@pytest.mark.asyncio
+async def test_creator_identity_is_read_and_blocked_rows_are_separate(isolated):
+    await isolated("rug", 10, creator="A")
+    await isolated("rug", 310, price="0.5", creator="A")
+    await isolated("next", 311, creator="A")
+    await api.refresh(START + timedelta(minutes=10))
+    assert api._book["trades"] == 1 and api._book["creator_skipped"] == 1
+    assert api._book["skipped"] == 0
+    app = FastAPI()
+    app.include_router(api.router, prefix="/labs/graduation")
+    # Freeze refresh scheduling: this route check observes only the prepared cache.
+    api._last_attempt = __import__("time").monotonic()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        b = (await client.get("/labs/graduation/pool-sprint")).json()
+        assert "creator_blocked_list" not in b
+        rs = (
+            await client.get("/labs/graduation/pool-sprint/trades?status=creator_blocked")
+        ).json()
+        assert rs["total"] == 1 and rs["trades"][0]["creator"] == "A"
+        assert rs["trades"][0]["mint"] == "next"

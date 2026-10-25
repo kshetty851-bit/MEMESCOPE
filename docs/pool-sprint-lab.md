@@ -22,6 +22,15 @@ Separate, read-only paper replay. Route `/pool-sprint-lab`; API
   times. Use integer comparison `100 * buys >= 65 * (buys + sells)`.
   Never qualify an entry from later readings. Every comparison ledger uses
   this same filter. Entry checks are included in trades and the CSV.
+- **Creator block:** after an account's own funded, priced trade loses 50%
+  or more, refuse all later tokens from that exact recorded creator address.
+  The block is permanent within the replay. Activate only when the loss is
+  observed at exit; a candle fallback cannot activate it before the seven-minute
+  deadline. Previously opened trades are not cancelled. Unpriced reserves and
+  unknown creators never create a block; unknown wallets are not grouped.
+  Each start-date, size and cost comparison has its own funded trade history.
+  The daily table and summary count creator refusals separately from cash skips;
+  `/trades?status=creator_blocked` lists the refused entries and activation times.
 - Admit a mint only when its **first** positive-liquidity DexScreener pool
   observation is at least $10,000 and below $40,000. A token initially observed
   above the band cannot qualify by falling into it later. A positive entry
@@ -73,8 +82,8 @@ production-derived records, historical account results or real snapshot fixtures
 The bootstrap contains observations from the requested October start through a
 fixed export timestamp. Its fields are mint, exact pool, entry time/price/liquidity,
 metadata, exit time/price, source and candle start; the header includes schema
-version (3, requiring base/quote mints, verification evidence, graduation time
-and original entry buy/sell counts), export cutoff
+version (4, requiring base/quote mints, verification evidence, graduation time,
+original entry buy/sell counts and recorded creator address), export cutoff
 and the source export checksum. Legacy snapshots are refused. The source CSV and full
 reconciliation stay private. Tests in this repository use synthetic records.
 

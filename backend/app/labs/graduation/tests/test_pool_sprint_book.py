@@ -180,3 +180,54 @@ def test_same_account_matches_all_current_comparison_cells():
         for key in ["balance_usd", "pnl_usd", "trades", "rugs", "skipped", "lowest_usd"]:
             assert comp[key] == r[key]
     assert abs(sum(D(b["pnl_usd"]) for b in r["bands"]) - D(r["pnl_usd"])) <= D("0.02")
+
+
+def test_creator_block_starts_at_close_not_at_the_earlier_buy():
+    rows = [
+        replace(coin("rug", ret="-0.5"), creator="A"),
+        replace(coin("already_open", minute=4), creator="A"),
+        replace(coin("later", minute=5), creator="A"),
+        coin("unknown", minute=6),
+    ]
+    b = walk(rows, as_of=START + timedelta(minutes=20), details=True)
+    assert b["trades"] == 3 and b["creator_skipped"] == 1 and b["skipped"] == 0
+    assert b["creator_blocked_list"][0]["mint"] == "later"
+    assert (
+        b["creator_blocked_list"][0]["blocked_since"]
+        == (START + timedelta(minutes=5)).isoformat()
+    )
+
+
+def test_candle_rug_is_not_known_until_the_seven_minute_deadline():
+    rows = [
+        replace(coin("rug", ret="-0.5"), creator="A", source="geckoterminal_candle_close"),
+        replace(coin("before_deadline", minute=6), creator="A"),
+        replace(coin("at_deadline", minute=7), creator="A"),
+    ]
+    b = walk(rows, as_of=START + timedelta(minutes=20), details=True)
+    assert b["trades"] == 2 and b["creator_skipped"] == 1
+    assert b["creator_blocked_list"][0]["mint"] == "at_deadline"
+
+
+def test_unpriced_exit_or_sub50_percent_loss_does_not_trigger_creator_block():
+    rows = [
+        replace(coin("gap"), creator="A", exit_price=None, exited_at=None),
+        replace(coin("under_threshold", ret="-0.49"), creator="B"),
+        replace(coin("nextA", minute=10), creator="A"),
+        replace(coin("nextB", minute=10), creator="B"),
+    ]
+    b = walk(rows, as_of=START + timedelta(minutes=20), cost=D(1))
+    assert b["trades"] == 4 and b["creator_skipped"] == 0 and b["blocked_creators"] == 0
+
+
+def test_creator_history_belongs_to_each_funded_scenario():
+    rows = [
+        replace(coin("rug", ret="-0.5"), creator="A"),
+        replace(coin("next", minute=24 * 60 + 1), creator="A"),
+    ]
+    full = walk(rows, as_of=START + timedelta(days=2))
+    later = walk(rows, start=START + timedelta(days=1), as_of=START + timedelta(days=2))
+    assert full["creator_skipped"] == 1
+    assert later["creator_skipped"] == 0 and later["trades"] == 1
+    excluded = [replace(rows[0], entry_buys=0), rows[1]]
+    assert walk(excluded, as_of=START + timedelta(days=2))["creator_skipped"] == 0

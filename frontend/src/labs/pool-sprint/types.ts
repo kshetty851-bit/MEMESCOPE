@@ -1,4 +1,5 @@
 export interface SprintSummary {
+  creator_skipped?: number;
   capital_usd: string;
   ticket_usd: string;
   cost_usd: string;
@@ -11,6 +12,7 @@ export interface SprintSummary {
 }
 
 export interface SprintDay {
+  creator_skipped?: number;
   date: string;
   n: number;
   running: boolean;
@@ -28,6 +30,8 @@ export interface SprintDay {
 }
 
 export interface SprintTrade {
+  creator?: string | null;
+  blocked_since?: string;
   graduated_at?: string | null;
   entry_buys?: number | null;
   entry_sells?: number | null;
@@ -43,7 +47,7 @@ export interface SprintTrade {
   pool_usd: string;
   entry_price?: string;
   exit_price?: string | null;
-  status: "priced" | "unpriced" | "open" | "cash_skipped";
+  status: "priced" | "unpriced" | "open" | "cash_skipped" | "creator_blocked";
   pct?: string | null;
   pnl_usd?: string | null;
   rugged?: boolean;
@@ -59,6 +63,8 @@ export interface SprintTrades {
 }
 
 export interface SprintBook extends SprintSummary {
+  blocked_creators?: number;
+  creator_rule?: string;
   excluded_entry_rule?: number;
   entry_rule?: string;
   pool_candidates?: number;

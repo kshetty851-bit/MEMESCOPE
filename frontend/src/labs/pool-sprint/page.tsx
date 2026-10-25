@@ -46,6 +46,10 @@ export function SprintRules({ data }: { data: SprintBook }) {
       `${usd(data.ticket_usd)} per token from ${usd(data.capital_usd)}. Several trades can overlap. Sale proceeds become available only when the simulated sale happens; an unaffordable entry is skipped.`,
     ],
     [
+      "Creator block",
+      "After one of this account's funded trades closes at a loss of 50% or more, refuse future coins from the same recorded creator wallet permanently. Never block an earlier entry using a later result. Missing exits do not trigger a block; a candle-based result triggers it only after minute 7. Each comparison account learns from its own funded trades. Unknown creators are not grouped together.",
+    ],
+    [
       "Sells",
       "Five minutes after entry, at the first positive same-pool DexScreener reading from minute 5 through minute 7. If none exists, use the first same-pool minute candle closing in that window. No target or stop-loss.",
     ],
@@ -130,9 +134,11 @@ export function SprintTradeRow({ trade: t }: { trade: SprintTrade }) {
             ? "Still open"
             : t.status === "cash_skipped"
               ? "Skipped · no free cash"
-              : t.source === "geckoterminal_candle_close"
-                ? "Minute candle close"
-                : "DexScreener quote"}
+              : t.status === "creator_blocked"
+                ? "Skipped · creator rugged before"
+                : t.source === "geckoterminal_candle_close"
+                  ? "Minute candle close"
+                  : "DexScreener quote"}
         {t.rugged ? <span className="ml-1 text-down">· rug</span> : null}
       </td>
     </tr>
@@ -214,6 +220,7 @@ function Trades({ day, onClear }: { day: string | null; onClear: () => void }) {
               <option value="unpriced">Unpriced exits</option>
               <option value="open">Still open</option>
               <option value="cash_skipped">Cash skips</option>
+              <option value="creator_blocked">Creator blocks</option>
             </select>
           </label>
           {q.isLoading ? (
@@ -286,8 +293,8 @@ export function PoolSprintContent({ data: d }: { data: SprintBook }) {
           <p className="mt-1 max-w-[78ch] text-[13px] leading-relaxed text-ink-dim">
             {usd(d.capital_usd)} at {usd(d.ticket_usd)} a trade · verified SOL pairs ·
             $10k–$40k pools · first seen within 30 seconds · at least 65% buy transactions ·
-            sell after 5 minutes. Replayed from{" "}
-            <b className="text-ink">1 October 2026, midnight Dubai</b>. Paper only.
+            sell after 5 minutes · block creators after their first observed rug. Replayed
+            from <b className="text-ink">1 October 2026, midnight Dubai</b>. Paper only.
           </p>
           <p className="mt-2 text-[12px] text-ink-dim">
             SOL-only replay: {(d.excluded_non_sol ?? 0).toLocaleString()} non-SOL or
@@ -376,6 +383,11 @@ export function PoolSprintContent({ data: d }: { data: SprintBook }) {
           value={d.skipped.toLocaleString()}
           hint={`${d.trades.toLocaleString()} funded entries · ${d.unpriced} unpriced exits`}
         />
+        <Figure
+          label="Skipped · creator block"
+          value={(d.creator_skipped ?? 0).toLocaleString()}
+          hint="Refused after this account observed the creator's first rug"
+        />
       </div>
 
       <SprintRules data={d} />
@@ -432,6 +444,7 @@ export function PoolSprintContent({ data: d }: { data: SprintBook }) {
                   "Unpriced",
                   "Rugs",
                   "Cash skips",
+                  "Creator blocks",
                   "Profit",
                   "Balance",
                 ].map((h) => (
@@ -458,6 +471,7 @@ export function PoolSprintContent({ data: d }: { data: SprintBook }) {
                   <td className={td}>{r.unpriced}</td>
                   <td className={`${td} text-down`}>{r.rugs}</td>
                   <td className={td}>{r.skipped}</td>
+                  <td className={td}>{r.creator_skipped ?? 0}</td>
                   <td className={`${td} ${tone(r.pnl_usd)}`}>{signed(r.pnl_usd)}</td>
                   <td className={td}>{usd(r.balance_usd)}</td>
                 </tr>

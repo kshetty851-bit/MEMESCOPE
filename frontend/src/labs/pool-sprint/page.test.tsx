@@ -67,6 +67,33 @@ function setup() {
 }
 
 describe("Pool Sprint paper account", () => {
+  it("shows creator refusals separately and filters their entries", () => {
+    hooks.trades.mockReturnValue({
+      data: {
+        total: 1,
+        trades: [
+          {
+            mint: "blocked",
+            symbol: "Test",
+            creator: "creatorA",
+            pair: "pair",
+            opened_at: "2026-10-02T00:00:00Z",
+            pool_usd: "15000",
+            status: "creator_blocked",
+          },
+        ],
+      },
+      isLoading: false,
+    });
+    render(<PoolSprintContent data={{ ...book, creator_skipped: 2 }} />);
+    expect(screen.getByText("Skipped · creator block")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show ▾" }));
+    fireEvent.change(screen.getByLabelText("Trade status"), {
+      target: { value: "creator_blocked" },
+    });
+    expect(hooks.trades).toHaveBeenLastCalledWith(null, "creator_blocked", 0);
+    expect(screen.getByText("Skipped · creator rugged before")).toBeInTheDocument();
+  });
   it("explains SOL-only exclusions and a cash-starved account", () => {
     hooks.trades.mockReturnValue({ data: { total: 0, trades: [] }, isLoading: false });
     render(

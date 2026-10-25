@@ -34,7 +34,7 @@ WITH first_recent AS MATERIALIZED (
  AND s.ts>:since AND s.ts<=:now
  ORDER BY s.mint,s.ts
 )
-SELECT c.*,t.symbol,t.name,t.migrated_at FROM first_recent c
+SELECT c.*,t.symbol,t.name,t.migrated_at,t.creator FROM first_recent c
 LEFT JOIN grad_tokens t ON t.mint=c.mint
 WHERE c.liquidity_usd>=10000 AND c.liquidity_usd<40000 AND c.price_usd>0
 AND NOT EXISTS (
@@ -103,6 +103,7 @@ async def refresh(now: datetime | None = None) -> None:
                         graduated_at=r["migrated_at"],
                         entry_buys=r["txns_m5_buys"],
                         entry_sells=r["txns_m5_sells"],
+                        creator=r["creator"],
                     ),
                 )
             # Never substitute a different pool. Refresh all unresolved observations,
@@ -195,18 +196,30 @@ async def current() -> dict[str, Any]:
 @router.get("")
 async def get_book() -> dict[str, Any]:
     data = await current()
-    return {k: v for k, v in data.items() if k not in {"trades_list", "skipped_list"}}
+    return {
+        k: v
+        for k, v in data.items()
+        if k not in {"trades_list", "skipped_list", "creator_blocked_list"}
+    }
 
 
 @router.get("/trades")
 async def get_trades(
     day: str | None = None,
-    status: str = Query("all", pattern="^(all|priced|unpriced|open|cash_skipped|rugs)$"),
+    status: str = Query(
+        "all", pattern="^(all|priced|unpriced|open|cash_skipped|creator_blocked|rugs)$"
+    ),
     offset: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=250),
 ) -> dict[str, Any]:
     data = await current()
-    rows = data["skipped_list"] if status == "cash_skipped" else data["trades_list"]
+    rows = (
+        data["skipped_list"]
+        if status == "cash_skipped"
+        else data["creator_blocked_list"]
+        if status == "creator_blocked"
+        else data["trades_list"]
+    )
     if day:
         from app.labs.graduation.pool_sprint_book import DUBAI
 
@@ -243,6 +256,7 @@ async def get_csv() -> Response:
         "symbol",
         "name",
         "pair",
+        "creator",
         "base_mint",
         "quote_mint",
         "quote_symbol",
