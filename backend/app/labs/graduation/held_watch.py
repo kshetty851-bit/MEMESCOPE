@@ -29,7 +29,7 @@ import base64
 import json
 import struct
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -262,6 +262,76 @@ class EarlyWatch:
                 "first_seen_at": first_at, "first_depth_usd": first_depth,
                 "crossed_at": at, "price_native": price,
                 "depth_usd": depth, "sol_usd": quote_usd}
+
+
+@dataclass
+class FirstMinute:
+    """Every new pumpswap pool, read from the migration for `window_s`.
+
+    A swap moves both vaults and the socket reports them one at a time, so a
+    price read between the two is half a swap. A slot's state is only kept
+    once a LATER slot arrives (or the window closes): by then both sides of
+    every swap in it have landed. One row per slot whose price changed.
+    """
+
+    window_s: float
+    #: mint -> (migrated_at, migration signature)
+    due: dict[str, tuple[datetime, str]] = field(default_factory=dict)
+    #: mint -> the newest state not yet known complete: (slot, first heard, held copy)
+    pending: dict[str, tuple[int, datetime, Held]] = field(default_factory=dict)
+    last_price: dict[str, Decimal] = field(default_factory=dict)
+
+    def add(self, mint: str, migrated_at: datetime, signature: str) -> None:
+        self.due.setdefault(mint, (migrated_at, signature))
+
+    def drop(self, mint: str) -> list[dict[str, Any]]:
+        """Stop watching; the last state is complete now, so it is kept."""
+        rows = self._close(mint)
+        self.due.pop(mint, None)
+        self.last_price.pop(mint, None)
+        return rows
+
+    def expire(self, now: datetime) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for mint, (at, _) in list(self.due.items()):
+            if (now - at).total_seconds() > self.window_s:
+                rows += self.drop(mint)
+        return rows
+
+    def observe(self, held: Held, at: datetime) -> list[dict[str, Any]]:
+        if held.mint not in self.due or not held.base or not held.quote:
+            return []
+        rows = self._close(held.mint) if (
+            held.mint in self.pending and held.slot > self.pending[held.mint][0]) else []
+        if held.mint not in self.pending:
+            self.pending[held.mint] = (held.slot, at, replace(held))
+        else:
+            copy = self.pending[held.mint][2]
+            copy.base, copy.quote = held.base, held.quote
+        return rows
+
+    def _close(self, mint: str) -> list[dict[str, Any]]:
+        got = self.pending.pop(mint, None)
+        entry = self.due.get(mint)
+        if got is None or entry is None:
+            return []
+        slot, at, held = got
+        if not held.base or not held.quote:
+            return []
+        base = Decimal(held.base).scaleb(-held.base_decimals)
+        # Vaults only. The pool's virtual quote field read 17.58 SOL on some new
+        # pools and 2^64 minus a few million lamports on others (25 Oct dry
+        # run), so it is kept raw, as a signed number, and never folded in here.
+        price = held.quote_whole() / base
+        if self.last_price.get(mint) == price:
+            return []
+        self.last_price[mint] = price
+        v = held.virtual_quote
+        return [{"mint": mint, "pool": held.pool, "slot": slot, "ts": at,
+                 "migrated_at": entry[0], "price_native": price,
+                 "quote_reserve": held.quote_whole(), "base_reserve": base,
+                 "virtual_quote": v - 2**64 if v >= 2**63 else v,
+                 "sol_quoted": held.quote_mint == config.WSOL_MINT}]
 
 
 @dataclass(slots=True)

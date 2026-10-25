@@ -39,6 +39,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
@@ -366,6 +367,40 @@ class GradEarlyOpen(Base):
     price_native: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
     depth_usd: Mapped[Decimal] = mapped_column(Numeric(24, 2), nullable=False)
     sol_usd: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
+
+
+class GradFirstMinute(Base):
+    """Every new pumpswap pool's price from its own vaults, slot by slot, for
+    `FIRST_MINUTE_WINDOW_S` after the migration (Karthik, 2026-10-25).
+
+    Research rows for the first-seconds test: DexScreener's first quote lands
+    35-50 s after graduation and is often a cached copy, so it cannot say what
+    a buy 1-10 s in would have paid. `ts` is when this process heard the slot,
+    `migrated_at` when it heard the migration; both are availability times.
+    Nothing reads this table to trade.
+    """
+
+    __tablename__ = "grad_first_minute"
+    __table_args__ = (
+        UniqueConstraint("mint", "slot", name="uq_grad_first_minute_mint_slot"),
+        Index("ix_grad_first_minute_ts", "ts"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    mint: Mapped[str] = mapped_column(_ADDRESS, nullable=False)
+    pool: Mapped[str] = mapped_column(_ADDRESS, nullable=False)
+    slot: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    migrated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    #: Quote per whole token from the two vaults alone.
+    price_native: Mapped[Decimal] = mapped_column(_PRICE, nullable=False)
+    #: Real reserves, whole units: what a buy's price impact is computed from.
+    quote_reserve: Mapped[Decimal] = mapped_column(Numeric(30, 9), nullable=False)
+    base_reserve: Mapped[Decimal] = mapped_column(Numeric(30, 6), nullable=False)
+    #: The pool's virtual quote field, raw lamports, read as SIGNED: its meaning
+    #: on new pools is unproven (see `FirstMinute._close`).
+    virtual_quote: Mapped[int] = mapped_column(Numeric(30, 0), nullable=False)
+    sol_quoted: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
 
 class GradOperator(Base):
