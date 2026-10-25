@@ -20,6 +20,7 @@ TICKET = D(50)
 HOLD = timedelta(minutes=5)
 DEADLINE = timedelta(minutes=7)
 SEED = Path(__file__).with_name("data") / "pool_sprint_oct_2026.json.gz"
+WSOL_MINT = "So11111111111111111111111111111111111111112"
 
 
 def money(value: Decimal) -> str:
@@ -39,6 +40,15 @@ class Observation:
     exit_price: Decimal | None = None
     source: str | None = None
     candle_start_at: datetime | None = None
+    base_mint: str | None = None
+    quote_mint: str | None = None
+    pair_evidence: str | None = None
+
+    @property
+    def sol_pair(self) -> bool:
+        return bool(
+            self.base_mint == self.mint and self.quote_mint == WSOL_MINT and self.pair_evidence
+        )
 
     @property
     def priced(self) -> bool:
@@ -54,7 +64,7 @@ class Observation:
 def snapshot() -> tuple[datetime, tuple[Observation, ...]]:
     """An audited, immutable export keeps a cold API off a 7m-row history scan."""
     data = json.loads(gzip.decompress(SEED.read_bytes()))
-    if data["version"] != 1:
+    if data["version"] != 2:
         raise ValueError("Unsupported Pool Sprint snapshot")
     records = tuple(
         Observation(
@@ -69,6 +79,9 @@ def snapshot() -> tuple[datetime, tuple[Observation, ...]]:
             exit_price=D(r[8]) if r[8] else None,
             source=r[9],
             candle_start_at=datetime.fromisoformat(r[10]) if r[10] else None,
+            base_mint=r[11],
+            quote_mint=r[12],
+            pair_evidence=r[13],
         )
         for r in data["records"]
     )
@@ -101,6 +114,7 @@ def walk(
             if start <= r.opened_at <= as_of
             and r.entry_price > 0
             and D(10000) <= r.liquidity < D(40000)
+            and r.sol_pair
         ),
         key=lambda r: (r.opened_at, r.mint),
     )
@@ -198,6 +212,10 @@ def walk(
                 "symbol": r.symbol,
                 "name": r.name,
                 "pair": r.pair,
+                "base_mint": r.base_mint,
+                "quote_mint": r.quote_mint,
+                "quote_symbol": "SOL",
+                "pair_evidence": r.pair_evidence,
                 "opened_at": r.opened_at.isoformat(),
                 "closed_at": None,
                 "pool_usd": str(r.liquidity),
@@ -344,10 +362,16 @@ def report(observations: list[Observation], as_of: datetime) -> dict[str, Any]:
         )
     return {
         **base,
+        "pool_candidates": len(observations),
+        "excluded_non_sol": sum(
+            bool(r.pair_evidence) and not r.sol_pair for r in observations
+        ),
+        "unverified_pools": sum(not r.pair_evidence for r in observations),
         "name": "Pool Sprint Lab",
         "book": "POOL_SPRINT_5M",
         "rule": (
-            "$10k-$40k at first recorded liquidity; $50 per trade; sell after five minutes"
+            "Verified token/SOL only; $10k-$40k at first recorded liquidity; "
+            "$50 per trade; sell after five minutes"
         ),
         "started_at": START.isoformat(),
         "as_of": as_of.isoformat(),

@@ -12,7 +12,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.labs.graduation import pool_sprint as api
-from app.labs.graduation.pool_sprint_book import START, Observation
+from app.labs.graduation.pool_sprint_book import START, WSOL_MINT, Observation
 
 
 @pytest.fixture
@@ -37,6 +37,11 @@ async def isolated(monkeypatch):
     factory = async_sessionmaker(engine, expire_on_commit=False)
     monkeypatch.setattr(api, "SessionFactory", factory)
     monkeypatch.setattr(api, "snapshot", lambda: (START, ()))
+
+    async def identities(pairs):
+        return {pair: (mint, WSOL_MINT, "synthetic_test") for pair, mint in pairs.items()}
+
+    monkeypatch.setattr(api, "verify_pairs", identities)
     for name, value in [
         ("_records", None),
         ("_book", None),
@@ -146,7 +151,17 @@ async def test_unprovisioned_snapshot_returns_503_without_inventing_a_balance(mo
 
 @pytest.mark.asyncio
 async def test_routes_only_read_and_paginate_and_csv_escapes_metadata(monkeypatch):
-    c = Observation("mint", "pair", START, Decimal(1), Decimal(15000), symbol="=CMD()")
+    c = Observation(
+        "mint",
+        "pair",
+        START,
+        Decimal(1),
+        Decimal(15000),
+        symbol="=CMD()",
+        base_mint="mint",
+        quote_mint=WSOL_MINT,
+        pair_evidence="synthetic_test",
+    )
     data = api.report([c], START + timedelta(minutes=10))
 
     async def cached():
@@ -168,3 +183,24 @@ async def test_routes_only_read_and_paginate_and_csv_escapes_metadata(monkeypatc
         ).status_code == 422
         csv = await client.get("/labs/graduation/pool-sprint/trades.csv")
         assert "'=CMD()" in csv.text and csv.headers["content-type"].startswith("text/csv")
+
+
+@pytest.mark.asyncio
+async def test_unverified_entry_is_not_traded_and_can_be_verified_later(isolated, monkeypatch):
+    await isolated("coin", 10)
+    await isolated("coin", 320, price=2)
+
+    async def unknown(pairs):
+        return {}
+
+    monkeypatch.setattr(api, "verify_pairs", unknown)
+    await api.refresh(START + timedelta(minutes=10))
+    assert api._book["trades"] == 0 and api._book["unverified_pools"] == 1
+
+    async def non_sol(pairs):
+        return {"coin": ("coin", "SPCX", "synthetic_test")}
+
+    monkeypatch.setattr(api, "verify_pairs", non_sol)
+    await api.refresh(START + timedelta(minutes=11))
+    assert api._book["trades"] == 0 and api._book["excluded_non_sol"] == 1
+    assert api._book["balance_usd"] == "2000.00"

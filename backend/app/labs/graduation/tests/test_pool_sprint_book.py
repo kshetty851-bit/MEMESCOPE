@@ -4,7 +4,7 @@ from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal as D  # noqa: N817
 
-from app.labs.graduation.pool_sprint_book import START, Observation, report, walk
+from app.labs.graduation.pool_sprint_book import START, WSOL_MINT, Observation, report, walk
 
 
 def coin(mint="a", minute=0, ret="0.2", hold=5):
@@ -18,7 +18,23 @@ def coin(mint="a", minute=0, ret="0.2", hold=5):
         exited_at=at + timedelta(minutes=hold),
         exit_price=1 + D(ret),
         source="dexscreener",
+        base_mint=mint,
+        quote_mint=WSOL_MINT,
+        pair_evidence="synthetic_test",
     )
+
+
+def test_sol_filter_refuses_other_quotes_wrong_base_and_unverified_identities():
+    rows = [
+        coin("sol"),
+        replace(coin("spcx"), quote_mint="SPCX"),
+        replace(coin("reverse"), base_mint="other"),
+        replace(coin("unknown"), pair_evidence=None),
+    ]
+    r = report(rows, START + timedelta(minutes=10))
+    assert r["trades"] == 1 and r["pnl_usd"] == "10.00"
+    assert r["excluded_non_sol"] == 2 and r["unverified_pools"] == 1
+    assert r["trades_list"][0]["quote_mint"] == WSOL_MINT
 
 
 def test_a_sale_funds_only_entries_at_or_after_its_exit():

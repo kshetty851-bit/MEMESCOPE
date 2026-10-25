@@ -67,6 +67,23 @@ function setup() {
 }
 
 describe("Pool Sprint paper account", () => {
+  it("explains SOL-only exclusions and a cash-starved account", () => {
+    hooks.trades.mockReturnValue({ data: { total: 0, trades: [] }, isLoading: false });
+    render(
+      <PoolSprintContent
+        data={{
+          ...book,
+          free_cash_usd: "25.00",
+          open: 0,
+          excluded_non_sol: 2,
+          unverified_pools: 1,
+        }}
+      />,
+    );
+    expect(screen.getByText(/SOL-only replay:/)).toHaveTextContent("2 non-SOL");
+    expect(screen.getByText(/The account cannot fund another/)).toHaveTextContent("$25.00");
+    expect(screen.getByText(/base mint must match/)).toBeInTheDocument();
+  });
   it("shows priced profit separately from the reserve-adjusted balance", () => {
     setup();
     expect(screen.getByRole("heading", { name: "Pool Sprint Lab" })).toBeInTheDocument();

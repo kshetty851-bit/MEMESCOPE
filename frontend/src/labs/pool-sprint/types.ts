@@ -28,6 +28,9 @@ export interface SprintDay {
 }
 
 export interface SprintTrade {
+  quote_mint?: string | null;
+  base_mint?: string | null;
+  pair_evidence?: string | null;
   mint: string;
   symbol: string | null;
   name?: string | null;
@@ -53,6 +56,9 @@ export interface SprintTrades {
 }
 
 export interface SprintBook extends SprintSummary {
+  pool_candidates?: number;
+  excluded_non_sol?: number;
+  unverified_pools?: number;
   name: string;
   book: string;
   rule: string;

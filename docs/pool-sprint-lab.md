@@ -5,6 +5,15 @@ Separate, read-only paper replay. Route `/pool-sprint-lab`; API
 
 ## Fixed rules
 
+- **SOL-only correction:** the exact recorded pool must have the candidate as
+  its base mint and wrapped SOL (`So11111111111111111111111111111111111111112`)
+  as its quote mint. Token symbols and the Solana chain label do not prove this.
+  Verify the canonical SOL migration PDA, a decoded PumpSwap account, or exact
+  pool metadata. Unknown identities are excluded and retried; verified non-SOL
+  pools are excluded. Never substitute a later pool or re-enter at a later time.
+  Pool mint identities are immutable; current prices/reserves are not used to
+  decide historical eligibility. This correction recalculates all ledgers.
+
 - Start **1 October 2026, 00:00 Dubai** with **$2,000**, **$50 per token**.
 - Admit a mint only when its **first** positive-liquidity DexScreener pool
   observation is at least $10,000 and below $40,000. A token initially observed
@@ -54,7 +63,8 @@ production-derived records, historical account results or real snapshot fixtures
 The bootstrap contains observations from the requested October start through a
 fixed export timestamp. Its fields are mint, exact pool, entry time/price/liquidity,
 metadata, exit time/price, source and candle start; the header includes schema
-version, export cutoff and the source export checksum. The source CSV and full
+version (2, requiring base/quote mints and verification evidence), export cutoff
+and the source export checksum. Legacy snapshots are refused. The source CSV and full
 reconciliation stay private. Tests in this repository use synthetic records.
 
 The API immediately serves the bootstrap with a visible historical timestamp

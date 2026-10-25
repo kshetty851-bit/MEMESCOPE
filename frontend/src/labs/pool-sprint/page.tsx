@@ -35,7 +35,7 @@ export function SprintRules({ data }: { data: SprintBook }) {
   const rules = [
     [
       "What it buys",
-      "Every token whose first recorded pool liquidity is at least $10,000 and below $40,000. No name, crew, volume, quiet-pool or rugged-name filters.",
+      "Verified token/SOL pools only: the base mint must match the token and the quote mint must be wrapped SOL. The first recorded pool liquidity must be at least $10,000 and below $40,000. Non-SOL and unverified pools are excluded; no later pool is substituted. No name, crew, volume, quiet-pool or rugged-name filters.",
     ],
     [
       "Trade size",
@@ -98,6 +98,7 @@ export function SprintTradeRow({ trade: t }: { trade: SprintTrade }) {
         >
           {t.symbol || `${t.mint.slice(0, 6)}…`} ↗
         </a>
+        <span className="ml-1 text-[11px] text-ink-dim">/ SOL</span>
       </td>
       <td className={td}>{usd(t.pool_usd)}</td>
       <td className={`${td} ${t.pct != null ? tone(t.pct) : "text-ink-dim"}`}>
@@ -268,10 +269,22 @@ export function PoolSprintContent({ data: d }: { data: SprintBook }) {
         <div>
           <h1 className="text-xl font-semibold">Pool Sprint Lab</h1>
           <p className="mt-1 max-w-[78ch] text-[13px] leading-relaxed text-ink-dim">
-            {usd(d.capital_usd)} at {usd(d.ticket_usd)} a trade · $10k–$40k pools · sell
-            after 5 minutes. Replayed from{" "}
+            {usd(d.capital_usd)} at {usd(d.ticket_usd)} a trade · verified SOL pairs ·
+            $10k–$40k pools · sell after 5 minutes. Replayed from{" "}
             <b className="text-ink">1 October 2026, midnight Dubai</b>. Paper only.
           </p>
+          <p className="mt-2 text-[12px] text-ink-dim">
+            SOL-only replay: {(d.excluded_non_sol ?? 0).toLocaleString()} non-SOL or
+            mismatched pools excluded; {(d.unverified_pools ?? 0).toLocaleString()} pools
+            awaiting identity verification. All boxes and tables use the corrected rule.
+          </p>
+          {Number(d.free_cash_usd) < Number(d.ticket_usd) && d.open === 0 ? (
+            <p className="mt-2 rounded-lg border border-down/40 bg-down/10 px-3 py-2 text-[13px] text-ink">
+              The account cannot fund another {usd(d.ticket_usd)} entry: only{" "}
+              {usd(d.free_cash_usd)} remains. Later days can show zero profit because trades
+              were skipped for insufficient cash, not because their prices were flat.
+            </p>
+          ) : null}
           <p className="mt-2 max-w-[78ch] rounded-lg border border-accent/40 bg-accent/[0.06] px-3 py-2 text-[13px] leading-relaxed text-ink-2">
             <b>Before costs, in fixed dollars.</b> Every balance, daily box and table uses
             its own funded replay. Unpriced exits reserve the full stake:{" "}

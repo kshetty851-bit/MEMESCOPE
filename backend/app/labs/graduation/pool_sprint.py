@@ -21,6 +21,7 @@ from sqlalchemy import text
 
 from app.db.session import SessionFactory
 from app.labs.graduation.pool_sprint_book import Observation, report, snapshot
+from app.labs.graduation.pool_sprint_pairs import verify_pairs
 
 router = APIRouter(prefix="/pool-sprint", tags=["pool-sprint-lab"])
 
@@ -139,6 +140,16 @@ async def refresh(now: datetime | None = None) -> None:
                             candle_start_at=e["candle_start"],
                         )
             await db.rollback()
+        # Identity checks never choose a replacement pool or a later entry.
+        # Unknown identities remain excluded and are retried on the next refresh.
+        identities = await verify_pairs(
+            {r.pair: r.mint for r in records.values() if not r.pair_evidence}
+        )
+        for mint, r in list(records.items()):
+            if identity := identities.get(r.pair):
+                records[mint] = replace(
+                    r, base_mint=identity[0], quote_mint=identity[1], pair_evidence=identity[2]
+                )
         built = await asyncio.to_thread(report, list(records.values()), now)
         _records, _book, _watermark, _live_as_of = records, built, now, now
         _error = False
@@ -227,6 +238,10 @@ async def get_csv() -> Response:
         "symbol",
         "name",
         "pair",
+        "base_mint",
+        "quote_mint",
+        "quote_symbol",
+        "pair_evidence",
         "opened_at",
         "closed_at",
         "pool_usd",
