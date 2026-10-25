@@ -15,7 +15,7 @@ from typing import Any
 D = Decimal
 DUBAI = timezone(timedelta(hours=4))
 START = datetime(2026, 9, 30, 20, tzinfo=UTC)
-CAPITAL = D(500)
+CAPITAL = D(1500)
 TICKET = D(50)
 HOLD = timedelta(minutes=5)
 DEADLINE = timedelta(minutes=7)

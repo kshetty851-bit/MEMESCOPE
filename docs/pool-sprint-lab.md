@@ -14,7 +14,7 @@ Separate, read-only paper replay. Route `/pool-sprint-lab`; API
   Pool mint identities are immutable; current prices/reserves are not used to
   decide historical eligibility. This correction recalculates all ledgers.
 
-- Start **1 October 2026, 00:00 Dubai** with **$500**, **$50 per token**.
+- Start **1 October 2026, 00:00 Dubai** with **$1,500**, **$50 per token**.
 - **Fresh + 65% buys:** the original observation must be between 0 and 30
   seconds after `grad_tokens.migrated_at`. Its `txns_m5_buys` must be at least
   65% of `txns_m5_buys + txns_m5_sells`; this is transaction count, not volume.
@@ -41,7 +41,7 @@ Separate, read-only paper replay. Route `/pool-sprint-lab`; API
 - Headline is BEFORE COSTS, in fixed USD; it does not move with SOL's price.
   Cost comparison rows replay their OWN cash limit, not unlimited trades with
   a fee subtracted after the fact. Stake/pool comparisons also run independent
-  $500 ledgers. Independent-account multiples assume no extra market impact.
+  $1,500 ledgers. Independent-account multiples assume no extra market impact.
 - The header explicitly labels recorded-price paper returns and warns that
   delayed-entry research lost money. The strategy was selected after a large
   historical rule search, not independently validated on future trades.
