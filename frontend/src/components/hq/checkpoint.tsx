@@ -67,11 +67,11 @@ function useCheckpoint() {
   });
 }
 
-function useLive(pool?: "10k") {
+function useLive() {
   return useQuery({
-    queryKey: ["hq", "checkpoint", "live", pool ?? "real"],
+    queryKey: ["hq", "checkpoint", "live", "real"],
     // Coin names are cleaned on the way in: this runs on the public homepage.
-    queryFn: () => api.get<LiveBelt>(`/real-wallet/checkpoint/live${pool ? `?pool=${pool}` : ""}`)
+    queryFn: () => api.get<LiveBelt>("/real-wallet/checkpoint/live")
       .then((b) => ({ ...b, coins: b.coins?.map((c) => ({ ...c, symbol: cleanName(c.symbol) ?? null })) })),
     refetchInterval: POLL_MS,
     staleTime: POLL_MS / 2,
@@ -426,8 +426,6 @@ function ManagerDesk({ talk, data, now }: { talk: Line | null; data: Checkpoint 
 }
 
 export function CheckpointOffice({ data, live, now: nowProp, motionOverride, money = {}, mode = "real" }: {
-  /** "pool10k" (2026-10-05): the same thirty checking for the Pool Lab's $10k
-   *  paper book — Diego's floor is $10,000 and a buy is the book's. */
   mode?: Mode;
   data: Checkpoint | undefined;
   live: LiveBelt | undefined;
@@ -487,9 +485,7 @@ export function CheckpointOffice({ data, live, now: nowProp, motionOverride, mon
         <div>
           <h2 className="text-base font-semibold text-ink">The Checkpoint</h2>
           <p className="text-xs text-ink-3">
-            {mode === "pool10k"
-              ? "The same 30 people checking every coin for the $10k paper book — live, as each coin graduates."
-              : "30 people check every coin before the real wallet buys it — live, as each coin graduates."}
+            30 people check every coin before the real wallet buys it — live, as each coin graduates.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-4 text-xs tabular-nums">
@@ -654,7 +650,7 @@ function Hall({ stage, stateOf, data, onBelt, stamp, recentStops, onPick, picked
 
 /** "public" (2026-10-22): the real office on the signed-out homepage, with the
  *  rules' exact numbers blacked out so the filters cannot be copied. */
-type Mode = "real" | "pool10k" | "public";
+type Mode = "real" | "public";
 
 /** Every figure in a rule or a stop reason, blacked out: "pool $18,274, under
  *  $50,000" → "pool ▮▮▮, under ▮▮▮". */
@@ -665,13 +661,7 @@ export function classified(text: string): string {
 /** A person's check in words; Diego's floor follows the office's mode. */
 function jobOf(r: (typeof ROBOTS)[number], mode: Mode): string {
   if (mode === "public") return classified(r.job);
-  return mode === "pool10k" && r.id === "depth" ? "The pool holds at least $10,000" : r.job;
-}
-
-/** The office for the Pool Lab's $10k paper book (2026-10-05). */
-export function CheckpointPool10k({ money }: { money?: { lab?: LabSummary } }) {
-  const live = useLive("10k");
-  return <CheckpointOffice data={undefined} live={live.data} money={money} mode="pool10k" />;
+  return r.job;
 }
 
 export function CheckpointLive({ mode = "real" }: { mode?: Mode } = {}) {

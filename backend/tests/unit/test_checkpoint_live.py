@@ -72,23 +72,3 @@ def test_the_safety_check_stops_it_by_its_first_reason_or_passes_it():
 def test_a_bought_coin_reaches_the_wallet():
     out = where(deep(books={QUIET_BOOK: at(35)}, bought_at=at(45)), at(50))
     assert (out["status"], out["robot"]) == ("bought", "wallet")
-
-
-def test_the_10k_office_buys_with_the_paper_book_and_stops_small_pools():
-    from app.real_wallet.checkpoint_live import where_pool
-
-    small = where_pool(Coin(graduated=GRAD, liquidity=Decimal("8000")), at(40))
-    assert (small["status"], small["robot"]) == ("stopped", "depth")
-    assert small["note"] == "pool $8,000, under $10,000"
-    bought = where_pool(
-        Coin(graduated=GRAD, liquidity=Decimal("15000"), bought_at=at(35)), at(40))
-    assert (bought["status"], bought["robot"]) == ("bought", "wallet")
-    hidden = where_pool(Coin(graduated=GRAD, liquidity=Decimal("15000"), bought_at=at(35),
-                             page_skip="bought by the paper book, but the page skips it: "
-                                       "6 sells before the buy"), at(40))
-    assert hidden["status"] == "stopped" and "6 sells" in hidden["note"]
-    waiting = where_pool(Coin(graduated=GRAD, liquidity=Decimal("15000")), at(40))
-    assert (waiting["status"], waiting["robot"]) == ("checking", "hush")
-    skipped = where_pool(Coin(graduated=GRAD, liquidity=Decimal("30000")), at(40))
-    assert (skipped["status"], skipped["robot"]) == ("stopped", "depth")
-    assert skipped["note"] == "pool $30,000, in the skipped $25k-$50k band"

@@ -704,11 +704,10 @@ ARMS: tuple[Arm, ...] = (
     # condition, a clean operator record. E75 is E75T's matched control, and
     # E75 against BASE_75k_5m is what the seconds are worth. Four minutes
     # because the backtest held four.
-    Arm("E75_4m", "fast75", 4,
-        note="pool's own reserves over $75k within 30s of graduating, "
-             "bought on sight, out at 4m"),
-    Arm("E75T_4m", "fast75_trust", 4,
-        note="as E75_4m, only when the operator's earlier coins (2+) never rugged"),
+    # E75_4m and E75T_4m were DELETED 2026-10-25 (Karthik: "delete 1 2 3 4 5"):
+    # both lost on paper (-$157 and -$66 at $50 since 1 Oct) and the Tape Lab
+    # failed its live test on 20 Oct. `_fill_fast` still RECORDS every deep
+    # graduation's operator: the real wallets' rug checks read those records.
     # Karthik, 2026-09-20: one floor at $25k, liquidity locked, four clocks.
     # A holder cap was asked for and left out on the evidence: of 200 coins
     # over $25k read at the buy, "no wallet over 5%" admits 2 (the launch
@@ -814,33 +813,8 @@ ARMS: tuple[Arm, ...] = (
     Arm("BASE_50k_quiet_5m", "floor50", 5, quiet=True,
         note="every graduation over $50k whose pool is still quiet (under "
              "100 trades) when it is bought, out at 5m"),
-    # Karthik, 2026-10-05: the Pool Lab's live $10k book (`pool_lab`). Out at
-    # 3m since that evening ("revise 10k pool selling at 3m"): it replaced
-    # POOL_10K_QUIET_5M, whose trades `scripts/seed_quiet_4m.py` re-priced at
-    # three minutes into this book.
-    # 2026-10-06: and no $25k-$50k pools (`floor10k_no25_50`). 2026-10-07: and
-    # a 10% stop ("apply -10% stop loss to 10k book"): its tiny-pool rugs drain
-    # over seconds, and a replay of its first 194 trades selling 0-10s after the
-    # stop roughly doubled the book in both halves. `scripts/restop_pool_10k.py`
-    # re-prices its trades from before the stop the same way.
-    # 2026-10-12: the stop came OFF again ("apply it to 10k pool since day 1").
-    # Re-priced on 469 page trades it changed 56: helped 22 (+$449), hurt 34
-    # (-$784), most selling a dip that recovered by three minutes, and its
-    # 7 Oct replay read DexScreener's back-dated marks, which let a stop sell
-    # before a drain it could not yet have seen. `scripts/unstop_pool_10k.py`
-    # re-prices the stopped trades at three minutes.
-    Arm("POOL_10K_QUIET_3M", "floor10k_no25_50", 3, quiet=True,
-        note="every graduation over $10k, except $25k-$50k pools, whose pool "
-             "is still quiet (under 100 trades) when it is bought, out at 3m"),
-    # Karthik, 2026-10-12: the Busy Pool Lab ("set up the busy pool as a
-    # separate lab ... starting today with 200$ and 20$ per trade"). The $10k
-    # book's rule turned inside out: ONLY the pools it refuses as busy (100+
-    # trades), everything else the same. 4,788 such coins were skipped 5-12 Oct
-    # with no record of how they would have done; this is that record.
-    Arm("POOL_10K_BUSY_3M", "floor10k_no25_50", 3, busy=True, stop=Decimal("0.10"),
-        note="every graduation over $10k, except $25k-$50k pools, whose pool "
-             "is already busy (100+ trades) when it is bought, out at 3m or 10% "
-             "below the price paid"),
+    # POOL_10K_QUIET_3M and POOL_10K_BUSY_3M (the Pool Lab's $10k books) were
+    # DELETED 2026-10-25 with the Pool Lab: -$3,478 and -$10,641 at $50.
 )
 
 BY_NAME: dict[str, Arm] = {a.name: a for a in ARMS}
@@ -861,19 +835,18 @@ CONTROLS: tuple[Arm, ...] = tuple(a for a in ARMS if a.is_control)
 #: 2026-10-03: KARTHIK_Q25_5M back, for the $25k+ column on his page, and
 #: BASE_50k_quiet_5m for USER 1's G-Q50.
 #: 2026-10-05: POOL_10K_QUIET_5M for the Pool Lab, the same day made
-#: POOL_10K_QUIET_3M.
-assert len(ARMS) == 17, (
+#: POOL_10K_QUIET_3M. 2026-10-25: the $10k pair and E75/E75T deleted.
+assert len(ARMS) == 13, (
     "the BASELINE, B3 at four and five minutes, the $500k+flow candidate, the "
-    "fast pair E75/E75T, the quiet arms (75k at four and five, 150k, 75-300k), "
+    "quiet arms (75k at four and five, 150k, 75-300k), "
     "the $50k quiet arm, the band's pump-only arm and Karthik's three (KARTHIK_QUIET_5M, "
-    "KARTHIK_Q50_5M, KARTHIK_Q25_5M), the $10k book and its busy twin — "
+    "KARTHIK_Q50_5M, KARTHIK_Q25_5M) — "
     f"not {len(ARMS)}. Retired and deleted "
     "arms' rules stay in ENTRY_RULES, and `_manage` settles what they still "
     "held as `arm_retired`")
-assert {a.hold for a in ARMS} == {3, 4, 5}, (
-    "Three, four and five minutes. Three is the Pool Lab's $10k book alone "
-    "(POOL_10K_QUIET_3M, Karthik 2026-10-05), from entry, on tiny pools whose "
-    "re-priced first 17 trades did best there. The two-minute arms (the A/B pair and BAND_55k_2m) "
+assert {a.hold for a in ARMS} == {4, 5}, (
+    "Four and five minutes. Three was the Pool Lab's $10k book alone, deleted "
+    "with it on 2026-10-25. The two-minute arms (the A/B pair and BAND_55k_2m) "
     "went with every losing arm on 2026-10-01. Before that — from 2026-09-17 — "
     "two "
     "and three counted from GRADUATION rather than from entry, which is a "
@@ -894,10 +867,10 @@ assert all(a.stop is None or a.stop == Decimal("0.10") for a in ARMS), (
     "one stop level, so the twins differ in ONE thing. Sweeping levels here "
     "would be fitting a parameter on the same data that suggested it")
 #: Fifteen since KARTHIK_Q25_5M, BASE_50k_quiet_5m and POOL_10K (2026-10-05);
-#: sixteen with POOL_10K_BUSY_3M (2026-10-12).
-assert len([a for a in ARMS if not a.is_control]) == 16, (
+#: sixteen with POOL_10K_BUSY_3M (2026-10-12); twelve after 2026-10-25.
+assert len([a for a in ARMS if not a.is_control]) == 12, (
     "`config.required_pf` is calibrated on the maximum of FORTY-TWO noise "
-    "draws. Sixteen arms are now judged against it, so the bar is if anything "
+    "draws. Twelve arms are now judged against it, so the bar is if anything "
     "CONSERVATIVE — the luckiest of twelve reaches less than the luckiest "
     "of forty-two. Left as it is deliberately: a bar that is too hard costs a "
     "real finding some time, where one that is too easy costs a false one nothing")
@@ -1515,7 +1488,9 @@ class Tournament:
         the arms buy at this tick's price if the pool holds the $75k floor.
         """
         arms = [a for a in ARMS if a.entry in FAST_ENTRIES]
-        if not arms or self._pool_reader is None or self._operator_reader is None:
+        # No fast arm buys since 2026-10-25, but the operator records below
+        # still feed the real wallets' rug checks, so this keeps running.
+        if self._pool_reader is None or self._operator_reader is None:
             return 0
         await self._label_operators()
         rows = await self._fast_candidates()

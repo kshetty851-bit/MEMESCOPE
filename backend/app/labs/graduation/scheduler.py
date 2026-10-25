@@ -427,33 +427,22 @@ def graduation_pool_lab_tick() -> dict[str, Any]:
 
 
 async def pool_lab_tick() -> dict[str, Any]:
-    """Build the Pool Lab once and leave it in Redis for the API to serve
-    (2026-10-05). A client of its own per run: the API's shared one belongs to
-    another event loop."""
+    """Build the Boost Lab every fifth minute and leave it in Redis for the API.
+    The task kept its Pool Lab name (its beat entry) when the Pool Lab was
+    deleted on 2026-10-25. A client of its own per run: the API's shared one
+    belongs to another event loop."""
     import json
 
     from redis.asyncio import Redis
 
     from app.core.config import settings
-    from app.labs.graduation.api import POOL_LAB_KEY, _pool_lab_build
+    from app.labs.graduation import boost_lab
 
     if not config.enabled():
         return {"skipped": "graduation_disabled"}
-    async with SessionFactory() as session:
-        payload = await _pool_lab_build(session)
-    redis = Redis.from_url(settings.REDIS_URI, decode_responses=True)
-    try:
-        await redis.set(POOL_LAB_KEY, json.dumps(payload, default=str), ex=3600)
-    finally:
-        await redis.aclose()
-    # The Boost Lab rides on the same tick (2026-10-10), in its own session so
-    # a failure there never touches the Pool Lab's write.
-    from app.labs.graduation import boost_lab
-
     boost: dict[str, Any] | None = None
     if datetime.now(UTC).minute % 5:       # every fifth minute: ~2s a build
-        return {"ten_k_coins": payload["ten_k"]["live_coins"],
-                "fifty_k_coins": payload["fifty_k"]["backtest"]["coins"]}
+        return {"boost_coins": None}
     try:
         async with SessionFactory() as session:
             boost = await boost_lab.build(session)
@@ -464,6 +453,4 @@ async def pool_lab_tick() -> dict[str, Any]:
             await redis.aclose()
     except Exception as exc:
         logger.warning("boost_lab_build_failed", error=str(exc)[:300])
-    return {"ten_k_coins": payload["ten_k"]["live_coins"],
-            "fifty_k_coins": payload["fifty_k"]["backtest"]["coins"],
-            "boost_coins": boost["coins_picked"] if boost else None}
+    return {"boost_coins": boost["coins_picked"] if boost else None}

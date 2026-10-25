@@ -2984,13 +2984,7 @@ async def tournament(db: AsyncSession = Depends(get_db)) -> Leaderboard:
     return board
 
 
-# --- Pool Lab (Karthik, 2026-10-05; the maths is in `pool_lab`) ---------------
-
-#: Where the job runner leaves the Pool Lab (`scheduler.pool_lab_tick`): built
-#: ONCE, every 15 minutes, by the worker, never by the API's processes
-#: (2026-10-05: four gunicorn workers each replaying it took the API toward its
-#: 1 GB cap; the replay itself went the same day with the $10k backtest).
-POOL_LAB_KEY = "graduation:pool_lab"
+# --- Shared by the Boost Lab and Karthik Lab's pages ---------------------------
 
 
 async def _pool_rows(db: AsyncSession, books: Sequence[str], since: datetime,
@@ -3024,8 +3018,6 @@ _SELLS_BEFORE_SQL = text("""
     from unnest(cast(:ids as uuid[]), cast(:mints as varchar[]),
                 cast(:ats as timestamptz[])) as x(id, mint, at)
 """)
-
-
 #: Each position's pool buys at its buy: the last 5-minute count read before.
 _BUYS_BEFORE_SQL = text("""
     select x.id, (select g.txns_m5_buys from grad_postgrad_samples g
@@ -3034,164 +3026,6 @@ _BUYS_BEFORE_SQL = text("""
     from unnest(cast(:ids as uuid[]), cast(:mints as varchar[]),
                 cast(:ats as timestamptz[])) as x(id, mint, at)
 """)
-
-
-async def _busy_buyers(db: AsyncSession, rows: Sequence[Any]) -> set[Any]:
-    """Ids of the positions whose pool had more than `MAX_BUYS_BEFORE` buys
-    when bought (2026-10-12). An unknown count is kept."""
-    from app.labs.graduation import pool_lab as pl
-
-    if not rows:
-        return set()
-    found = await db.execute(_BUYS_BEFORE_SQL, {
-        "ids": [r.id for r in rows], "mints": [r.mint for r in rows],
-        "ats": [r.opened_at for r in rows]})
-    return {i for i, buys in found.all() if buys is not None and buys > pl.MAX_BUYS_BEFORE}
-
-
-async def _busy_sellers(db: AsyncSession, rows: Sequence[Any]) -> set[Any]:
-    """Ids of the positions whose pool had more than `MAX_SELLS_BEFORE` sells
-    when bought. An unknown count is kept."""
-    from app.labs.graduation import pool_lab as pl
-
-    if not rows:
-        return set()
-    found = await db.execute(_SELLS_BEFORE_SQL, {
-        "ids": [r.id for r in rows], "mints": [r.mint for r in rows],
-        "ats": [r.opened_at for r in rows]})
-    return {i for i, sells in found.all() if sells is not None and sells > pl.MAX_SELLS_BEFORE}
-
-
-async def _pool_ten_k_book(db: AsyncSession, rows: Sequence[Any], sol: Decimal | None,
-                           cents: Decimal, picked: Sequence[Any] = ()) -> dict[str, Any]:
-    """The $10k book at $50 on $500, laid out like Karthik's Lab (2026-10-05:
-    "10k pool should show open and closed trades too and daily profits and
-    rugs same like karthik lab"): its days, every closed trade, what it holds."""
-    from app.labs.graduation import pool_lab as pl
-
-    rows = sorted(rows, key=_opened_order)
-    walk = _funded_walk([(r.opened_at, r.closed_at, float(r.net_return),
-                          float(r.impact_open or 0), float(r.impact_close or 0)) for r in rows],
-                        sol, ticket=pl.WALLET_TICKET, start=pl.TEN_K_START)
-    took = [(r, m) for r, m in zip(rows, walk.pnl, strict=True) if m is not None]
-    held = (await db.scalars(
-        select(GradPaperPosition)
-        .where(GradPaperPosition.book == pl.TEN_K_BOOK, GradPaperPosition.closed_at.is_(None),
-               GradPaperPosition.excluded.is_(None), GradPaperPosition.opened_at >= pl.START)
-        .order_by(GradPaperPosition.opened_at.desc()))).all()
-    busy = await _busy_sellers(db, held) | await _busy_buyers(db, held)
-    held = [p for p in held if p.id not in busy and not pl.famous_name(p.symbol)
-            and pl.in_entry_window(p)]
-    if picked:   # a coin bought while the 48-hour switch was red is not the book's
-        closed = [r for r in picked if r.closed_at is not None]
-        held = [p for p in held if pl.green(closed, p.opened_at)[0]]
-
-    def move(p: Any) -> Decimal | None:
-        live = net_return(p, p.last_quote)  # after costs, as the trade list's open rows
-        return None if live is None else (100 * live).quantize(cents)
-
-    from app.labs.graduation.tournament import BY_NAME
-
-    return {
-        "ticket_usd": pl.WALLET_TICKET, "capital_usd": pl.TEN_K_START,
-        # The rule book's numbers (Karthik, 2026-10-06: "write rule book in 10k
-        # lab"), from the book itself so the words cannot drift from it.
-        "rules": {"floor_usd": 10_000, "skip_pool_usd": list(pl.SKIP_POOL_USD),
-                  "quiet_max_txs": config.QUIET_MAX_POOL_TXS,
-                  "max_entry_age_s": config.MAX_ENTRY_AGE_S,
-                  "hold_minutes": BY_NAME[pl.TEN_K_BOOK].hold,
-                  "stop_pct": (float(BY_NAME[pl.TEN_K_BOOK].stop * 100)
-                               if BY_NAME[pl.TEN_K_BOOK].stop else None),
-                  "reaction_s": config.EXIT_REACTION_S,
-                  "max_sells_before": pl.MAX_SELLS_BEFORE,
-                  "max_buys_before": pl.MAX_BUYS_BEFORE,
-                  "entry_age_s": list(pl.ENTRY_AGE_S),
-                  "skip_famous": True, "skip_name_len": pl.SKIP_NAME_LEN},
-        "balance_usd": Decimal(str(walk.cash)).quantize(cents),
-        "days": _karthik_days(took, pl.START, pl.TEN_K_START, cents),
-        "start_dates": _start_dates(rows, sol, ticket=pl.WALLET_TICKET, capital=pl.TEN_K_START,
-                                    now=datetime.now(UTC), cents=cents),
-        "closed": [{"symbol": r.symbol, "mint": r.mint, "opened_at": r.opened_at,
-                    "closed_at": r.closed_at, "pool_usd": r.liq_open_usd, **_mcaps(r),
-                    "pct": Decimal(str(100 * float(r.net_return))).quantize(cents),
-                    "pnl_usd": Decimal(str(m)).quantize(cents),
-                    "rugged": float(r.net_return) <= float(config.OPERATOR_RUG_MOVE)}
-                   for r, m in reversed(took)],
-        "open": [{"symbol": p.symbol, "mint": p.mint, "opened_at": p.opened_at,
-                  "pool_usd": p.liq_open_usd, "pct_now": move(p),
-                  "marked_at": p.marked_at}
-                 for p in held],
-    }
-
-
-async def _pool_lab_build(db: AsyncSession) -> dict[str, Any]:
-    from app.labs.graduation import pool_lab as pl
-    now = datetime.now(UTC)
-    cents = Decimal("0.01")
-    sol = await db.scalar(
-        select(GradPostgradSample.price_usd / GradPostgradSample.price_native)
-        # A USDC-quoted pool reads 1.00 here, not SOL's price (2026-10-23:
-        # Karthik Lab's days were valued at $1 a SOL).
-        .where(GradPostgradSample.price_usd > 0, GradPostgradSample.price_native > 0,
-               (GradPostgradSample.price_usd / GradPostgradSample.price_native)
-               .between(config.SOL_USD_MIN, config.SOL_USD_MAX))
-        .order_by(GradPostgradSample.ts.desc()).limit(1))
-
-    def sizes(rows: Sequence[Any]) -> list[dict[str, Any]]:
-        rows = sorted(rows, key=_opened_order)
-        return [{"ticket_usd": t, "capital_usd": pl.TEN_K_RATIO * t,
-                 **_karthik_line(rows, sol, size=float(t), capital=float(pl.TEN_K_RATIO * t), cents=cents)}
-                for t in pl.SIZES]
-
-    lo, hi = pl.SKIP_POOL_USD
-    ten_live = [r for r in await _pool_rows(db, (pl.TEN_K_BOOK,), pl.START, 10_000)
-                if not lo <= float(r.liq_open_usd or 0) < hi]
-    busy = await _busy_sellers(db, ten_live) | await _busy_buyers(db, ten_live)
-    ten_live = [r for r in ten_live if r.id not in busy]
-    famous = [r for r in ten_live if pl.famous_name(r.symbol)]
-    ten_live = [r for r in ten_live if not pl.famous_name(r.symbol)]
-    ten_live = [r for r in ten_live if pl.in_entry_window(r)]
-    # The 48-hour switch (2026-10-21) decides on every coin the rule picked,
-    # bought or not; the book and its size grid hold only what it let through.
-    picked = [r for r in ten_live if not pl.long_name(r.symbol)]
-    ten_live = pl.switched(picked)
-    ten_book = await _pool_ten_k_book(db, ten_live, sol, cents, picked=picked)
-    on, made, n = pl.green([r for r in picked if r.closed_at is not None], now)
-    ten_book["switch"] = {"hours": pl.SWITCH_HOURS, "green": on,
-                          "last_usd": Decimal(str(made)).quantize(cents), "last_trades": n,
-                          "skipped": len(picked) - len(ten_live)}
-    # What the famous-name skip refused, and what each would have done.
-    ten_book["skipped_famous"] = [
-        {"symbol": r.symbol, "mint": r.mint, "opened_at": r.opened_at, "pool_usd": r.liq_open_usd,
-         "pct": Decimal(str(100 * float(r.net_return))).quantize(cents),
-         "rugged": float(r.net_return) <= float(config.OPERATOR_RUG_MOVE)}
-        for r in reversed(famous)]
-
-    # $50k: ten user wallets on Karthik's book's real-time trades.
-    penalty = _size_penalty(pl.WALLET_TICKET, float(config.PAPER_NOTIONAL_USD), sol)
-    fifty = await _pool_rows(db, ("KARTHIK_QUIET_5M", "KARTHIK_Q50_5M"), pl.FROM, 50_000,
-                             skip_repeat=False)
-    fifty = await moneyblock.without_crew(db, fifty, now)
-
-    def trades(rows: Sequence[Any]) -> list[tuple[Any, ...]]:
-        return [(r.opened_at, r.closed_at, float(r.net_return),
-                 (float(r.impact_open or 0), float(r.impact_close or 0))) for r in rows]
-
-    def wallets(rows: Sequence[Any]) -> dict[str, Any]:
-        capped = pl.wallets_payload(pl.ten_wallets(trades(rows), penalty, cap=pl.COIN_CAP))
-        uncapped = pl.wallets_payload(pl.ten_wallets(trades(rows), penalty, cap=None))
-        return {**capped, "uncapped_total_usd": uncapped["total_usd"],
-                "uncapped_pnl_usd": uncapped["pnl_usd"], "coins": len(rows)}
-
-    live50 = [r for r in fifty if r.opened_at >= pl.START]
-    return {
-        "started_at": pl.START, "backtest_from": pl.FROM, "computed_at": now,
-        # Live only since 2026-10-05: no backtest for the $10k book.
-        "ten_k": {"live": sizes(ten_live), "live_coins": len(ten_live), "book": ten_book},
-        "fifty_k": {"backtest": wallets(fifty), "live": wallets(live50),
-                    "ticket_usd": pl.WALLET_TICKET, "start_usd": pl.WALLET_START,
-                    "coin_cap_usd": pl.COIN_CAP},
-    }
 
 
 @router.get("/boost-lab",
@@ -3209,17 +3043,3 @@ async def boost_lab_view() -> dict[str, Any]:
                 "backtest_from": boost_lab.FROM}
     return json.loads(raw)
 
-
-@router.get("/pool-lab",
-            summary="Pool Lab: $10k pools at 10x sizes, $50k pools on ten wallets")
-async def pool_lab_view() -> dict[str, Any]:
-    """What the job runner last built; "computing" until its first pass."""
-    import json
-
-    from app.core.redis import init_redis
-    from app.labs.graduation import pool_lab as pl
-
-    raw = await (await init_redis()).get(POOL_LAB_KEY)
-    if not raw:
-        return {"computing": True, "started_at": pl.START, "backtest_from": pl.FROM}
-    return json.loads(raw)

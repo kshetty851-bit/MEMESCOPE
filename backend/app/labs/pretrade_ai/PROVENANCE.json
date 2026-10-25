@@ -1,7 +1,0 @@
-{
-  "archive": "MEMESCOPE-pretrade-ai-2.zip",
-  "archive_sha256": "38fabd249f34a07a6f537d4b49ee3de53c9535f4438ec75136d50ec7a01ec2d3",
-  "verified_original_files": 37,
-  "integration": "isolated offline lab",
-  "upstream_manifest": "UPSTREAM_MANIFEST.sha256"
-}

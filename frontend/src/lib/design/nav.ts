@@ -90,15 +90,6 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Paper only. Karthik Lab's coins and rules, sold at +30% or 10 minutes instead of 5.",
       },
-      // Karthik, 2026-10-05: small pools at every size, and ten user wallets
-      // sharing the same coins.
-      {
-        href: "/pool-lab",
-        label: "Pool Lab",
-        icon: IconSpark,
-        status: "ready",
-        note: "Paper only. $10k pools at 10x sizes; $50k pools on ten wallets.",
-      },
       // Karthik, 2026-10-10: does paying DexScreener (profile, boosts) pay?
       {
         href: "/boost-lab",
