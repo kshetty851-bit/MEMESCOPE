@@ -84,6 +84,12 @@ _HELD_DEX_FIELDS = ("price_native", "liquidity_usd", "volume_m5_usd",
                     "txns_m5_buys", "txns_m5_sells")
 
 
+def _pool_address(row: parse.MigrationRow) -> str | None:
+    """The pool the chain's migration event names (PumpPortal's names none)."""
+    got = row.raw.get("pool_address") if isinstance(row.raw, dict) else None
+    return got if isinstance(got, str) and got else None
+
+
 class GraduationRecorder:
     """Holds the sources, the watch set and the write buffers."""
 
@@ -529,47 +535,60 @@ class GraduationRecorder:
 
     async def _first_minute_pools(self, stream: HeldVaultStream,
                                   wanted: dict[str, Held]) -> None:
-        """Each new graduation's pool, asked for every second until the node
-        has it (a transaction seconds old is often not readable yet)."""
-        tried: dict[str, int] = {}
+        """One finder per new graduation, all at once: one slow node answer
+        must not hold up the next pool (25 Oct, run one-at-a-time: 3-60 s to
+        the first price, and 4 graduations in 15 never found)."""
+        finders: dict[str, asyncio.Task[None]] = {}
         while True:
             try:
                 for row in self.first_minute.expire(self._now()):
                     self._buffer(self._first_rows, row)
                 for mint in wanted.keys() - self.first_minute.due.keys():
                     del wanted[mint]
+                for mint, task in list(finders.items()):
+                    if task.done() or mint not in self.first_minute.due:
+                        task.cancel()
+                        del finders[mint]
                 for mint, (_, signature) in list(self.first_minute.due.items()):
-                    if mint in wanted:
-                        continue
-                    tried[mint] = tried.get(mint, 0) + 1
-                    try:
-                        # The canonical pool is DERIVED, no network: the public
-                        # node refused most migration transactions for minutes
-                        # in the 25 Oct dry run. The transaction is the fallback.
-                        derived = derive_or_none(mint, pumpfun_program=config.PUMP_PROGRAM_ID)
-                        held = await stream.resolve(mint, derived[0]) if derived else None
-                        if held is None:
-                            pool = await stream.pool_from_migration(mint, signature)
-                            held = await stream.resolve(mint, pool) if pool else None
-                    except ConnectionError:
-                        if tried[mint] >= 60:   # a minute of no answer: the start is gone anyway
-                            self.first_minute.drop(mint)
-                        continue
-                    if held is None:
-                        self.first_minute.drop(mint)
-                        continue
-                    wanted[mint] = held
-                    logger.info("graduation_first_minute_watching", mint=mint,
-                                tries=tried.pop(mint, 0))
-                for mint in tried.keys() - self.first_minute.due.keys():
-                    del tried[mint]
+                    if mint not in wanted and mint not in finders:
+                        finders[mint] = asyncio.create_task(
+                            self._first_minute_find(stream, mint, signature, wanted))
                 if self._first_rows:
                     await self.flush()
             except asyncio.CancelledError:
+                for task in finders.values():
+                    task.cancel()
                 raise
             except Exception:
                 logger.exception("graduation_first_minute_failed")
             await asyncio.sleep(1.0)
+
+    async def _first_minute_find(self, stream: HeldVaultStream, mint: str,
+                                 signature: str, wanted: dict[str, Held]) -> None:
+        """Every second for a minute: the pool the chain's event named, the
+        canonical (derived) pool and the migration transaction's pool, asked at
+        once; the first that reads as this token's pool wins."""
+        async def via(pool: str | None) -> Held | None:
+            return await stream.resolve(mint, pool, young=True) if pool else None
+
+        async def via_tx() -> Held | None:
+            return await via(await stream.pool_from_migration(mint, signature))
+
+        derived = derive_or_none(mint, pumpfun_program=config.PUMP_PROGRAM_ID)
+        for tries in range(1, 61):
+            attempts = [via(self.first_minute.pools.get(mint)),
+                        via(derived[0] if derived else None), via_tx()]
+            got = await asyncio.gather(*(asyncio.wait_for(a, 5.0) for a in attempts),
+                                       return_exceptions=True)
+            held = next((h for h in got if isinstance(h, Held)), None)
+            if held is not None:
+                if mint in self.first_minute.due:
+                    wanted[mint] = held
+                    logger.info("graduation_first_minute_watching", mint=mint, tries=tries)
+                return
+            await asyncio.sleep(1.0)
+        self.first_minute.drop(mint)     # a minute of no answer: the start is gone anyway
+        logger.info("graduation_first_minute_unfound", mint=mint)
 
     async def _first_minute_socket(self, stream: HeldVaultStream,
                                    wanted: dict[str, Held]) -> None:
@@ -661,6 +680,8 @@ class GraduationRecorder:
             if first != source:
                 logger.info("graduation_migration_confirmed", mint=row.mint,
                             first=first, then=source)
+            # The chain's event names the pool; PumpPortal's does not.
+            self.first_minute.hint(row.mint, _pool_address(row))
             return
         if len(self._migrated) >= 10_000:  # ponytail: ~10 days of mints, oldest dropped
             self._migrated.pop(next(iter(self._migrated)))
@@ -682,7 +703,7 @@ class GraduationRecorder:
             # and most deep pools belong to tokens nobody was watching.
             self.early.add(row.mint, row.ts, row.signature)
             if config.FIRST_MINUTE_ENABLED:
-                self.first_minute.add(row.mint, row.ts, row.signature)
+                self.first_minute.add(row.mint, row.ts, row.signature, _pool_address(row))
         if state is None:
             return
         state.migrated_at = row.ts

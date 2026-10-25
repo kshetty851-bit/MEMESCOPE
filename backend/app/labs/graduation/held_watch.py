@@ -280,15 +280,24 @@ class FirstMinute:
     #: mint -> the newest state not yet known complete: (slot, first heard, held copy)
     pending: dict[str, tuple[int, datetime, Held]] = field(default_factory=dict)
     last_price: dict[str, Decimal] = field(default_factory=dict)
+    #: mint -> the pool address the chain's migration event named, when heard.
+    pools: dict[str, str] = field(default_factory=dict)
 
-    def add(self, mint: str, migrated_at: datetime, signature: str) -> None:
+    def add(self, mint: str, migrated_at: datetime, signature: str,
+            pool: str | None = None) -> None:
         self.due.setdefault(mint, (migrated_at, signature))
+        self.hint(mint, pool)
+
+    def hint(self, mint: str, pool: str | None) -> None:
+        if pool and mint in self.due:
+            self.pools.setdefault(mint, pool)
 
     def drop(self, mint: str) -> list[dict[str, Any]]:
         """Stop watching; the last state is complete now, so it is kept."""
         rows = self._close(mint)
         self.due.pop(mint, None)
         self.last_price.pop(mint, None)
+        self.pools.pop(mint, None)
         return rows
 
     def expire(self, now: datetime) -> list[dict[str, Any]]:

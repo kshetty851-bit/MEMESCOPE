@@ -44,3 +44,14 @@ def test_a_wrapped_virtual_field_is_kept_signed_and_out_of_the_price():
     fm.observe(h, T0)
     (row,) = fm.expire(T0 + timedelta(seconds=481))
     assert row["virtual_quote"] == -14_845_478 and row["price_native"] == Decimal(10) / Decimal(1000)
+
+
+def test_a_pool_hint_is_kept_only_for_watched_mints_and_dropped_with_them():
+    fm = FirstMinute(window_s=480)
+    fm.hint("M", "POOL")                      # not graduated yet: ignored
+    assert fm.pools == {}
+    fm.add("M", T0, "sig", "POOL")
+    fm.hint("M", "OTHER")                     # the first named pool stays
+    assert fm.pools == {"M": "POOL"}
+    fm.expire(T0 + timedelta(seconds=481))
+    assert fm.pools == {}

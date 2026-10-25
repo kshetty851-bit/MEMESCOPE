@@ -46,7 +46,7 @@ from app.core.backoff import BackoffPolicy
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.labs.graduation import config, held_watch, curve, parse
-from app.security.liquidity import parse_pool
+from app.security.liquidity import POOL_ACCOUNT_SIZE, parse_pool
 from app.services.curve.pda import InvalidAddressError, bonding_curve_address
 from app.services.curve.state import CurveState
 from app.services.market.providers.rate_budget import CallBudget
@@ -1176,7 +1176,8 @@ class HeldVaultStream:
             return 0, [None] * len(addresses)
         return slot, [held_watch.account_bytes(v) for v in values]
 
-    async def resolve(self, mint: str, pool: str) -> held_watch.Held | None:
+    async def resolve(self, mint: str, pool: str, *,
+                      young: bool = False) -> held_watch.Held | None:
         """The watchable form of one position's pool, or nothing.
 
         Two calls, once per token: the caller caches the answer, including a
@@ -1189,6 +1190,12 @@ class HeldVaultStream:
             # No account yet is not "not a pool": a pool seconds old can be
             # missing from the node that answered. Asked again next pass.
             raise ConnectionError(f"pool {pool} unread")
+        if young and len(raw) < POOL_ACCOUNT_SIZE:
+            # A pool seconds old is 287 bytes until it grows to 301, ~7 s in
+            # (25 Oct trace). Every field read here sits inside the first 253,
+            # so the short account is read as-is; the vault check in `watch`
+            # still has to pass. Only the first-minute recorder asks for this.
+            raw = raw.ljust(POOL_ACCOUNT_SIZE, b"\0")
         state = parse_pool(raw)
         if state is None:
             return None
