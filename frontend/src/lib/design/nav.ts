@@ -90,6 +90,13 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Paper only. Karthik Lab's coins and rules, sold at +30% or 10 minutes instead of 5.",
       },
+      {
+        href: "/pool-sprint-lab",
+        label: "Pool Sprint Lab",
+        icon: IconSpark,
+        status: "ready",
+        note: "Paper replay. $2,000 at $50 a trade in $10k–$40k pools; five-minute exits from 1 Oct.",
+      },
       // Karthik, 2026-10-05: small pools at every size, and ten user wallets
       // sharing the same coins.
       {

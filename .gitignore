@@ -169,3 +169,6 @@ backend/.fxweb.env
 # Site media served by Caddy from the host (docker/caddy/Caddyfile). Kept out
 # of this public repository: the soundtrack is a commercial recording.
 /media/
+
+# Private paper-lab history is provisioned only in the API release image.
+backend/app/labs/graduation/data/pool_sprint_oct_2026.json.gz
