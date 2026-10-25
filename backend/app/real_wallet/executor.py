@@ -201,10 +201,21 @@ class RealWalletExecutor:
                 detail={"safety": "not_applied_to_a_sell"},
             )
             return AdvanceOutcome(ExecutionState.SAFETY_APPROVED, str(intent.id), True)
+        # Graduation intents pin both refresh and safety to the deterministic
+        # migration pool. Other strategies keep their existing selection.
+        from app.labs.graduation.live_spec import BY_ID as GRAD_BY_ID
+        from app.labs.graduation.tournament import graduation_pool
+
+        pool_filter = {}
+        if (getattr(intent, "strategy_id", "") or "").upper() in GRAD_BY_ID:
+            pool = graduation_pool(intent.mint_address)
+            if not pool:
+                return await self._block(intent, now, "safety:GRADUATION_POOL_UNVERIFIED")
+            pool_filter = {"pool_address": pool}
         # The gate judges the newest reading there is; make sure there is one.
         # Graduations are bought before enrichment reaches them on its own.
         reading = await market_refresh.ensure_fresh(
-            self._session, intent.mint_address, now=now)
+            self._session, intent.mint_address, now=now, **pool_filter)
         if reading.status != "fresh":
             logger.info("real_wallet_market_refreshed", intent_id=str(intent.id),
                         mint=intent.mint_address, result=reading.status)
@@ -216,6 +227,7 @@ class RealWalletExecutor:
             mint_address=intent.mint_address,
             trade_size_usd=Decimal(str(intent.requested_usd)),
             now=now,
+            **pool_filter,
         )
         # "ALLOW", not "ALLOWED". This compared against a verdict the gate never
         # returns, so EVERY intent was blocked — and with an empty reason string,

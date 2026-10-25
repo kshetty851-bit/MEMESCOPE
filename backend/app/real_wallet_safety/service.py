@@ -198,7 +198,8 @@ class RealWalletSafetyGate:
         self._holders_rpc = holders_rpc
 
     async def evaluate(
-        self, *, mint_address: str, trade_size_usd: Decimal, now: datetime | None = None
+        self, *, mint_address: str, trade_size_usd: Decimal, now: datetime | None = None,
+        pool_address: str | None = None,
     ) -> SafetyDecision:
         evaluated_at = (now or datetime.now(UTC)).astimezone(UTC)
         if trade_size_usd <= 0:
@@ -212,9 +213,13 @@ class RealWalletSafetyGate:
             )
 
         token = await TokenRepository(self._session).get_by_mint(mint_address)
-        snapshot = await MarketSnapshotRepository(self._session).latest_for_mint(mint_address)
+        pool_filter = {"pool_address": pool_address} if pool_address is not None else {}
+        snapshot = await MarketSnapshotRepository(self._session).latest_for_mint(
+            mint_address, **pool_filter)
         reasons: list[str] = []
         provenance = self._provenance(token, snapshot)
+        if pool_address is not None:
+            provenance = {**provenance, "expected_pool_address": pool_address}
         if not bool(provenance["verified"]):
             reasons.append(Reason.PROVENANCE_UNVERIFIED)
         if snapshot is not None and (snapshot.dex_name or "").lower() not in {
@@ -630,7 +635,7 @@ class RealWalletSafetyGate:
         feed_native = None if snapshot is None else getattr(snapshot, "price_native", None)
         if not feed_usd or not feed_native or feed_usd <= 0 or feed_native <= 0:
             return None
-        native = await self._session.scalar(
+        stmt = (
             select(GradPostgradSample.price_native)
             .where(GradPostgradSample.mint == mint,
                    GradPostgradSample.source == SOURCE_HELD_WS,
@@ -639,6 +644,10 @@ class RealWalletSafetyGate:
                    GradPostgradSample.ts >= at - timedelta(seconds=POOL_PRICE_TRUST_S))
             .order_by(GradPostgradSample.ts.desc())
             .limit(1))
+        pool = getattr(snapshot, "pool_address", None)
+        if pool:
+            stmt = stmt.where(GradPostgradSample.pair_address == pool)
+        native = await self._session.scalar(stmt)
         return None if native is None else native * feed_usd / feed_native
 
     @staticmethod

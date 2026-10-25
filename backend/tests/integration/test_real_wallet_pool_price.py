@@ -50,3 +50,35 @@ async def test_without_the_feeds_sol_rate_there_is_no_dollar_price(db_session) -
     await _sample(db_session, age_s=3)
     no_rate = SimpleNamespace(price_usd=Decimal("0.005498"), price_native=None)
     assert await RealWalletSafetyGate(db_session)._pool_price(MINT, no_rate, AT) is None
+
+
+async def test_vault_quote_must_match_snapshot_pool(db_session):
+    from app.labs.graduation.models import GradPostgradSample
+
+    await _sample(db_session, age_s=5, native="0.00001")
+    # Add a newer wrong-pool quote beside the intended pool.
+    db_session.add(
+        GradPostgradSample(
+            mint=MINT,
+            ts=AT - timedelta(seconds=3),
+            source=SOURCE_HELD_WS,
+            pair_address="right",
+            price_native=Decimal("0.00002"),
+        )
+    )
+    db_session.add(
+        GradPostgradSample(
+            mint=MINT,
+            ts=AT - timedelta(seconds=1),
+            source=SOURCE_HELD_WS,
+            pair_address="wrong",
+            price_native=Decimal("0.0009"),
+        )
+    )
+    await db_session.flush()
+    snapshot = SimpleNamespace(
+        price_usd=Decimal(".001"), price_native=Decimal(".00001"), pool_address="right"
+    )
+    assert await RealWalletSafetyGate(db_session)._pool_price(MINT, snapshot, AT) == Decimal(
+        ".002"
+    )

@@ -879,3 +879,35 @@ async def test_paying_far_over_the_pool_price_is_still_too_much_impact(
                      _quote(side="exit", output="98000000"))
     decision = await _decision(monkeypatch, snapshot=_snapshot(**_STALE_FEED), quotes=quotes)
     assert Reason.BUY_PRICE_IMPACT_TOO_HIGH in decision.reason_codes
+
+
+async def test_safety_market_lookup_is_pinned_to_requested_pool(monkeypatch):
+    seen = []
+
+    async def snapshot(mint, **filters):
+        seen.append(filters)
+        return None
+
+    monkeypatch.setattr(
+        service,
+        "TokenRepository",
+        lambda _: SimpleNamespace(get_by_mint=lambda mint: _return(None)),
+    )
+    monkeypatch.setattr(
+        service,
+        "MarketSnapshotRepository",
+        lambda _: SimpleNamespace(latest_for_mint=snapshot),
+    )
+    gate = _Gate(
+        _inspection(),
+        _Quotes(
+            _quote(side="entry", output="100000000"), _quote(side="exit", output="98000000")
+        ),
+    )
+    decision = await gate.evaluate(
+        mint_address=MINT, trade_size_usd=Decimal(100), now=NOW, pool_address="canonical"
+    )
+    assert seen == [{"pool_address": "canonical"}]
+    assert "MARKET_DATA_MISSING" in decision.reason_codes
+    assert decision.decision == "REJECT"
+    assert decision.provenance["expected_pool_address"] == "canonical"
