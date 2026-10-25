@@ -59,7 +59,7 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
     One baseline per hold, so no hold is judged without an unselected twin on
     its own clock. Nothing on this board decides by hashing a mint.
     """
-    assert len(ARMS) == 17
+    assert len(ARMS) == 13
     # Karthik's quiet-pool arm (2026-09-20): the baseline's rule, refusing a
     # pool already past `QUIET_MAX_POOL_TXS` transactions. Not a control, so
     # the baseline below is unchanged and it has something to be judged against.
@@ -80,10 +80,8 @@ def test_the_tournament_is_a_hold_sweep_with_a_baseline_on_every_hold() -> None:
                 for a in quiet75}) == 1
     # The fast pair (2026-09-19): E75T is E75 plus ONE condition, a clean
     # operator record, so E75 is its matched control on the same clock.
-    fast = {a.name: a for a in ARMS if a.entry in ("fast75", "fast75_trust")}
-    assert set(fast) == {"E75_4m", "E75T_4m"}
-    assert {(a.hold, a.clock, a.stop, a.drain)
-            for a in fast.values()} == {(4, "entry", None, None)}
+    # Deleted 2026-10-25; their operator records keep being written.
+    assert not [a for a in ARMS if a.entry in ("fast75", "fast75_trust")]
     # The BASELINE is back (2026-09-16). Without one the board could not tell a
     # profitable arm from a rising market — every arm here is a SUBSET of the
     # floor arm's population, so beating it is the claim each one makes.
@@ -1274,17 +1272,3 @@ def test_karthiks_small_pool_checks_buy_only_their_band():
         False, True, True, False]
     assert arms["KARTHIK_Q25_5M"].quiet and arms["KARTHIK_Q50_5M"].quiet
     assert arms["KARTHIK_Q25_5M"].hold == arms["KARTHIK_Q50_5M"].hold == 5
-
-
-def test_the_10k_book_skips_25k_to_50k_pools() -> None:
-    """Karthik, 2026-10-06: the Pool Lab's $10k book leaves $25k-$50k out."""
-    from datetime import UTC, datetime
-
-    from app.labs.graduation.tournament import BY_NAME, accepts
-
-    arm = BY_NAME["POOL_10K_QUIET_3M"]
-    def takes(usd: int) -> bool:
-        return accepts(arm, mint="M", open_at=datetime(2026, 10, 6, tzinfo=UTC),
-                       liquidity=Decimal(usd), fdv=None, sells=None, reuse=None)
-    assert [takes(u) for u in (9_999, 10_000, 24_999, 25_000, 49_999, 50_000)] == [
-        False, True, True, False, False, True]

@@ -6,9 +6,10 @@ import { Panel, PanelHeader, PanelTitle } from "@/components/ui/panel";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorState } from "@/components/ui/states";
 import { Days, formatElapsed, Row, McapHeads, StartDates } from "@/labs/karthik/page";
-import { DAY_30_MS } from "@/labs/pool/page";
 import type { KarthikDay, KarthikTrade, StartDate } from "@/labs/karthik/types";
 import { api } from "@/lib/api-client";
+
+const DAY_30_MS = 30 * 86_400_000;
 
 /**
  * BOOST LAB (Karthik, 2026-10-10). Does paying DexScreener pay? Every coin a

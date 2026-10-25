@@ -320,9 +320,8 @@ celery_app.conf.beat_schedule = {
         "task": "app.labs.graduation.scheduler.graduation_features_tick",
         "schedule": crontab(minute="*/10"),
     },
-    # The Pool Lab (2026-10-05): built here and served from Redis, so no API
-    # process builds it. Every minute since its replay went: it now only reads
-    # the books, and its open trades turn over in five minutes.
+    # The Boost Lab, built here every fifth minute and served from Redis. It
+    # kept the Pool Lab's task name when that lab was deleted (2026-10-25).
     "graduation-pool-lab": {
         "task": "app.labs.graduation.scheduler.graduation_pool_lab_tick",
         "schedule": crontab(minute="*"),

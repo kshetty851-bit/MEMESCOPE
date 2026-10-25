@@ -71,11 +71,6 @@
 	# Inside `handle` so the media block above can claim its paths first:
 	# `handle` blocks are mutually exclusive, and one with no matcher is the
 	# fallback for everything the others did not take.
-	# Isolated paper lab; validates alpha sessions through the backend.
-	handle /api/v1/labs/pretrade-ai/* {
-		reverse_proxy pretrade-ai:8011
-	}
-
 	handle {
 		reverse_proxy backend:8000 {
 			header_up X-Real-IP {remote_host}

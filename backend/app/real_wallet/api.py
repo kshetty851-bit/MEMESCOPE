@@ -675,87 +675,11 @@ LIVE_WINDOW = timedelta(minutes=10)
 LIVE_MAX = 24
 
 
-async def _page_skips(session: Any, bought: Any, coins: dict[str, Any],
-                      symbols: dict[str, str]) -> None:
-    """The $10k page's own rules on what its paper book bought, so the office
-    never shows BOUGHT for a trade the page leaves out (`api._pool_rows`,
-    `_busy_sellers`, `pool_lab.famous_name`)."""
-    from app.labs.graduation import api as grad_api
-    from app.labs.graduation import pool_lab as pl
-
-    sells = dict((await session.execute(grad_api._SELLS_BEFORE_SQL, {
-        "ids": [b.id for b in bought], "mints": [b.mint for b in bought],
-        "ats": [b.opened_at for b in bought]})).all())
-    repeat = set((await session.execute(
-        grad_api._REPEAT_CREATOR_SQL, {"m": [b.mint for b in bought]})).scalars())
-    buyers = await grad_api._busy_buyers(session, bought)
-    for b in bought:
-        n = sells.get(b.id)
-        if n is not None and n > pl.MAX_SELLS_BEFORE:
-            why = f"bought by the paper book, but the page skips it: {n} sells before the buy"
-        elif b.id in buyers:
-            why = (f"bought by the paper book, but the page skips it: over "
-                   f"{pl.MAX_BUYS_BEFORE} buys before the buy")
-        elif pl.famous_name(symbols.get(b.mint)):
-            why = "bought by the paper book, but the page skips famous names"
-        elif b.mint in repeat:
-            why = "bought by the paper book, but the page skips repeat creators"
-        else:
-            continue
-        coins[b.mint].page_skip = why
-
-
-async def _checkpoint_live_10k(session: Any) -> dict[str, object]:
-    from app.real_wallet import checkpoint_live as live
-
-    now = datetime.now(UTC)
-    grads = (await session.execute(
-        select(GradMigration.mint, GradMigration.ts)
-        .where(GradMigration.ts >= now - LIVE_WINDOW)
-        .order_by(GradMigration.ts.desc()).limit(LIVE_MAX))).all()
-    coins = {m: live.Coin(graduated=ts) for m, ts in grads}
-    symbols: dict[str, str] = {}
-    if coins:
-        mints = list(coins)
-        for m, liq in (await session.execute(
-                select(GradPostgradSample.mint, GradPostgradSample.liquidity_usd)
-                .where(GradPostgradSample.mint.in_(mints),
-                       GradPostgradSample.liquidity_usd.is_not(None))
-                .order_by(GradPostgradSample.mint, GradPostgradSample.ts)
-                .distinct(GradPostgradSample.mint))).all():
-            coins[m].liquidity = Decimal(liq)
-        for m, why in (await session.execute(
-                select(GradOperator.mint, GradOperator.blocked_reason)
-                .where(GradOperator.mint.in_(mints)))).all():
-            coins[m].blocked = why
-        bought = (await session.execute(
-            select(GradPaperPosition.id, GradPaperPosition.mint, GradPaperPosition.opened_at)
-            .where(GradPaperPosition.mint.in_(mints),
-                   GradPaperPosition.book == live.POOL_10K_BOOK))).all()
-        for b in bought:
-            coins[b.mint].bought_at = b.opened_at
-        symbols = {m: s for m, s in (await session.execute(
-            select(GradToken.mint, GradToken.symbol).where(GradToken.mint.in_(mints)))).all()
-            if s}
-        if bought:
-            await _page_skips(session, bought, coins, symbols)
-    return {"now": now.isoformat(), "coins": [
-        {"symbol": symbols.get(m), "graduated_at": ts.isoformat(),
-         **live.where_pool(coins[m], now)}
-        for m, ts in grads]}
-
-
 @router.get("/checkpoint/live", summary="Where each new graduation is in the checks, now")
-async def checkpoint_live_view(session: DbSession,
-                               pool: str | None = None) -> dict[str, object]:
+async def checkpoint_live_view(session: DbSession) -> dict[str, object]:
     """Karthik, 2026-10-02: "i want real time token checks". Every coin that
     graduated in the last ten minutes and the check it has reached, from the
-    records each check leaves (`checkpoint_live.where`). Names only.
-
-    `pool=10k` (2026-10-05): the same office for the Pool Lab's $10k paper
-    book (`checkpoint_live.where_pool`) — no wallet, the book's own buys."""
-    if pool == "10k":
-        return await _checkpoint_live_10k(session)
+    records each check leaves (`checkpoint_live.where`). Names only."""
     from app.models.real_wallet_execution import RealWalletLiveIntent
     from app.real_wallet import checkpoint_live as live
 
