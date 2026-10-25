@@ -396,7 +396,7 @@ export function PoolSprintContent({ data: d }: { data: SprintBook }) {
 
       <Panel>
         <PanelHeader>
-          <PanelTitle>Day by day · the funded $2,000 book</PanelTitle>
+          <PanelTitle>Day by day · the funded {usd(d.capital_usd)} book</PanelTitle>
         </PanelHeader>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[42rem] text-[13px] tabular-nums">
@@ -454,7 +454,8 @@ export function PoolSprintContent({ data: d }: { data: SprintBook }) {
       <Panel>
         <PanelHeader>
           <PanelTitle>
-            Trading costs · each scenario starts with $2,000 at $50 per trade
+            Trading costs · each scenario starts with {usd(d.capital_usd)} at{" "}
+            {usd(d.ticket_usd)} per trade
           </PanelTitle>
         </PanelHeader>
         <div className="overflow-x-auto">
@@ -500,7 +501,9 @@ export function PoolSprintContent({ data: d }: { data: SprintBook }) {
 
       <Panel>
         <PanelHeader>
-          <PanelTitle>If each trade had been · same $2,000 starting money</PanelTitle>
+          <PanelTitle>
+            If each trade had been · same {usd(d.capital_usd)} starting money
+          </PanelTitle>
         </PanelHeader>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[34rem] text-[13px] tabular-nums">
@@ -604,7 +607,8 @@ export function PoolSprintContent({ data: d }: { data: SprintBook }) {
           </table>
           <p className="mt-2 text-[11px] text-ink-dim">
             Copies of the same paper replay, not real wallets. Assumes identical quotes and
-            no extra market impact. Each account keeps its own $2,000 cash limit.
+            no extra market impact. Each account keeps its own {usd(d.capital_usd)} cash
+            limit.
           </p>
         </Panel>
       </div>

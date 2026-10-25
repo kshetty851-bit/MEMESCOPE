@@ -203,4 +203,4 @@ async def test_unverified_entry_is_not_traded_and_can_be_verified_later(isolated
     monkeypatch.setattr(api, "verify_pairs", non_sol)
     await api.refresh(START + timedelta(minutes=11))
     assert api._book["trades"] == 0 and api._book["excluded_non_sol"] == 1
-    assert api._book["balance_usd"] == "2000.00"
+    assert api._book["balance_usd"] == "10000.00"

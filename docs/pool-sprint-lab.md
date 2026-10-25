@@ -14,7 +14,7 @@ Separate, read-only paper replay. Route `/pool-sprint-lab`; API
   Pool mint identities are immutable; current prices/reserves are not used to
   decide historical eligibility. This correction recalculates all ledgers.
 
-- Start **1 October 2026, 00:00 Dubai** with **$2,000**, **$50 per token**.
+- Start **1 October 2026, 00:00 Dubai** with **$10,000**, **$50 per token**.
 - Admit a mint only when its **first** positive-liquidity DexScreener pool
   observation is at least $10,000 and below $40,000. A token initially observed
   above the band cannot qualify by falling into it later. A positive entry
@@ -34,7 +34,7 @@ Separate, read-only paper replay. Route `/pool-sprint-lab`; API
 - Headline is BEFORE COSTS, in fixed USD; it does not move with SOL's price.
   Cost comparison rows replay their OWN cash limit, not unlimited trades with
   a fee subtracted after the fact. Stake/pool comparisons also run independent
-  $2,000 ledgers. Independent-account multiples assume no extra market impact.
+  $10,000 ledgers. Independent-account multiples assume no extra market impact.
 
 ## Missing prices and reconciliation
 

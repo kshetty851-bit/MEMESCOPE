@@ -124,7 +124,7 @@ def test_priced_profit_and_reserve_reconcile_in_a_synthetic_account():
         replace(coin("candle", 1, "1"), source="geckoterminal_candle_close"),
         replace(coin("gap", 2), exited_at=None, exit_price=None, source=None),
     ]
-    r = walk(rows, as_of=at)
+    r = walk(rows, as_of=at, capital=D(2000))
     assert (r["signals"], r["trades"], r["skipped"]) == (3, 3, 0)
     assert (r["closed"], r["unpriced"], r["rugs"]) == (2, 1, 0)
     assert (r["dex_exits"], r["candle_exits"]) == (1, 1)
