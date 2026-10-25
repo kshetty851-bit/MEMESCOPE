@@ -43,7 +43,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.logging import get_logger
 from app.db.session import SessionFactory
 from app.labs.graduation import config, curve, parse
-from app.labs.graduation.held_watch import EarlyWatch, Held, MarkWriter
+from app.labs.graduation.held_watch import EarlyWatch, FirstMinute, Held, MarkWriter
 from app.labs.graduation.models import (
     SOURCE_DEXSCREENER,
     SOURCE_HELD_WS,
@@ -51,6 +51,7 @@ from app.labs.graduation.models import (
     GradCheckpoint,
     GradCurveSample,
     GradEarlyOpen,
+    GradFirstMinute,
     GradMigration,
     GradPaperPosition,
     GradPostgradSample,
@@ -72,6 +73,7 @@ from app.labs.graduation.sources import (
     PumpPortalStream,
 )
 from app.labs.graduation.watchset import TokenState, WatchSet
+from app.security.liquidity import derive_or_none
 
 logger = get_logger(__name__)
 
@@ -117,6 +119,9 @@ class GraduationRecorder:
         self.early = EarlyWatch(floor_usd=config.EARLY_FLOOR_USD,
                                 window_s=config.EARLY_WINDOW_S)
         self._early_rows: list[dict[str, Any]] = []
+        #: Every new pumpswap pool, priced off its vaults for its first minutes.
+        self.first_minute = FirstMinute(window_s=config.FIRST_MINUTE_WINDOW_S)
+        self._first_rows: list[dict[str, Any]] = []
         #: SOL/USD from the newest DexScreener row: prices early pool depth.
         self._sol_usd: Decimal | None = None
         self._market = market or MarketSource()
@@ -163,6 +168,9 @@ class GraduationRecorder:
                 asyncio.create_task(self._held_loop(), name="graduation-held"),
                 asyncio.create_task(self._holders_loop(), name="graduation-holders"),
             ]
+            if config.FIRST_MINUTE_ENABLED:
+                tasks.append(asyncio.create_task(self._first_minute_loop(),
+                                                 name="graduation-first-minute"))
             if self._chain is not None:
                 tasks.append(asyncio.create_task(self._chain_loop(), name="graduation-chain"))
             try:
@@ -511,6 +519,83 @@ class GraduationRecorder:
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, config.RECONNECT_MAX_SECONDS)
 
+    async def _first_minute_loop(self) -> None:
+        """The first-minute recorder: its OWN socket and lookups, so a burst of
+        new pools can never slow the marks on open positions."""
+        stream = HeldVaultStream(now=self._now)
+        wanted: dict[str, Held] = {}
+        await asyncio.gather(self._first_minute_pools(stream, wanted),
+                             self._first_minute_socket(stream, wanted))
+
+    async def _first_minute_pools(self, stream: HeldVaultStream,
+                                  wanted: dict[str, Held]) -> None:
+        """Each new graduation's pool, asked for every second until the node
+        has it (a transaction seconds old is often not readable yet)."""
+        tried: dict[str, int] = {}
+        while True:
+            try:
+                for row in self.first_minute.expire(self._now()):
+                    self._buffer(self._first_rows, row)
+                for mint in wanted.keys() - self.first_minute.due.keys():
+                    del wanted[mint]
+                for mint, (_, signature) in list(self.first_minute.due.items()):
+                    if mint in wanted:
+                        continue
+                    tried[mint] = tried.get(mint, 0) + 1
+                    try:
+                        # The canonical pool is DERIVED, no network: the public
+                        # node refused most migration transactions for minutes
+                        # in the 25 Oct dry run. The transaction is the fallback.
+                        derived = derive_or_none(mint, pumpfun_program=config.PUMP_PROGRAM_ID)
+                        held = await stream.resolve(mint, derived[0]) if derived else None
+                        if held is None:
+                            pool = await stream.pool_from_migration(mint, signature)
+                            held = await stream.resolve(mint, pool) if pool else None
+                    except ConnectionError:
+                        if tried[mint] >= 60:   # a minute of no answer: the start is gone anyway
+                            self.first_minute.drop(mint)
+                        continue
+                    if held is None:
+                        self.first_minute.drop(mint)
+                        continue
+                    wanted[mint] = held
+                    logger.info("graduation_first_minute_watching", mint=mint,
+                                tries=tried.pop(mint, 0))
+                for mint in tried.keys() - self.first_minute.due.keys():
+                    del tried[mint]
+                if self._first_rows:
+                    await self.flush()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("graduation_first_minute_failed")
+            await asyncio.sleep(1.0)
+
+    async def _first_minute_socket(self, stream: HeldVaultStream,
+                                   wanted: dict[str, Held]) -> None:
+        async def on_price(held: Held, ts: datetime) -> None:
+            for row in self.first_minute.observe(held, ts):
+                self._buffer(self._first_rows, row)
+
+        loop = asyncio.get_running_loop()
+        delay = config.RECONNECT_INITIAL_SECONDS
+        while True:
+            if not wanted:
+                await asyncio.sleep(1.0)
+                continue
+            started = loop.time()
+            try:
+                await stream.stream(lambda: wanted, on_price)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if loop.time() - started > config.RECONNECT_MAX_SECONDS:
+                    delay = config.RECONNECT_INITIAL_SECONDS
+                logger.warning("graduation_first_minute_dropped", error=repr(exc),
+                               retry_in=delay)
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, config.RECONNECT_MAX_SECONDS)
+
     async def shutdown(self) -> None:
         """Last flush. Every live state is closed, so a restart does not think
         it is still polling something this process no longer holds."""
@@ -596,6 +681,8 @@ class GraduationRecorder:
             # Watched whether or not the lab saw its curve: the feed is global,
             # and most deep pools belong to tokens nobody was watching.
             self.early.add(row.mint, row.ts, row.signature)
+            if config.FIRST_MINUTE_ENABLED:
+                self.first_minute.add(row.mint, row.ts, row.signature)
         if state is None:
             return
         state.migrated_at = row.ts
@@ -723,7 +810,7 @@ class GraduationRecorder:
         """
         total = (len(self._samples) + len(self._checkpoints)
                  + len(self._migrations) + len(self._postgrad_rows)
-                 + len(self._early_rows))
+                 + len(self._early_rows) + len(self._first_rows))
         if total >= config.BUFFER_MAX_ROWS:
             self.dropped_rows += 1
             return
@@ -766,7 +853,7 @@ class GraduationRecorder:
         """
         if not (self._dirty or self._retired or self._samples
                 or self._checkpoints or self._migrations or self._postgrad_rows
-                or self._holders_ready or self._early_rows):
+                or self._holders_ready or self._early_rows or self._first_rows):
             return {}
         # No network in here, ever: every loop that writes waits on this.
         holders, self._holders_ready = self._holders_ready, {}
@@ -777,6 +864,7 @@ class GraduationRecorder:
         migrations, self._migrations = self._migrations, []
         postgrad, self._postgrad_rows = self._postgrad_rows, []
         early, self._early_rows = self._early_rows, []
+        first, self._first_rows = self._first_rows, []
         self._dirty = set()
         closed_at = now or self._now()
 
@@ -797,6 +885,8 @@ class GraduationRecorder:
                 await self._insert(session, GradPostgradSample, postgrad,
                                    constraint="uq_grad_postgrad_samples_mint_ts")
                 await self._insert(session, GradEarlyOpen, early, "mint")
+                await self._insert(session, GradFirstMinute, first,
+                                   constraint="uq_grad_first_minute_mint_slot")
                 await session.commit()
         except Exception:
             # The rows are gone from the buffer either way: re-queueing a batch
@@ -804,7 +894,8 @@ class GraduationRecorder:
             # aggregates are re-derived from state on the next flush; only one
             # window of samples is lost, and the count says how many.
             self.dropped_rows += (len(samples) + len(checkpoints)
-                                  + len(migrations) + len(postgrad) + len(early))
+                                  + len(migrations) + len(postgrad) + len(early)
+                                  + len(first))
             logger.exception("graduation_flush_failed", samples=len(samples),
                              checkpoints=len(checkpoints))
             return {"error": 1}

@@ -343,6 +343,15 @@ EARLY_WINDOW_S = _int("LAB_GRADUATION_EARLY_WINDOW_S", 90)
 #: A crossing older than this is not an entry: a wallet acts on one in
 #: seconds, and the book ticks every ten.
 EARLY_MAX_AGE_S = _int("LAB_GRADUATION_EARLY_MAX_AGE_S", 30)
+#: First-minute recorder (Karthik, 2026-10-25: "yes build the first minute
+#: recorder"). Every pumpswap graduation's pool is read off its own vaults from
+#: the migration for this long, every price change kept, so entries 1-10 s after
+#: graduation can be tested on real reserves instead of DexScreener's first
+#: (35-50 s, often cached) quote. Paper research only: nothing reads it to trade.
+FIRST_MINUTE_ENABLED = os.getenv(
+    "LAB_GRADUATION_FIRST_MINUTE", "1").strip().lower() in {"1", "true", "yes"}
+#: A 5-minute hold bought up to a minute in, plus the 2-minute exit window.
+FIRST_MINUTE_WINDOW_S = _int("LAB_GRADUATION_FIRST_MINUTE_WINDOW_S", 480)
 #: B3's floor, in dollars of pool depth. `test_tournament` holds it to the band.
 EARLY_FLOOR_USD = Decimal(198_000)
 #: Wrapped SOL. Depth is priced with the SOL rate, so only a SOL-quoted pool

@@ -114,6 +114,14 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Paper only. Watches every graduation for 48 h; Second Wind book, $25 a buy from $500 (Runner off).",
       },
+      // Karthik, 2026-10-25: record the first seconds of every new pool.
+      {
+        href: "/first-minute-lab",
+        label: "First-minute recorder",
+        icon: IconSpark,
+        status: "ready",
+        note: "Research only. Every new pool's price from the blockchain, from the second it graduates.",
+      },
     ],
   },
   {
