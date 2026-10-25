@@ -107,6 +107,17 @@ export function SprintTradeRow({ trade: t }: { trade: SprintTrade }) {
           {t.symbol || `${t.mint.slice(0, 6)}…`} ↗
         </a>
         <span className="ml-1 text-[11px] text-ink-dim">/ SOL</span>
+        {t.status === "creator_blocked" && t.creator ? (
+          <a
+            href={`https://solscan.io/account/${t.creator}`}
+            target="_blank"
+            rel="noreferrer"
+            title={t.creator}
+            className="block text-[11px] text-ink-dim hover:text-accent"
+          >
+            Creator {t.creator.slice(0, 4)}…{t.creator.slice(-4)} ↗
+          </a>
+        ) : null}
       </td>
       <td className={`${td} whitespace-nowrap text-[11px] text-ink-dim`}>
         {t.graduated_at && t.entry_buys != null && t.entry_sells != null ? (
@@ -128,17 +139,27 @@ export function SprintTradeRow({ trade: t }: { trade: SprintTrade }) {
         {t.pnl_usd == null ? "—" : usd(t.pnl_usd)}
       </td>
       <td className="py-1.5 pl-3 text-[11px] text-ink-dim">
-        {t.status === "unpriced"
-          ? "Unpriced · stake reserved"
-          : t.status === "open"
-            ? "Still open"
-            : t.status === "cash_skipped"
-              ? "Skipped · no free cash"
-              : t.status === "creator_blocked"
-                ? "Skipped · creator rugged before"
-                : t.source === "geckoterminal_candle_close"
-                  ? "Minute candle close"
-                  : "DexScreener quote"}
+        {t.status === "unpriced" ? (
+          "Unpriced · stake reserved"
+        ) : t.status === "open" ? (
+          "Still open"
+        ) : t.status === "cash_skipped" ? (
+          "Skipped · no free cash"
+        ) : t.status === "creator_blocked" ? (
+          <span
+            title={
+              t.blocked_since
+                ? `Block active since ${when(t.blocked_since)} Dubai`
+                : undefined
+            }
+          >
+            Skipped · creator rugged before
+          </span>
+        ) : t.source === "geckoterminal_candle_close" ? (
+          "Minute candle close"
+        ) : (
+          "DexScreener quote"
+        )}
         {t.rugged ? <span className="ml-1 text-down">· rug</span> : null}
       </td>
     </tr>
@@ -234,7 +255,11 @@ function Trades({ day, onClear }: { day: string | null; onClear: () => void }) {
               <table className="w-full min-w-[48rem] text-[13px] tabular-nums">
                 <thead className="text-[11px] uppercase tracking-wider text-ink-dim">
                   <tr>
-                    <th className="py-1 pr-3 text-left font-normal">Bought · Dubai</th>
+                    <th className="py-1 pr-3 text-left font-normal">
+                      {status === "creator_blocked" || status === "cash_skipped"
+                        ? "Refused signal · Dubai"
+                        : "Bought · Dubai"}
+                    </th>
                     <th className="py-1 pr-3 text-left font-normal">Coin</th>
                     <th className={th}>Entry check</th>
                     <th className={th}>Pool</th>
