@@ -41,9 +41,13 @@ from app.labs.graduation.models import (
     GradTradeFlow,
 )
 from app.labs.graduation.paper import PaperBook, costs, net_return, positions
+from app.labs.graduation.pool_sprint import router as pool_sprint_router
 from app.labs.graduation.tournament import ARMS
 
 router = APIRouter(prefix="/labs/graduation", tags=["graduation-lab"])
+
+# Independent read-only paper replay; no trading-worker integration.
+router.include_router(pool_sprint_router)
 
 logger = get_logger(__name__)
 
