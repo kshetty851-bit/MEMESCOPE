@@ -634,9 +634,10 @@ class RealWalletDriver:
 
     async def _bad_name(self, mint: str, strategy_id: str, now: datetime) -> bool:
         """A blocked name, or a name that rugged in this strategy's own paper
-        book in the last `KARTHIK_RUGGED_NAME_HOURS` (Karthik, 2026-10-15: "yes
+        book in the last `REAL_WALLET_RUGGED_NAME_HOURS` (Karthik, 2026-10-15: "yes
         apply to real wallet too", after Karthik Lab's 48 h rule and MrBeast
-        block). The same settings as the lab, so the two cannot drift. Read
+        block). Its own settings since 2026-10-24, when the labs alone went to
+        12 h: a lab change never moves a real wallet. Read
         from the lab's paper position; an unnamed coin is bought."""
         from app.labs.graduation import config as grad_config
         from app.labs.graduation.live_spec import PAPER_BOOKS
@@ -652,12 +653,12 @@ class RealWalletDriver:
         if key in grad_config.KARTHIK_BLOCKED_NAMES:
             return True
         book = PAPER_BOOKS.get(strategy_id.upper())
-        if book is None or not grad_config.KARTHIK_LAB_RUGGED_NAME_BAN:
+        if book is None or not grad_config.REAL_WALLET_RUGGED_NAME_BAN:
             return False
         rugged = (await self._session.scalars(select(GradPaperPosition.symbol).where(
             GradPaperPosition.book == book,
             GradPaperPosition.closed_at.is_not(None),
-            GradPaperPosition.closed_at > now - timedelta(hours=grad_config.KARTHIK_RUGGED_NAME_HOURS),
+            GradPaperPosition.closed_at > now - timedelta(hours=grad_config.REAL_WALLET_RUGGED_NAME_HOURS),
             GradPaperPosition.closed_at <= now,
             GradPaperPosition.net_return <= grad_config.OPERATOR_RUG_MOVE))).all()
         return key in {name_key(s) for s in rugged}
