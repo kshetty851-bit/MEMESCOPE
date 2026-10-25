@@ -23,7 +23,7 @@ DexScreener poll of it is used instead, written by that same path and marked
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,12 +56,30 @@ class Reading(NamedTuple):
     captured_at: datetime | None = None
 
 
+def _usable(reading: Any | None, pool_address: str | None) -> bool:
+    """A price/address alone is insufficient market data for a safety check.
+
+    A shallow pool is still a usable observation: the existing safety gate
+    decides whether it is safe. Missing/zero values are never reused.
+    """
+    return bool(
+        reading is not None
+        and getattr(reading, "price_usd", None) is not None
+        and reading.price_usd > 0
+        and getattr(reading, "liquidity_usd", None) is not None
+        and reading.liquidity_usd > 0
+        and getattr(reading, "pool_address", None)
+        and (pool_address is None or reading.pool_address == pool_address)
+    )
+
+
 async def ensure_fresh(
     session: AsyncSession,
     mint: str,
     *,
     now: datetime,
     provider: MarketDataProvider | None = None,
+    pool_address: str | None = None,
 ) -> Reading:
     """Make sure `mint` has a current snapshot.
 
@@ -72,8 +90,10 @@ async def ensure_fresh(
     stale — which would refuse exactly the reading this exists to supply.
     """
     snapshots = MarketSnapshotRepository(session)
-    latest = await snapshots.latest_for_mint(mint)
-    if latest is not None and (now - latest.captured_at).total_seconds() <= FRESH_S:
+    pool_filter = {"pool_address": pool_address} if pool_address is not None else {}
+    latest = await snapshots.latest_for_mint(mint, **pool_filter)
+    if (latest is not None and _usable(latest, pool_address)
+            and 0 <= (now - latest.captured_at).total_seconds() <= FRESH_S):
         return Reading("fresh", latest.captured_at)
     token = await TokenRepository(session).get_by_mint(mint)
     if token is None:
@@ -96,13 +116,17 @@ async def ensure_fresh(
         fetched = await service.fetch([mint])
         listed = fetched.results.get(mint)
         from_lab = False
-        if listed is None or not listed.has_market:
-            lab = await _lab_reading(session, mint, now=now)
+        if not _usable(listed, pool_address):
+            lab = await _lab_reading(session, mint, now=now, pool_address=pool_address)
             if lab is not None:
                 fetched = FetchedBatch(results={mint: lab}, error=None, degraded=False,
                                        unavailable=False, retry_after_seconds=None,
                                        latency_ms=0)
                 from_lab = True
+            elif pool_address is not None:
+                # A different/invalid pool must never poison the canonical
+                # pool's history. The gate will refuse missing/stale data.
+                return Reading("no_reading")
         # Written by the same path either way: the same row, the same firewall.
         await service.enrich([state], fetched=fetched)
     except Exception as exc:  # the gate refuses what this could not fetch
@@ -114,14 +138,15 @@ async def ensure_fresh(
             await provider.close()
     # Read back through the gate's own lens: a print the firewall marked
     # suspect is not a reading, whatever was written.
-    after = await snapshots.latest_for_mint(mint)
+    after = await snapshots.latest_for_mint(mint, **pool_filter)
     if after is None or (latest is not None and after.id == latest.id):
         return Reading("no_reading")
     return Reading("refreshed_from_lab" if from_lab else "refreshed", after.captured_at)
 
 
 async def _lab_reading(
-    session: AsyncSession, mint: str, *, now: datetime
+    session: AsyncSession, mint: str, *, now: datetime,
+    pool_address: str | None = None,
 ) -> MarketData | None:
     """The graduation lab's own live DexScreener poll of this pool, if current.
 
@@ -136,17 +161,21 @@ async def _lab_reading(
     this module would reuse anyway. It decides nothing: the gate applies every
     rule to it that it applies to any other snapshot.
     """
-    row = await session.scalar(
+    stmt = (
         select(GradPostgradSample)
         .where(GradPostgradSample.mint == mint,
                # A live poll; `geckoterminal` rows are candles backfilled later.
                GradPostgradSample.source == "dexscreener",
-               GradPostgradSample.price_usd.is_not(None),
-               GradPostgradSample.liquidity_usd.is_not(None),
+               GradPostgradSample.price_usd > 0,
+               GradPostgradSample.liquidity_usd > 0,
+               GradPostgradSample.ts <= now,
                GradPostgradSample.ts >= now - timedelta(seconds=FRESH_S))
         .order_by(GradPostgradSample.ts.desc())
         .limit(1)
     )
+    if pool_address is not None:
+        stmt = stmt.where(GradPostgradSample.pair_address == pool_address)
+    row = await session.scalar(stmt)
     if row is None or row.liquidity_usd is None:
         return None
     # DexScreener's own rule, `DexScreenerProvider._to_market_data`, applied

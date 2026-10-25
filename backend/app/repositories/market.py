@@ -96,7 +96,9 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
             rows.sort(key=lambda r: r.captured_at)
         return out
 
-    async def latest_for_mint(self, mint_address: str) -> TokenMarketSnapshot | None:
+    async def latest_for_mint(
+        self, mint_address: str, *, pool_address: str | None = None,
+    ) -> TokenMarketSnapshot | None:
         stmt = (
             select(TokenMarketSnapshot)
             .where(
@@ -108,6 +110,8 @@ class MarketSnapshotRepository(BaseRepository[TokenMarketSnapshot]):
             .order_by(TokenMarketSnapshot.captured_at.desc())
             .limit(1)
         )
+        if pool_address is not None:
+            stmt = stmt.where(TokenMarketSnapshot.pool_address == pool_address)
         return (await self.session.execute(stmt)).scalars().first()
 
     async def latest_priced_for_mint_as_of(
