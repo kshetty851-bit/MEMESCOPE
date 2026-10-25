@@ -14,11 +14,18 @@ Separate, read-only paper replay. Route `/pool-sprint-lab`; API
   Pool mint identities are immutable; current prices/reserves are not used to
   decide historical eligibility. This correction recalculates all ledgers.
 
-- Start **1 October 2026, 00:00 Dubai** with **$10,000**, **$50 per token**.
+- Start **1 October 2026, 00:00 Dubai** with **$500**, **$50 per token**.
+- **Fresh + 65% buys:** the original observation must be between 0 and 30
+  seconds after `grad_tokens.migrated_at`. Its `txns_m5_buys` must be at least
+  65% of `txns_m5_buys + txns_m5_sells`; this is transaction count, not volume.
+  Refuse missing/negative counts, zero total activity and missing graduation
+  times. Use integer comparison `100 * buys >= 65 * (buys + sells)`.
+  Never qualify an entry from later readings. Every comparison ledger uses
+  this same filter. Entry checks are included in trades and the CSV.
 - Admit a mint only when its **first** positive-liquidity DexScreener pool
   observation is at least $10,000 and below $40,000. A token initially observed
   above the band cannot qualify by falling into it later. A positive entry
-  quote and a pool address are required. No name, crew, activity, age or
+  quote and a pool address are required. No name, crew or
   rugged-name filters from the other labs are inherited.
 - Quote entry at that observation. Exit at the first positive SAME-POOL USD
   DexScreener reading from five through seven minutes after entry. If absent,
@@ -34,7 +41,10 @@ Separate, read-only paper replay. Route `/pool-sprint-lab`; API
 - Headline is BEFORE COSTS, in fixed USD; it does not move with SOL's price.
   Cost comparison rows replay their OWN cash limit, not unlimited trades with
   a fee subtracted after the fact. Stake/pool comparisons also run independent
-  $10,000 ledgers. Independent-account multiples assume no extra market impact.
+  $500 ledgers. Independent-account multiples assume no extra market impact.
+- The header explicitly labels recorded-price paper returns and warns that
+  delayed-entry research lost money. The strategy was selected after a large
+  historical rule search, not independently validated on future trades.
 
 ## Missing prices and reconciliation
 
@@ -63,7 +73,8 @@ production-derived records, historical account results or real snapshot fixtures
 The bootstrap contains observations from the requested October start through a
 fixed export timestamp. Its fields are mint, exact pool, entry time/price/liquidity,
 metadata, exit time/price, source and candle start; the header includes schema
-version (2, requiring base/quote mints and verification evidence), export cutoff
+version (3, requiring base/quote mints, verification evidence, graduation time
+and original entry buy/sell counts), export cutoff
 and the source export checksum. Legacy snapshots are refused. The source CSV and full
 reconciliation stay private. Tests in this repository use synthetic records.
 

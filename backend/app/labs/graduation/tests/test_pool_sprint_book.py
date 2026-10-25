@@ -21,6 +21,9 @@ def coin(mint="a", minute=0, ret="0.2", hold=5):
         base_mint=mint,
         quote_mint=WSOL_MINT,
         pair_evidence="synthetic_test",
+        graduated_at=at - timedelta(seconds=10),
+        entry_buys=65,
+        entry_sells=35,
     )
 
 
@@ -35,6 +38,38 @@ def test_sol_filter_refuses_other_quotes_wrong_base_and_unverified_identities():
     assert r["trades"] == 1 and r["pnl_usd"] == "10.00"
     assert r["excluded_non_sol"] == 2 and r["unverified_pools"] == 1
     assert r["trades_list"][0]["quote_mint"] == WSOL_MINT
+
+
+def test_fresh65_requires_original_counts_and_exact_freshness_boundaries():
+    c = coin()
+    assert replace(c, graduated_at=c.opened_at).fresh65
+    assert replace(c, graduated_at=c.opened_at - timedelta(seconds=30)).fresh65
+    assert replace(c, entry_buys=13, entry_sells=7).fresh65
+    for refused in [
+        replace(c, graduated_at=c.opened_at - timedelta(seconds=30, microseconds=1)),
+        replace(c, graduated_at=c.opened_at + timedelta(microseconds=1)),
+        replace(c, graduated_at=None),
+        replace(c, entry_buys=None),
+        replace(c, entry_sells=None),
+        replace(c, entry_buys=0, entry_sells=0),
+        replace(c, entry_buys=64, entry_sells=36),
+        replace(c, entry_buys=-1),
+        replace(c, entry_sells=-1),
+    ]:
+        assert not refused.fresh65
+        assert walk([refused], as_of=c.opened_at + timedelta(minutes=10))["trades"] == 0
+
+
+def test_every_comparison_uses_the_same_fresh65_entry_filter():
+    good = coin("good")
+    refused = replace(coin("refused", ret="100"), entry_buys=64, entry_sells=36)
+    r = report([good, refused], START + timedelta(minutes=20))
+    assert r["entry_rule"] == "FRESH_30S_BUYS_65PCT"
+    assert r["excluded_entry_rule"] == 1 and r["pnl_usd"] == "10.00"
+    assert r["trades_list"][0]["entry_buys"] == 65
+    assert all(row["trades"] == 1 for row in r["costs"])
+    assert r["start_dates"][-1]["trades"] == 1
+    assert all(row["cells"][0]["trades"] == 1 for row in r["sizes"])
 
 
 def test_a_sale_funds_only_entries_at_or_after_its_exit():

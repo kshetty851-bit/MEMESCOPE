@@ -92,6 +92,10 @@ describe("Pool Sprint paper account", () => {
     expect(screen.getByText("$1,850.00")).toBeInTheDocument();
     expect(screen.queryByText(/today.s SOL price/)).not.toBeInTheDocument();
     expect(screen.getByText(/no name, crew, volume/i)).toBeInTheDocument();
+    expect(screen.getByText(/These are transaction counts/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Its delayed-entry research test lost money/),
+    ).toBeInTheDocument();
   });
 
   it("opens the clicked Dubai day and resets trade pagination", () => {
@@ -135,6 +139,9 @@ describe("Pool Sprint paper account", () => {
               mint: "mint",
               symbol: "Test",
               pair: "pair",
+              graduated_at: "2026-09-30T23:59:50Z",
+              entry_buys: 13,
+              entry_sells: 7,
               opened_at: "2026-10-01T00:00:00Z",
               pool_usd: "15000",
               status: "priced",
@@ -149,6 +156,7 @@ describe("Pool Sprint paper account", () => {
     );
     expect(screen.getByText(/Minute candle close/)).toBeInTheDocument();
     expect(screen.getByText("· rug")).toBeInTheDocument();
+    expect(screen.getByText("10s · 13/20 buys")).toBeInTheDocument();
     expect(screen.getByRole("link")).toHaveAttribute(
       "href",
       "https://dexscreener.com/solana/pair",

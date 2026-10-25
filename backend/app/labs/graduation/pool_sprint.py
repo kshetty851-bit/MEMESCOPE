@@ -27,13 +27,15 @@ router = APIRouter(prefix="/pool-sprint", tags=["pool-sprint-lab"])
 
 ENTRIES_SQL = """
 WITH first_recent AS MATERIALIZED (
- SELECT DISTINCT ON (s.mint) s.mint,s.ts,s.pair_address,s.price_usd,s.liquidity_usd
+ SELECT DISTINCT ON (s.mint) s.mint,s.ts,s.pair_address,s.price_usd,s.liquidity_usd,
+ s.txns_m5_buys,s.txns_m5_sells
  FROM grad_postgrad_samples s
  WHERE s.source='dexscreener' AND s.pair_address IS NOT NULL AND s.liquidity_usd>0
  AND s.ts>:since AND s.ts<=:now
  ORDER BY s.mint,s.ts
 )
-SELECT c.*,t.symbol,t.name FROM first_recent c LEFT JOIN grad_tokens t ON t.mint=c.mint
+SELECT c.*,t.symbol,t.name,t.migrated_at FROM first_recent c
+LEFT JOIN grad_tokens t ON t.mint=c.mint
 WHERE c.liquidity_usd>=10000 AND c.liquidity_usd<40000 AND c.price_usd>0
 AND NOT EXISTS (
  SELECT 1 FROM grad_postgrad_samples p WHERE p.mint=c.mint AND p.ts<c.ts
@@ -98,6 +100,9 @@ async def refresh(now: datetime | None = None) -> None:
                         liquidity=Decimal(r["liquidity_usd"]),
                         symbol=r["symbol"],
                         name=r["name"],
+                        graduated_at=r["migrated_at"],
+                        entry_buys=r["txns_m5_buys"],
+                        entry_sells=r["txns_m5_sells"],
                     ),
                 )
             # Never substitute a different pool. Refresh all unresolved observations,
@@ -242,6 +247,9 @@ async def get_csv() -> Response:
         "quote_mint",
         "quote_symbol",
         "pair_evidence",
+        "graduated_at",
+        "entry_buys",
+        "entry_sells",
         "opened_at",
         "closed_at",
         "pool_usd",

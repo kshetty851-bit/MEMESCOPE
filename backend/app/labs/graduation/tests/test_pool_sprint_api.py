@@ -26,13 +26,15 @@ async def isolated(monkeypatch):
         await c.execute(
             text(
                 "CREATE TABLE grad_tokens "
-                "(mint varchar PRIMARY KEY, symbol varchar, name varchar)"
+                "(mint varchar PRIMARY KEY, symbol varchar, name varchar, "
+                "migrated_at timestamptz)"
             )
         )
         await c.execute(
             text("""CREATE TABLE grad_postgrad_samples (
           mint varchar, ts timestamptz, pair_address varchar, source varchar,
-          price_usd numeric, liquidity_usd numeric, UNIQUE(mint,ts))""")
+          price_usd numeric, liquidity_usd numeric, txns_m5_buys int, txns_m5_sells int,
+          UNIQUE(mint,ts))""")
         )
     factory = async_sessionmaker(engine, expire_on_commit=False)
     monkeypatch.setattr(api, "SessionFactory", factory)
@@ -53,11 +55,28 @@ async def isolated(monkeypatch):
         monkeypatch.setattr(api, name, value)
     monkeypatch.setattr(api, "_lock", asyncio.Lock())
 
-    async def add(mint, seconds, price=1, liquidity=15000, pair=None, source="dexscreener"):
+    async def add(
+        mint,
+        seconds,
+        price=1,
+        liquidity=15000,
+        pair=None,
+        source="dexscreener",
+        buys=65,
+        sells=35,
+        age=10,
+    ):
         async with factory() as s:
             await s.execute(
+                text(
+                    "INSERT INTO grad_tokens (mint,migrated_at) VALUES (:mint,:at) "
+                    "ON CONFLICT DO NOTHING"
+                ),
+                {"mint": mint, "at": START + timedelta(seconds=seconds - age)},
+            )
+            await s.execute(
                 text("""INSERT INTO grad_postgrad_samples
-              VALUES (:mint,:ts,:pair,:source,:price,:liq)"""),
+              VALUES (:mint,:ts,:pair,:source,:price,:liq,:buys,:sells)"""),
                 {
                     "mint": mint,
                     "ts": START + timedelta(seconds=seconds),
@@ -65,6 +84,8 @@ async def isolated(monkeypatch):
                     "source": source,
                     "price": price,
                     "liq": liquidity,
+                    "buys": buys,
+                    "sells": sells,
                 },
             )
             await s.commit()
@@ -81,6 +102,19 @@ async def test_first_liquidity_is_used_not_later_drop_into_band(isolated):
     await isolated("upper", 3, liquidity=40000)
     await api.refresh(START + timedelta(minutes=10))
     assert set(api._records) == {"inside"}
+
+
+@pytest.mark.asyncio
+async def test_later_buy_counts_do_not_qualify_a_refused_first_observation(isolated):
+    await isolated("refused", 10, buys=64, sells=36)
+    await isolated("refused", 40, buys=100, sells=0)
+    await isolated("stale", 20, age=31)
+    await isolated("good", 30, buys=13, sells=7, age=30)
+    await api.refresh(START + timedelta(minutes=10))
+    assert api._records["refused"].entry_buys == 64
+    assert api._book["signals"] == 1
+    assert api._book["excluded_entry_rule"] == 2
+    assert api._book["trades_list"][0]["mint"] == "good"
 
 
 @pytest.mark.asyncio
@@ -161,6 +195,9 @@ async def test_routes_only_read_and_paginate_and_csv_escapes_metadata(monkeypatc
         base_mint="mint",
         quote_mint=WSOL_MINT,
         pair_evidence="synthetic_test",
+        graduated_at=START - timedelta(seconds=10),
+        entry_buys=65,
+        entry_sells=35,
     )
     data = api.report([c], START + timedelta(minutes=10))
 
@@ -203,4 +240,4 @@ async def test_unverified_entry_is_not_traded_and_can_be_verified_later(isolated
     monkeypatch.setattr(api, "verify_pairs", non_sol)
     await api.refresh(START + timedelta(minutes=11))
     assert api._book["trades"] == 0 and api._book["excluded_non_sol"] == 1
-    assert api._book["balance_usd"] == "10000.00"
+    assert api._book["balance_usd"] == "500.00"

@@ -38,6 +38,10 @@ export function SprintRules({ data }: { data: SprintBook }) {
       "Verified token/SOL pools only: the base mint must match the token and the quote mint must be wrapped SOL. The first recorded pool liquidity must be at least $10,000 and below $40,000. Non-SOL and unverified pools are excluded; no later pool is substituted. No name, crew, volume, quiet-pool or rugged-name filters.",
     ],
     [
+      "Fresh + 65% buys",
+      "The first recorded observation must be between 0 and 30 seconds after graduation. At that observation, buys must be at least 65% of buys plus sells in the last five minutes. These are transaction counts, not dollar volume. Missing graduation times, missing counts or zero transactions are refused. Later readings cannot qualify a refused token.",
+    ],
+    [
       "Trade size",
       `${usd(data.ticket_usd)} per token from ${usd(data.capital_usd)}. Several trades can overlap. Sale proceeds become available only when the simulated sale happens; an unaffordable entry is skipped.`,
     ],
@@ -99,6 +103,16 @@ export function SprintTradeRow({ trade: t }: { trade: SprintTrade }) {
           {t.symbol || `${t.mint.slice(0, 6)}…`} ↗
         </a>
         <span className="ml-1 text-[11px] text-ink-dim">/ SOL</span>
+      </td>
+      <td className={`${td} whitespace-nowrap text-[11px] text-ink-dim`}>
+        {t.graduated_at && t.entry_buys != null && t.entry_sells != null ? (
+          <>
+            {Math.round((Date.parse(t.opened_at) - Date.parse(t.graduated_at)) / 1000)}s ·{" "}
+            {t.entry_buys}/{t.entry_buys + t.entry_sells} buys
+          </>
+        ) : (
+          "—"
+        )}
       </td>
       <td className={td}>{usd(t.pool_usd)}</td>
       <td className={`${td} ${t.pct != null ? tone(t.pct) : "text-ink-dim"}`}>
@@ -210,11 +224,12 @@ function Trades({ day, onClear }: { day: string | null; onClear: () => void }) {
             </p>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[42rem] text-[13px] tabular-nums">
+              <table className="w-full min-w-[48rem] text-[13px] tabular-nums">
                 <thead className="text-[11px] uppercase tracking-wider text-ink-dim">
                   <tr>
                     <th className="py-1 pr-3 text-left font-normal">Bought · Dubai</th>
                     <th className="py-1 pr-3 text-left font-normal">Coin</th>
+                    <th className={th}>Entry check</th>
                     <th className={th}>Pool</th>
                     <th className={th}>Result</th>
                     <th className={th}>Money</th>
@@ -270,13 +285,21 @@ export function PoolSprintContent({ data: d }: { data: SprintBook }) {
           <h1 className="text-xl font-semibold">Pool Sprint Lab</h1>
           <p className="mt-1 max-w-[78ch] text-[13px] leading-relaxed text-ink-dim">
             {usd(d.capital_usd)} at {usd(d.ticket_usd)} a trade · verified SOL pairs ·
-            $10k–$40k pools · sell after 5 minutes. Replayed from{" "}
+            $10k–$40k pools · first seen within 30 seconds · at least 65% buy transactions ·
+            sell after 5 minutes. Replayed from{" "}
             <b className="text-ink">1 October 2026, midnight Dubai</b>. Paper only.
           </p>
           <p className="mt-2 text-[12px] text-ink-dim">
             SOL-only replay: {(d.excluded_non_sol ?? 0).toLocaleString()} non-SOL or
             mismatched pools excluded; {(d.unverified_pools ?? 0).toLocaleString()} pools
-            awaiting identity verification. All boxes and tables use the corrected rule.
+            awaiting identity verification. All boxes and tables use the corrected rule.{" "}
+            {(d.excluded_entry_rule ?? 0).toLocaleString()} verified SOL pools did not pass
+            the Fresh + 65% entry rule.
+          </p>
+          <p className="mt-2 rounded-lg border border-down/40 bg-down/10 px-3 py-2 text-[13px] text-ink-2">
+            Recorded-price paper replay, not executed profit. This rule was selected after
+            comparing historical results. Its delayed-entry research test lost money; fees,
+            slippage and stale quotes can erase the apparent profit.
           </p>
           {Number(d.free_cash_usd) < Number(d.ticket_usd) && d.open === 0 ? (
             <p className="mt-2 rounded-lg border border-down/40 bg-down/10 px-3 py-2 text-[13px] text-ink">
