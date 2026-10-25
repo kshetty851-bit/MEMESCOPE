@@ -80,12 +80,12 @@ def test_name_key_matches_spacing_and_case():
 def test_karthik_stake_by_pool_and_quietness():
     from app.labs.graduation import config
 
-    assert config.karthik_ticket(60_000) == 100.0           # small pool, buys unknown (19 Oct)
-    assert config.karthik_ticket(60_000, 13) == 100.0       # small pool, quiet
-    assert config.karthik_ticket(60_000, 14) == 100.0       # small pool, busier (19 Oct)
+    assert config.karthik_ticket(60_000) == 50.0            # flat $50 since 24 Oct
+    assert config.karthik_ticket(60_000, 13) == 50.0
+    assert config.karthik_ticket(60_000, 14) == 50.0
     # The real wallets keep the 16 Oct table.
     assert config.karthik_ticket(60_000, 14, config.WALLET_TICKETS_BY_POOL) == 75.0
-    assert config.karthik_ticket(400_000, 3) == 100.0       # flat $100 since 20 Oct
+    assert config.karthik_ticket(400_000, 3) == 50.0
     assert config.karthik_ticket(400_000, 3, config.USER1_TICKETS_BY_POOL) == 25.0
 
 
@@ -245,3 +245,16 @@ def test_open_buy_reads_helius_first(monkeypatch) -> None:
     assert read({"result": {"data": [tx(100, 1000), tx(101, 70_000_000_000, err={"x": 1})]}}) == 0  # a failed tx is no buy
     assert read({"result": {"data": []}}) is None
     assert read({"error": {"code": 429}}) is None          # refused: fall back to the free node
+
+
+def test_labs_block_a_rugged_name_12h_but_real_wallets_keep_their_own_setting() -> None:
+    """2026-10-24: both labs went to a 12 h rugged-name block; the real wallets
+    read their own flag and stay as they were until Karthik says otherwise."""
+    import inspect
+
+    from app.labs.graduation import config
+    from app.real_wallet.driver import RealWalletDriver
+    assert config.KARTHIK_LAB_RUGGED_NAME_BAN is True and config.KARTHIK_RUGGED_NAME_HOURS == 12
+    assert config.REAL_WALLET_RUGGED_NAME_BAN is False
+    src = inspect.getsource(RealWalletDriver._bad_name)
+    assert "REAL_WALLET_RUGGED_NAME_BAN" in src and "KARTHIK_LAB_RUGGED_NAME_BAN" not in src
