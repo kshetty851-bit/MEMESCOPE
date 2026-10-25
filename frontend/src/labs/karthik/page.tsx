@@ -107,7 +107,7 @@ function day(iso: string): string {
   return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
-function Figure({
+export function Figure({
   label,
   value,
   sub,
