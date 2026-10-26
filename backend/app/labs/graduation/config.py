@@ -1233,10 +1233,11 @@ def unnamed_evening(symbol: str | None, at: datetime) -> bool:
 #: every coin, any pool. Replayed: same 932 trades; on $500 it read $2,314.
 #: Karthik, 2026-10-24: $50 on every coin, from day 1, on a $300 book.
 KARTHIK_TICKETS_BY_POOL: tuple[tuple[int | None, float], ...] = ((None, 50.0),)
-#: USER1 is real money and keeps the 19 Oct lab table until Karthik says
-#: otherwise (a lab-only change never moves a real wallet).
-USER1_TICKETS_BY_POOL: tuple[tuple[int | None, float], ...] = (
-    (150_000, 100.0), (None, 25.0))
+#: USER1 is real money: a lab-only change never moves it. Karthik, 2026-10-26
+#: ("yes do it with user 1 wallet at $10"): it follows the Pump Catcher Lab,
+#: which buys the same amount on every coin, so its ticket is now flat on every
+#: pool (75 = the wallet table's base, so `lab_sized` leaves the ticket as set).
+USER1_TICKETS_BY_POOL: tuple[tuple[int | None, float], ...] = ((None, 75.0),)
 #: The real wallets keep the 16 Oct table (Karthik approved the change for the
 #: lab only): `real_wallet.driver.lab_sized` scales a ticket by it, $75 = 1x.
 WALLET_TICKETS_BY_POOL: tuple[tuple[int | None, float], ...] = (

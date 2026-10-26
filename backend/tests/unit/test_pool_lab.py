@@ -86,7 +86,7 @@ def test_karthik_stake_by_pool_and_quietness():
     # The real wallets keep the 16 Oct table.
     assert config.karthik_ticket(60_000, 14, config.WALLET_TICKETS_BY_POOL) == 75.0
     assert config.karthik_ticket(400_000, 3) == 50.0
-    assert config.karthik_ticket(400_000, 3, config.USER1_TICKETS_BY_POOL) == 25.0
+    assert config.karthik_ticket(400_000, 3, config.USER1_TICKETS_BY_POOL) == 75.0   # USER1 flat since 26 Oct
 
 
 def test_unnamed_evening_is_dubai_17_to_midnight() -> None:
@@ -130,10 +130,10 @@ def test_real_wallets_size_like_karthik_lab() -> None:
     assert lab_sized("G-Q50", d("50"), 400_000, 3) == d("16.66")      # $150k+ pool
     assert lab_sized("G-Q50", d("50"), None, 3) == d("50")            # pool unread: plain
     assert lab_sized("G-Q150", d("50"), 60_000, 3) == d("50")         # other strategies: plain
-    # USER1 sizes like Karthik Lab today (19 Oct): every coin under $150k alike.
-    assert lab_sized("G-Q50", d("50"), 60_000, 13, "USER1") == d("66.66")
-    assert lab_sized("G-Q50", d("50"), 60_000, 14, "user1") == d("66.66")
-    assert lab_sized("G-Q50", d("50"), 400_000, 3, "USER1") == d("16.66")
+    # USER1 follows the Pump Catcher Lab (26 Oct): the same ticket on every coin.
+    assert lab_sized("G-Q50", d("50"), 60_000, 13, "USER1") == d("50.00")
+    assert lab_sized("G-Q50", d("50"), 60_000, 14, "user1") == d("50.00")
+    assert lab_sized("G-Q50", d("50"), 400_000, 3, "USER1") == d("50.00")
     assert lab_sized("G-Q50", d("50"), 60_000, 14, "USER2") == d("50.00")  # others unchanged
 
 
