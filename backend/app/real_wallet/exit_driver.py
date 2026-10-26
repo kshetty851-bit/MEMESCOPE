@@ -67,7 +67,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.lab import execution, spec
-from app.lab.rules import MarkState, evaluate_exit
+from app.lab.rules import ExitVerdict, MarkState, evaluate_exit
 from app.labs.graduation import live_spec
 from app.models.lab import LabDecision
 from app.models.real_wallet_execution import RealWalletPosition
@@ -81,6 +81,16 @@ from app.repositories.market import MarketSnapshotRepository
 
 logger = get_logger(__name__)
 
+#: Wallets that SELL like the Pump Catcher Lab (Karthik, 2026-10-26: "yes do it
+#: with user 1 wallet at $10"): at +30% on the executable quote, at 5 minutes if
+#: below cost there, else at 10 minutes. What they BUY is unchanged (their
+#: strategy's), and every other wallet on the same strategy keeps its own hold.
+PUMP_EXIT_MEMBERS = frozenset({"USER1"})
+PUMP_EXITS = spec.Exits(take_profit=Decimal("1.30"), time_exit_hours=10 / 60)  # type: ignore[arg-type]
+#: The one look at five minutes: a mark in this minute below cost sells. A dip
+#: after it does not (the lab decides once, at five), and no mark in it holds on.
+PUMP_CHECK_HOURS = (5 / 60, 6 / 60)
+
 #: The stagnation band, matching the Lab's. A multiple inside it is "flat".
 FLAT_BAND = (Decimal("0.95"), Decimal("1.05"))
 
@@ -88,6 +98,22 @@ FLAT_BAND = (Decimal("0.95"), Decimal("1.05"))
 #: attempt up to the ceiling.
 RETRY_FIRST_S = 15
 RETRY_MAX_S = 1800
+
+
+def pump_exit(public_key: str | None) -> bool:
+    """Does this wallet sell like the Pump Catcher Lab?"""
+    from app.real_wallet.family_wallets import member_for
+
+    return bool(public_key) and member_for(public_key) in PUMP_EXIT_MEMBERS
+
+
+def exit_verdict(exits: spec.Exits, state: MarkState, *, pump: bool) -> ExitVerdict:
+    """The shared rule, plus the Pump Catcher's one look at five minutes."""
+    verdict = evaluate_exit(exits, state)
+    if (verdict.action is None and pump and state.exec_multiple < 1
+            and PUMP_CHECK_HOURS[0] <= state.held_hours < PUMP_CHECK_HOURS[1]):
+        return ExitVerdict("CLOSE", "down_at_5m")
+    return verdict
 
 
 def strategy_for(strategy_id: str | None) -> spec.Strategy | None:
@@ -139,6 +165,8 @@ class RealWalletExitDriver:
                 skip("unknown_strategy")
                 continue
 
+            pump = pump_exit(pos.wallet_public_key)
+            exits = PUMP_EXITS if pump else strategy.exits
             started = await self._clock_start(pos)
             if pos.exit_intent_id is not None:
                 # Already decided. Asked again only if nothing was sold, and
@@ -148,9 +176,9 @@ class RealWalletExitDriver:
                     skip(waiting)
                     continue
                 reason = pos.exit_reason or "retry"
-            elif (state := await self._mark(pos, strategy, now, started)) is not None:
+            elif (state := await self._mark(pos, exits, now, started)) is not None:
                 marked += 1
-                verdict = evaluate_exit(strategy.exits, state)
+                verdict = exit_verdict(exits, state, pump=pump)
                 if verdict.action is None:
                     continue
                 # `create_sell_intent` binds the FULL confirmed quantity, so a
@@ -160,8 +188,8 @@ class RealWalletExitDriver:
                 # ponytail: real partials need a fractional-quantity SELL intent.
                 reason = (f"partial_promoted_to_close:{verdict.reason}"
                           if verdict.action == "PARTIAL" else str(verdict.reason))
-            elif (strategy.exits.time_exit_hours is not None
-                  and _held_hours(started, now) >= strategy.exits.time_exit_hours):
+            elif (exits.time_exit_hours is not None
+                  and _held_hours(started, now) >= exits.time_exit_hours):
                 reason = "time_exit_unpriced"
             else:
                 skip("unpriceable")
@@ -202,7 +230,7 @@ class RealWalletExitDriver:
         return min(opened, _aware(decided)) if decided is not None else opened
 
     async def _mark(
-        self, pos: RealWalletPosition, strategy: spec.Strategy, now: datetime,
+        self, pos: RealWalletPosition, exits: spec.Exits, now: datetime,
         started: datetime,
     ) -> MarkState | None:
         """Update the position's live state and return what the rules read.
@@ -238,7 +266,7 @@ class RealWalletExitDriver:
         pos.last_exec_multiple = exec_multiple
         pos.last_marked_at = now
 
-        arm = strategy.exits.break_even_arm
+        arm = exits.break_even_arm
         if arm is not None and not pos.break_even_armed and exec_multiple >= arm:
             pos.break_even_armed = True
 

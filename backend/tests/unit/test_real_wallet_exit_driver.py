@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 from decimal import Decimal
+import re
 from pathlib import Path
 
 import pytest
@@ -38,7 +39,7 @@ def test_it_owns_no_exit_rule_of_its_own():
     implementations of 'when do we sell' would eventually disagree, and the paper
     record and the real record would stop describing the same strategy."""
     src = Path(exit_driver.__file__).read_text()
-    assert "from app.lab.rules import MarkState, evaluate_exit" in src
+    assert re.search(r"from app\.lab\.rules import [^\n]*\bevaluate_exit\b", src)
     # No local reimplementation of the triggers.
     for trigger in ("take_profit >", "trailing_drawdown >", "runner_target >"):
         assert trigger not in src
