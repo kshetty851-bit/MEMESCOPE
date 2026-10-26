@@ -90,6 +90,14 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Paper only. Karthik Lab's coins and rules, sold at +30% or 10 minutes instead of 5.",
       },
+      // Karthik, 2026-10-26: small fresh pools, one rule, from 1 Oct.
+      {
+        href: "/fresh-catch-lab",
+        label: "Fresh Catch Lab",
+        icon: IconSpark,
+        status: "ready",
+        note: "Paper only. $10k-$30k pools seen within 30 s with 65% buys, sold at 4 minutes, $1,000 at $50.",
+      },
       // Karthik, 2026-10-10: does paying DexScreener (profile, boosts) pay?
       {
         href: "/boost-lab",
