@@ -444,7 +444,10 @@ async def pool_lab_tick() -> dict[str, Any]:
     if datetime.now(UTC).minute % 5:       # every fifth minute: ~2s a build
         return {"boost_coins": None}
     try:
+        from app.core.redis import init_redis
+
         async with SessionFactory() as session:
+            await boost_lab.refresh(session, await init_redis())   # its own new coins
             boost = await boost_lab.build(session)
         redis = Redis.from_url(settings.REDIS_URI, decode_responses=True)
         try:

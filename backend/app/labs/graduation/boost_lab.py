@@ -22,6 +22,7 @@ beside it re-prices the same coins at other holds. Paper only.
 
 from __future__ import annotations
 
+import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -31,7 +32,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.labs.graduation import api, config
 from app.labs.graduation import pool_lab as pl
+from app.labs.graduation.backtest import amm_buy, amm_impact
 from app.labs.graduation.models import GradPaperPosition, GradPostgradSample
+from app.labs.graduation.paper import _P, _Q, costs
 from app.labs.graduation.tournament import Mark, exit_mark, seen_at, settle, valued
 
 KEY = "graduation:boost_lab:ratio31-cooldown60-v1"
@@ -175,6 +178,102 @@ def _sold_at(row: Any, marks: list[Mark], minutes: int) -> GradPaperPosition | N
     return copy
 
 
+# --- Its own feed (Karthik, 2026-10-26: "Rebuild it on all coins") -----------
+# The book used to re-price the coins the graduation books bought; the Pool Lab's
+# $10k books, where 796 of its 799 picks came from, were deleted on 25 Oct. Now
+# every graduation is looked at once: its first DexScreener reading, $10k+ and
+# within the 2-minute entry guard, and kept in grad_boost_picks if it was paid
+# then. Each kept pick is bought, on paper, at its own reading at that moment,
+# costed exactly like a book's pool-open buy.
+FEED_FLOOR_USD = 10_000
+CHECKED = "boostlab:checked:v1"
+_NEW_GRADS = text("""
+    select mint, min(ts) from grad_migrations where pool = 'pump-amm'
+      and ts >= :a and ts <= :b group by mint""")
+_FIRST = text("""
+    select ts, price_native, price_usd, liquidity_usd from grad_postgrad_samples
+    where mint = :m and source = 'dexscreener' and pair_address is not null
+      and liquidity_usd > 0 and price_native > 0 order by ts limit 1""")
+#: Each pick's reading at its buy (the last at or before it, else the first after),
+#: its graduation and its name.
+_PICKS = text("""
+    select b.mint, b.opened_at, r.price_native, r.price_usd, r.liquidity_usd,
+           (select min(m.ts) from grad_migrations m where m.mint = b.mint),
+           (select t.symbol from grad_tokens t where t.mint = b.mint)
+    from grad_boost_picks b
+    cross join lateral (
+        (select price_native, price_usd, liquidity_usd from grad_postgrad_samples
+          where mint = b.mint and source = 'dexscreener' and price_native > 0
+            and liquidity_usd > 0 and ts <= b.opened_at order by ts desc limit 1)
+        union all
+        (select price_native, price_usd, liquidity_usd from grad_postgrad_samples
+          where mint = b.mint and source = 'dexscreener' and price_native > 0
+            and liquidity_usd > 0 and ts > b.opened_at order by ts limit 1)
+        limit 1) r
+    where b.opened_at >= :f""")
+
+
+async def refresh(db: AsyncSession, redis: Any, now: datetime | None = None) -> int:
+    """Look once at every graduation of the last two hours not yet looked at;
+    keep the paid ones. Returns how many were kept."""
+    now = now or datetime.now(UTC)
+    checked = {k.decode() if isinstance(k, bytes) else k for k in await redis.hkeys(CHECKED)}
+    grads = (await db.execute(_NEW_GRADS, {"a": max(FROM, now - timedelta(hours=2)),
+                                           "b": now - timedelta(minutes=3)})).all()
+    kept = 0
+    for mint, graduated in grads:
+        if mint in checked:
+            continue
+        first = (await db.execute(_FIRST, {"m": mint})).first()
+        if first is None:
+            if now - graduated < timedelta(minutes=15):
+                continue                     # not listed yet: asked again next pass
+        elif (float(first.liquidity_usd) >= FEED_FLOOR_USD
+              and (first.ts - graduated).total_seconds() <= config.MAX_ENTRY_AGE_S):
+            found = (await db.execute(_PAID_SQL, {"m": [mint], "t": [first.ts]})).all()
+            for m, profile, boosts in found:
+                await db.execute(_KEEP_SQL, {"m": [m], "t": [first.ts], "p": [bool(profile)],
+                                             "b": [boosts]})
+                kept += 1
+        await redis.hset(CHECKED, mint, "1")
+    if kept:
+        await db.commit()
+    return kept
+
+
+def _bought(mint: str, at: datetime, price: Any, price_usd: Any, depth: Any,
+            graduated: datetime | None, symbol: str | None) -> GradPaperPosition | None:
+    """A book's pool-open buy at this reading, or None where a book would not buy."""
+    price, depth = Decimal(str(price)), Decimal(str(depth))
+    rate = Decimal(str(price_usd)) / price
+    impact = amm_impact(config.PAPER_NOTIONAL_USD, depth)
+    if impact is None or impact > config.PAPER_MAX_IMPACT or rate <= 0:
+        return None
+    notional_quote = (config.PAPER_NOTIONAL_USD / rate).quantize(_Q)
+    fee_bps = config.pool_fee_bps(price)
+    leg = costs(notional_quote, pool_fee_bps=fee_bps)
+    fill = amm_buy(price, order_usd=config.PAPER_NOTIONAL_USD, liquidity_usd=depth,
+                   fee_fraction=leg.fee_fraction)
+    if fill is None or fill <= 0:
+        return None
+    return GradPaperPosition(
+        id=uuid.uuid5(uuid.NAMESPACE_URL, f"boost:{mint}"), book="BOOST_FEED", mint=mint,
+        symbol=symbol, opened_at=at, open_quote=price.quantize(_P), open_fill=fill.quantize(_P),
+        notional_usd=config.PAPER_NOTIONAL_USD, sol_usd_at_open=rate.quantize(Decimal("0.000001")),
+        notional_quote=notional_quote, tokens=(notional_quote / fill).quantize(_Q),
+        peak_quote=price.quantize(_P), last_quote=price.quantize(_P),
+        liq_open_usd=depth.quantize(Decimal("0.01")), impact_open=impact.quantize(Decimal("0.000001")),
+        pool_fee_bps=fee_bps, graduated_at=graduated, excluded=None)
+
+
+async def _feed(db: AsyncSession) -> list[Any]:
+    """Every kept pick since `FROM`, bought at its own reading, within the
+    two-minute entry guard (as the books' rows were)."""
+    rows = [_bought(*r) for r in (await db.execute(_PICKS, {"f": FROM})).all()]
+    rows = [r for r in rows if r is not None and api._fresh_entry(r)]
+    return sorted(rows, key=api._opened_order)
+
+
 async def build(db: AsyncSession) -> dict[str, Any]:
     cents = Decimal("0.01")
     sol = await db.scalar(
@@ -185,10 +284,7 @@ async def build(db: AsyncSession) -> dict[str, Any]:
                (GradPostgradSample.price_usd / GradPostgradSample.price_native)
                .between(config.SOL_USD_MIN, config.SOL_USD_MAX))
         .order_by(GradPostgradSample.ts.desc()).limit(1))
-    books = tuple((await db.execute(text(
-        "select distinct book from grad_paper_positions where opened_at >= :f"),
-        {"f": FROM})).scalars())
-    rows = await api._pool_rows(db, books, FROM, 0, skip_repeat=False)
+    rows = await _feed(db)
     paid: dict[str, tuple[bool, int | None]] = {}
     if rows:
         mints = [r.mint for r in rows]
