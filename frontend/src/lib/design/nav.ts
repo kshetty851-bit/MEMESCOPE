@@ -106,13 +106,6 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Paper only. Coins with a paid DexScreener profile or boosts, sold at 4 minutes.",
       },
-      {
-        href: "/longwatch-lab",
-        label: "Long-watch Lab",
-        icon: IconSpark,
-        status: "ready",
-        note: "Paper only. Watches every graduation for 48 h; Second Wind book, $25 a buy from $500 (Runner off).",
-      },
       // Karthik, 2026-10-25: record the first seconds of every new pool.
       {
         href: "/first-minute-lab",

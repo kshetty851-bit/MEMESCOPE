@@ -43,7 +43,6 @@ from app.real_wallet import family_api as real_wallet_family
 from app.real_wallet import fivebags_api, push_api
 from app.newsroom import api as newsroom_api
 from app.track_record import api as track_record_api
-from app.labs.longwatch import api as longwatch_api
 from app.real_wallet_safety import api as real_wallet_safety
 from app.security import api as token_security
 from app.social import api as social
@@ -117,7 +116,6 @@ api_router.include_router(fivebags_api.router)
 api_router.include_router(newsroom_api.router)
 # The track record page (2026-10-22): read-only, behind the alpha gate.
 api_router.include_router(track_record_api.router)
-api_router.include_router(longwatch_api.router)
 # HQ-6: shared token security. Read-only evidence, and deliberately its own
 # namespace rather than an extension of `/real-wallet-safety` — the whole
 # point is that token security is not a real-wallet concern and stays

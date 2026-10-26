@@ -6,7 +6,6 @@ model that is never imported is invisible to it.
 
 from app.db.base import Base
 from app.models.early_buyer import TokenEarlyBuyer
-from app.labs.longwatch.models import LongwatchBook, LongwatchPosition, LongwatchReading  # noqa: F401
 from app.models.kol import KolWalletRank
 from app.models.alpha_session import AlphaSession
 from app.models.curve import TokenCurveSnapshot  # noqa: F401

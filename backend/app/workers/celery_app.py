@@ -65,7 +65,6 @@ celery_app = Celery(
         "app.labs.graduation.fresh_catch_scheduler",
         "app.services.journey_refresh",
         # Long-watch Lab (2026-10-22): 48-hour readings + Runner / Second Wind books.
-        "app.labs.longwatch.scheduler",
     ],
 )
 
@@ -242,13 +241,6 @@ celery_app.conf.beat_schedule = {
     "pumpfun-tick": {
         "task": "app.pumpfun.scheduler.pumpfun_tick",
         "schedule": crontab(minute="*"),
-    },
-    # Long-watch Lab (2026-10-22): every graduation of the last 48 h read once,
-    # then the Runner and Second Wind paper books. Paper only.
-    "longwatch-tick": {
-        "task": "app.labs.longwatch.scheduler.longwatch_tick",
-        "schedule": crontab(minute="*/10"),
-        "options": {"expires": 540},
     },
     # Momentum V2: twenty wallets on a 3x6 entry grid, each ratcheting at +10%.
     # Same cadence as the tournaments it shares an engine with — the cycle

@@ -42,11 +42,6 @@ select g.mint, g.ts, t.symbol, t.name,
        (array_agg(p.liquidity_usd::float8 order by p.ts))[1]
 from g
 join (select mint, ts, price_usd, liquidity_usd from grad_postgrad_samples
-      where mint in (select mint from g)
-      union all
-      -- The Long-watch Lab's 10-minute readings (2026-10-22) carry a coin past
-      -- the first ~2 hours the graduation lab prices it for.
-      select mint, ts, price_usd, liquidity_usd from longwatch_readings
       where mint in (select mint from g)) p
      on p.mint = g.mint and p.ts >= g.ts and p.ts <= g.ts + interval '24 hours' and p.price_usd > 0
 left join grad_tokens t on t.mint = g.mint
