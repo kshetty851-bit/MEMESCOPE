@@ -42,14 +42,9 @@ BATCH = 250
 SETTLE = timedelta(seconds=HOLD_S + 120)
 
 _READINGS = text("""
-    select ts, price_usd::float8, pair from (
-      select ts, price_usd, pair_address pair from grad_postgrad_samples
-       where mint = :m and price_usd > 0 and ts >= cast(:a as timestamptz) - interval '2 minutes'
-         and ts <= cast(:a as timestamptz) + interval '30 minutes'
-      union all
-      select ts, price_usd, pair from longwatch_readings
-       where mint = :m and price_usd > 0 and ts >= cast(:a as timestamptz) - interval '2 minutes'
-         and ts <= cast(:a as timestamptz) + interval '30 minutes') x
+    select ts, price_usd::float8, pair_address pair from grad_postgrad_samples
+     where mint = :m and price_usd > 0 and ts >= cast(:a as timestamptz) - interval '2 minutes'
+       and ts <= cast(:a as timestamptz) + interval '30 minutes'
     order by ts""")
 
 
