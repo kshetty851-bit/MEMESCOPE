@@ -53,13 +53,13 @@ def test_the_main_wallet_skips_only_measured_150_to_200k_pools():
     assert not in_skipped_pool(None, band)  # unread pool: bought as before
 
 
-async def test_user1_floor_is_110_until_november_then_225():
+async def test_user1_floor_is_110_then_50_from_26_oct():
     assert rug_brake.member_floor("USER1", NOW) == Decimal(110)
-    assert rug_brake.member_floor("USER1", NOV) == Decimal(225)
+    assert rug_brake.member_floor("USER1", NOV) == Decimal(50)   # $50 from 26 Oct
     assert rug_brake.member_floor("USER2", NOV) is None
     s = _Session(SimpleNamespace(own_enabled=True, own_updated_at=None, own_updated_by=None))
     assert not await rug_brake.stop_member_below_floor(s, "USER1", Decimal("200"), NOW)
-    assert await rug_brake.stop_member_below_floor(s, "USER1", Decimal("200"), NOV)
+    assert await rug_brake.stop_member_below_floor(s, "USER1", Decimal("40"), NOV)
 
 
 def test_user1_skips_150_to_200k_pools_too():
