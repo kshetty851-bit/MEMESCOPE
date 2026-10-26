@@ -100,6 +100,13 @@ OWNER_SKIP_AI_POOL_USD: tuple[int, int] = (50_000, 60_000)
 #: buys what the lab's $75 buys, so a $50 ticket is $66.67 on a quiet small
 #: coin, $50 on a small one and $16.67 at $150k+.
 LAB_RULES_STRATEGY = "G-Q50"
+#: The Pump Catcher Lab's coins (Karthik, 2026-10-26: "it shud use same
+#: stratergy as pump catcher lab"): read straight from the three paper arms
+#: Karthik Lab's book is built from, with every rule the book applies.
+PUMP_STRATEGY = "G-PUMP"
+PUMP_FEED = ("KARTHIK_QUIET_5M", "KARTHIK_Q25_5M", "KARTHIK_Q50_5M")
+#: Both trade Karthik Lab's rules and are sized like it.
+LAB_RULES_STRATEGIES = frozenset({LAB_RULES_STRATEGY, PUMP_STRATEGY})
 #: User wallets that size exactly like Karthik Lab today (Karthik, 2026-10-19:
 #: "make user1 same as karthik lab"): its current table, $100 under $150k and
 #: $25 above, scaled so a ticket buys what the lab's $75 used to. Every other
@@ -113,7 +120,7 @@ def lab_sized(strategy_id: str, ticket: Decimal, pool_usd: Decimal | float | Non
     strategy only. An unread pool keeps the plain ticket."""
     from app.labs.graduation import config as grad_config
 
-    if strategy_id.upper() != LAB_RULES_STRATEGY or pool_usd is None:
+    if strategy_id.upper() not in LAB_RULES_STRATEGIES or pool_usd is None:
         return ticket
     table = (grad_config.USER1_TICKETS_BY_POOL if (member or "").upper() in LAB_SIZED_MEMBERS
              else grad_config.WALLET_TICKETS_BY_POOL)
@@ -525,6 +532,8 @@ class RealWalletDriver:
         """
         from app.labs.graduation import config as grad_config
 
+        if strategy_id.upper() == PUMP_STRATEGY:
+            return await self._next_pump_candidate(now=now, wallet=wallet)
         lab = strategy_id.upper() == LAB_RULES_STRATEGY
         if lab:
             skip_pools = skip_pools or grad_config.KARTHIK_SKIP_POOL_USD
@@ -568,6 +577,73 @@ class RealWalletDriver:
                 continue
             return mint
         return None
+
+    async def _next_pump_candidate(self, *, now: datetime, wallet: str) -> str | None:
+        """The newest coin one of the Pump Catcher Lab's arms bought and this
+        wallet has not, if Karthik Lab's book would keep it - the book's own
+        rules, in the book's order (`api.karthik_book`), on the paper entry's
+        own pool and name. The crew block is the safety check's
+        (`REAL_WALLET_CREW_BLOCK_ENABLED`)."""
+        from app.labs.graduation import config as grad_config
+        from app.labs.graduation import live_spec
+        from app.labs.graduation.models import GradPaperPosition
+        from app.labs.graduation.pool_lab import ai_name
+
+        cutoff = now - timedelta(seconds=live_spec.MAX_DECISION_AGE_SECONDS)
+        traded = select(RealWalletLiveIntent.mint_address).where(
+            RealWalletLiveIntent.wallet_public_key == wallet)
+        rows = (await self._session.execute(
+            select(GradPaperPosition.mint, GradPaperPosition.symbol,
+                   GradPaperPosition.liq_open_usd, GradPaperPosition.opened_at,
+                   GradPaperPosition.graduated_at)
+            .where(GradPaperPosition.book.in_(PUMP_FEED),
+                   GradPaperPosition.opened_at >= cutoff,
+                   GradPaperPosition.excluded.is_(None),
+                   GradPaperPosition.close_reason.is_distinct_from("replayed"),
+                   GradPaperPosition.mint.not_in(traded))
+            .order_by(GradPaperPosition.opened_at.desc())
+            .limit(10))).all()
+        skip_lo, skip_hi = grad_config.KARTHIK_SKIP_POOL_USD
+        ai_lo, ai_hi = grad_config.KARTHIK_SKIP_AI_POOL_USD
+        for mint, symbol, pool, opened_at, graduated_at in rows:
+            if graduated_at is None or (now - graduated_at).total_seconds() > grad_config.MAX_ENTRY_AGE_S:
+                continue                                  # the two-minute entry guard
+            if not grad_config.karthik_book_pool(pool, symbol):
+                continue                                  # $40k+, short names below $50k
+            depth = float(pool or 0)
+            if skip_lo <= depth < skip_hi or (ai_lo <= depth < ai_hi and ai_name(symbol)):
+                continue
+            if await self._quiet_big_pool(mint, pool, opened_at):
+                continue                                  # $200k+ needs its buys
+            if grad_config.unnamed_evening(symbol, opened_at):
+                continue
+            if await self._no_open_buy(mint):
+                continue
+            if await self._pump_bad_name(symbol, now):
+                continue                                  # blocked, spaced, rugged 12 h
+            return mint
+        return None
+
+    async def _pump_bad_name(self, symbol: str | None, now: datetime) -> bool:
+        """The book's name rules: a blocked name, a spaced name, or a name one of
+        its arms closed at a rug's loss in the last `KARTHIK_RUGGED_NAME_HOURS`
+        (the labs' 12 h block, which the other real wallets do not use)."""
+        from app.labs.graduation import config as grad_config
+        from app.labs.graduation.models import GradPaperPosition
+        from app.labs.graduation.pool_lab import name_key
+
+        key = name_key(symbol)
+        if key in grad_config.KARTHIK_BLOCKED_NAMES or grad_config.spaced_name(symbol):
+            return True
+        if not key or not grad_config.KARTHIK_LAB_RUGGED_NAME_BAN:
+            return False
+        window = timedelta(hours=grad_config.KARTHIK_RUGGED_NAME_HOURS)
+        rugged = (await self._session.scalars(select(GradPaperPosition.symbol).where(
+            GradPaperPosition.book.in_(PUMP_FEED),
+            GradPaperPosition.closed_at > now - window,
+            GradPaperPosition.closed_at <= now,
+            GradPaperPosition.net_return <= grad_config.OPERATOR_RUG_MOVE))).all()
+        return key in {name_key(s) for s in rugged}
 
     @staticmethod
     def _too_old(strategy_id: str, features: dict | None, now: datetime) -> bool:
@@ -699,7 +775,7 @@ class RealWalletDriver:
         from app.labs.graduation import live_spec
         from app.labs.graduation.models import GradPostgradSample
 
-        if strategy_id.upper() != LAB_RULES_STRATEGY:
+        if strategy_id.upper() not in LAB_RULES_STRATEGIES:
             return ticket
         buys = await self._session.scalar(
             select(GradPostgradSample.txns_m5_buys).where(

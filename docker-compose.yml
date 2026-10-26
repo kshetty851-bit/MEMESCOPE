@@ -346,7 +346,8 @@ x-backend-env: &backend-env
   REAL_WALLET_BLOCK_REPEAT_CREATORS: ${REAL_WALLET_BLOCK_REPEAT_CREATORS:-false}
   REAL_WALLET_CREW_BLOCK_ENABLED: ${REAL_WALLET_CREW_BLOCK_ENABLED:-false}
   # Karthik, 2026-10-03: USER 1 trades the $50k+ quiet rule, several at once.
-  REAL_WALLET_MEMBER_STRATEGY: '{"USER1": "G-Q50"}'
+  # Karthik, 2026-10-26: USER1 buys the Pump Catcher Lab's coins (G-PUMP).
+  REAL_WALLET_MEMBER_STRATEGY: '{"USER1": "G-PUMP"}'
   REAL_WALLET_MEMBER_MAX_OPEN: '{"USER1": 25}'
   # Karthik, 2026-10-04: the main wallet holds several at once too.
   REAL_WALLET_OWNER_MAX_OPEN: 25

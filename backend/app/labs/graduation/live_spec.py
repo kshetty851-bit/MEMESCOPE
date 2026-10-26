@@ -60,7 +60,8 @@ _Money = TypeVar("_Money", float, Decimal)
 #: one under the old version leaves that row holding the old `SPEC_HASH`, and
 #: `app.lab.health` then reads the difference as drift and halts every arm on
 #: it. A new version means a new tournament row, which is what 1.1.0 did.
-SPEC_VERSION = "gradlive-1.12.0"
+#: 1.13.0 adds G-PUMP (2026-10-26), the Pump Catcher Lab's coins for USER 1.
+SPEC_VERSION = "gradlive-1.13.0"
 
 #: Each live arm and the paper arm it mirrors. Recorded so a reader can put the
 #: real book beside the arm it is supposed to be copying, and so nothing has to
@@ -76,7 +77,11 @@ PAPER_BOOKS = {"G-B3-5M": "B3_198k_5m", "G-B3-4M": "B3_198k_4m",
                "G-QUIET4": "BASE_75k_quiet_4m", "G-BAND5": "BAND_55k_5m",
                "G-BANDP": "BAND_55k_pump_5m", "G-B5-5M": "B5_500k_flow_5m",
                "G-Q150": "BASE_150k_quiet_5m", "G-QMID": "BASE_75_300k_quiet_5m",
-               "G-Q50": "BASE_50k_quiet_5m"}
+               "G-Q50": "BASE_50k_quiet_5m",
+               #: Mirrors Karthik Lab's $75k+ arm only to satisfy the
+               #: one-book-per-arm rule below: the driver reads ALL THREE of the
+               #: book's arms itself (`driver.PUMP_FEED`), not these decisions.
+               "G-PUMP": "KARTHIK_QUIET_5M"}
 #: The same mapping read the other way: the live arm a paper entry feeds.
 MIRRORS = {book: sid for sid, book in PAPER_BOOKS.items()}
 
@@ -97,7 +102,9 @@ POOL_FLOORS = {"G-B3-5M": POOL_FLOOR_USD, "G-B3-4M": POOL_FLOOR_USD,
                "G-BAND5": 55_000, "G-BANDP": 55_000, "G-B5-5M": 500_000,
                "G-Q150": 150_000,
                #: A band, $75k to $300k: the arm's own rule enforces the top.
-               "G-QMID": 75_000, "G-Q50": 50_000}
+               "G-QMID": 75_000, "G-Q50": 50_000,
+               #: $40k, and below $50k only short names (`config.karthik_book_pool`).
+               "G-PUMP": 40_000}
 
 #: The largest trade size Start offers for an arm, where that is smaller than
 #: `REAL_WALLET_ENTRY_SIZE_USD`.
@@ -505,6 +512,31 @@ STRATEGIES: tuple[Strategy, ...] = (
             "3). The $50-75k pools rug far more often; the rug blocks refused "
             "most of them from 2 Oct. Its paper arm BASE_50k_quiet_5m starts "
             "empty today; only its trades from then on are evidence."
+        ),
+    ),
+    Strategy(
+        id="G-PUMP",
+        name="PUMP-CATCHER-LAB-COINS",
+        hypothesis=(
+            "The coins the Pump Catcher Lab buys (Karthik Lab's coins and "
+            "rules): $40k+ quiet pools, short names only below $50k, with the "
+            "lab's name, crew, open-buy, big-pool and pool-band skips."
+        ),
+        checkpoint_minutes=0,
+        entry=(),
+        size_usd=D("100"),
+        max_concurrent=10,
+        max_exposure_usd=D("1000"),
+        exits=Exits(take_profit=None, stop_loss=None, time_exit_hours=_hours(5)),
+        evidence="POST_HOC_RULES_FORWARD_FROM_2026_10_24",
+        overfit_risk="HIGH",
+        note=(
+            "REGISTERED AT KARTHIK'S REQUEST, 2026-10-26 (\"it shud use same "
+            "stratergy as pump catcher lab\"), for USER 1's wallet only. The "
+            "hold here is the registry's five minutes; USER 1's wallet sells "
+            "the Pump Catcher's way (`exit_driver.PUMP_EXIT_MEMBERS`). The "
+            "rules were chosen on October's data; only trades from 24 Oct on "
+            "are a fair test."
         ),
     ),
     Strategy(

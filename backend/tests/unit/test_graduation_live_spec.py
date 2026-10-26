@@ -83,7 +83,9 @@ def test_each_live_arm_copies_its_own_paper_book() -> None:
     assert set(live_spec.PAPER_BOOKS) == {"G-B3-5M", "G-B3-4M", "G-BAS-5M",
                                           "G-QUIET", "G-QUIET4", "G-BAND5",
                                           "G-BANDP", "G-B5-5M", "G-Q150", "G-QMID",
-                                          "G-Q50"}
+                                          "G-Q50", "G-PUMP"}
+    # USER 1's Pump Catcher feed (2026-10-26): its pool rule is $40k.
+    assert live_spec.pool_floor("G-PUMP") == 40_000
     assert live_spec.pool_floor("G-Q50") == 50_000
     assert live_spec.PAPER_BOOKS["G-Q50"] == "BASE_50k_quiet_5m"
     # USER 1's since 2026-10-03, offered at the owner's Start since 2026-10-04.
