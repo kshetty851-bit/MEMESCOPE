@@ -22,16 +22,17 @@ class _Session:
     async def scalars(self, _stmt): return _Rows(self.rugged)
 
 
-def _row(mint, symbol, pool, age_s=40):
+def _row(mint, symbol, pool, age_s=40, book="KARTHIK_Q50_5M"):
     opened = NOW - timedelta(seconds=10)
-    return (mint, symbol, Decimal(pool), opened, NOW - timedelta(seconds=age_s))
+    return (mint, symbol, Decimal(pool), opened, NOW - timedelta(seconds=age_s), book)
 
 
-async def _pick(rows, rugged=()):
+async def _pick(rows, rugged=(), no_open_buy=False):
     d = drv.RealWalletDriver(_Session(rows, rugged))
     async def no(*_a, **_k): return False
+    async def open_buy(*_a, **_k): return no_open_buy
     d._quiet_big_pool = no
-    d._no_open_buy = no
+    d._no_open_buy = open_buy
     return await d._next_pump_candidate(now=NOW, wallet="W")
 
 
@@ -57,3 +58,10 @@ async def test_a_name_that_rugged_in_the_last_12_hours_is_refused():
 def test_g_pump_is_registered_and_sized_like_the_lab():
     assert "G-PUMP" in live_spec.BY_ID and live_spec.pool_floor("G-PUMP") == 40_000
     assert drv.lab_sized("G-PUMP", Decimal(10), 60_000, 5, "USER1") == Decimal("10.00")
+
+
+@pytest.mark.asyncio
+async def test_no_buy_at_open_is_checked_only_where_the_book_checks_it():
+    # The $40-50k arm is never read by the book, so a coin from it is bought (Grok, 26 Oct).
+    assert await _pick([_row("G", "Grok", 48_000, book="KARTHIK_Q25_5M")], no_open_buy=True) == "G"
+    assert await _pick([_row("Q", "ROCK", 60_000, book="KARTHIK_Q50_5M")], no_open_buy=True) is None
