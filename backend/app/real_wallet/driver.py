@@ -595,7 +595,7 @@ class RealWalletDriver:
         rows = (await self._session.execute(
             select(GradPaperPosition.mint, GradPaperPosition.symbol,
                    GradPaperPosition.liq_open_usd, GradPaperPosition.opened_at,
-                   GradPaperPosition.graduated_at)
+                   GradPaperPosition.graduated_at, GradPaperPosition.book)
             .where(GradPaperPosition.book.in_(PUMP_FEED),
                    GradPaperPosition.opened_at >= cutoff,
                    GradPaperPosition.excluded.is_(None),
@@ -605,7 +605,9 @@ class RealWalletDriver:
             .limit(10))).all()
         skip_lo, skip_hi = grad_config.KARTHIK_SKIP_POOL_USD
         ai_lo, ai_hi = grad_config.KARTHIK_SKIP_AI_POOL_USD
-        for mint, symbol, pool, opened_at, graduated_at in rows:
+        from app.labs.graduation.open_buys import BOOKS as OPEN_BUY_BOOKS
+
+        for mint, symbol, pool, opened_at, graduated_at, book in rows:
             if graduated_at is None or (now - graduated_at).total_seconds() > grad_config.MAX_ENTRY_AGE_S:
                 continue                                  # the two-minute entry guard
             if not grad_config.karthik_book_pool(pool, symbol):
@@ -617,7 +619,9 @@ class RealWalletDriver:
                 continue                                  # $200k+ needs its buys
             if grad_config.unnamed_evening(symbol, opened_at):
                 continue
-            if await self._no_open_buy(mint):
+            # Only where the book reads it (`open_buys.BOOKS`): its $40-50k arm
+            # is never read, so the lab keeps those coins (26 Oct: Grok).
+            if book in OPEN_BUY_BOOKS and await self._no_open_buy(mint):
                 continue
             if await self._pump_bad_name(symbol, now):
                 continue                                  # blocked, spaced, rugged 12 h
