@@ -365,8 +365,24 @@ def short_form(message: str) -> str:
 # --- the log --------------------------------------------------------------------
 
 
+#: User wallets whose trades send nothing, WhatsApp or phone (Karthik, 2026-10-27:
+#: "switch off notifications for user 1"). Their events are recorded as
+#: `baseline`, the status neither sender ever sends.
+MUTED_MEMBERS = frozenset({"USER1"})
+
+
+def _muted(public_key: str | None) -> bool:
+    from app.real_wallet import family_wallets
+
+    try:
+        return family_wallets.member_for(public_key or "") in MUTED_MEMBERS
+    except family_wallets.FamilyWalletConfigError:
+        return False
+
+
 async def record_new_events(session: AsyncSession, *, now: datetime) -> dict[str, int]:
-    """Give every trade event without an alert row one. Old ones become `baseline`."""
+    """Give every trade event without an alert row one. Old ones, and muted
+    wallets' ones, become `baseline`."""
     created = {"pending": 0, "baseline": 0}
     fresh_after = now - FRESH_WINDOW
 
@@ -376,7 +392,8 @@ async def record_new_events(session: AsyncSession, *, now: datetime) -> dict[str
     ):
         missing = (
             await session.execute(
-                select(RealWalletPosition.id, happened).where(
+                select(RealWalletPosition.id, happened,
+                       RealWalletPosition.wallet_public_key).where(
                     happened.is_not(None),
                     ~exists().where(
                         RealWalletTradeAlert.position_id == RealWalletPosition.id,
@@ -385,8 +402,8 @@ async def record_new_events(session: AsyncSession, *, now: datetime) -> dict[str
                 )
             )
         ).all()
-        for position_id, at in missing:
-            status = "pending" if at >= fresh_after else "baseline"
+        for position_id, at, wallet in missing:
+            status = "pending" if at >= fresh_after and not _muted(wallet) else "baseline"
             result = await session.execute(
                 insert(RealWalletTradeAlert)
                 .values(position_id=position_id, event=event, status=status)
