@@ -35,7 +35,14 @@ CAPITAL = Decimal(500)
 #: v2 (2026-10-24, Karthik: "yes great add it since day 1"): a coin that is down
 #: at 5 minutes is sold then, like Karthik Lab; only coins up at 5 minutes stay
 #: for the +30% target or 10 minutes. Every position re-priced under v2.
-KEY = "pumpcatcher:exit:v2"
+#: v3 (Karthik, 2026-10-27: "pause user 1 and do both"): priced the way a real
+#: wallet sells. The +30% target must be reached AFTER this coin's fees and
+#: impact, and every exit gives up `REAL_SLIP` more: USER 1's real sells came in
+#: 1-2 points under the lab's and twice missed the target by a hair (Apple x1.278
+#: and x1.248 real against x1.32 on paper), then rugged. Re-priced from day 1:
+#: +$2,492 -> about +$977 at $50.
+KEY = "pumpcatcher:exit:v3"
+REAL_SLIP = 0.03
 CHECK_S = 300
 BATCH = 250
 #: Wait this long after the buy before deciding: the 10-minute reading plus slack.
@@ -53,14 +60,14 @@ def decide(path: list[tuple[float, float]], net5: float) -> dict[str, Any]:
     price), same pool, after the buy. Returns net return, seconds held, how."""
     near5 = [x for s, x in path if 240 <= s <= 420]
     if not near5 or abs(near5[0] - (1 + net5)) > MISMATCH or len(path) < 3:
-        return {"net": net5, "held_s": 300, "gross": None, "how": "5m"}
-    cost = (near5[0] - 1) - net5                     # this coin's fees + impact
+        return {"net": net5 - REAL_SLIP, "held_s": 300, "gross": None, "how": "5m"}
+    cost = (near5[0] - 1) - net5 + REAL_SLIP         # this coin's fees + impact + real slippage
     for i, (s, x) in enumerate(path):
         if s > HOLD_S:
             break
         if s > CHECK_S and net5 < 0:                 # down at 5 minutes: out, like Karthik Lab
-            return {"net": net5, "held_s": 300, "gross": None, "how": "5m-down"}
-        if x >= 1 + TARGET:
+            return {"net": net5 - REAL_SLIP, "held_s": 300, "gross": None, "how": "5m-down"}
+        if x - 1 - cost >= TARGET:                   # +30% as a real wallet would see it
             ns, nx = path[i + 1] if i + 1 < len(path) else (s, x)
             return {"net": nx - 1 - cost, "held_s": ns, "gross": nx, "how": "target"}
     for s, x in path:
@@ -75,7 +82,7 @@ async def price(session, row) -> dict[str, Any]:
     pre = [(ts, p, pa) for ts, p, pa in rows if ts <= row.opened_at and pa]
     net5 = float(row.net_return)
     if not pre:
-        return {"net": net5, "held_s": 300, "gross": None, "how": "5m"}
+        return {"net": net5 - REAL_SLIP, "held_s": 300, "gross": None, "how": "5m"}
     pair, p0 = pre[-1][2], pre[-1][1]
     path = [((ts - row.opened_at).total_seconds(), p / p0)
             for ts, p, pa in rows if ts > row.opened_at and pa == pair]

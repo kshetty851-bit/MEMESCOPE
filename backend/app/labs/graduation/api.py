@@ -2220,6 +2220,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
         rows, small = pump_catcher.reprice(rows, priced), pump_catcher.reprice(small, priced)
         capital = pump_catcher.CAPITAL
         pump = {"target_pct": round(100 * pump_catcher.TARGET), "hold_min": pump_catcher.HOLD_S // 60,
+                "real_slip_pct": round(100 * pump_catcher.REAL_SLIP),
                 "check_min": pump_catcher.CHECK_S // 60,
                 "priced": len(rows) + len(small), "settling": before - len(rows) - len(small)}
     # Every $75k+ signal his arm took: what the grid beside the book reads.
