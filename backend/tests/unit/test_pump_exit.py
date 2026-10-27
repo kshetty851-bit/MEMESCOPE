@@ -35,3 +35,16 @@ def test_other_wallets_keep_the_five_minute_hold():
 def test_only_user1_is_on_the_pump_exit():
     assert ed.PUMP_EXIT_MEMBERS == frozenset({"USER1"})
     assert ed.pump_exit(None) is False
+
+
+def test_user1_sells_on_the_freshest_price():
+    from datetime import UTC, datetime, timedelta
+    from types import SimpleNamespace as N
+
+    t = datetime(2026, 10, 27, tzinfo=UTC)
+    snap = N(price_usd=Decimal("1.0"), captured_at=t)
+    live = N(price_usd=Decimal("1.3"), captured_at=t + timedelta(seconds=15))
+    assert ed.freshest(snap, live) is live                       # newer live mark wins
+    assert ed.freshest(live, N(price_usd=Decimal("1"), captured_at=t)) is live
+    assert ed.freshest(snap, None) is snap and ed.freshest(None, live) is live
+    assert ed.freshest(snap, N(price_usd=None, captured_at=t + timedelta(seconds=9))) is snap

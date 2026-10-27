@@ -36,7 +36,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -384,9 +384,16 @@ class GraduationRecorder:
         most of a two-minute hold.
         """
         async with self._sessions() as session:
-            held = (select(GradPaperPosition.mint)
-                    .where(GradPaperPosition.closed_at.is_(None),
-                           GradPaperPosition.notional_usd > 0))
+            # Paper positions, and the real wallets' open ones too (Karthik,
+            # 2026-10-27: USER 1 sold on 15-20 s old snapshots and missed its
+            # target by a hair twice): their sells read these marks.
+            held = list((await session.scalars(
+                select(GradPaperPosition.mint)
+                .where(GradPaperPosition.closed_at.is_(None),
+                       GradPaperPosition.notional_usd > 0))).all())
+            held += list((await session.execute(text(
+                "select distinct mint_address from real_wallet_positions"
+                " where status = 'OPEN'"))).scalars())
             rows = (await session.execute(
                 select(GradPostgradSample.mint,
                        GradPostgradSample.pair_address,
