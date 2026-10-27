@@ -14,6 +14,7 @@ import type {
   WalletCounts, KarthikBook, KarthikDay, KarthikFlows, KarthikTrade, KarthikWhatIfLine, PumpfunDay,
   StartDate, WalletProfit,
 } from "./types";
+import { User1Real } from "./user1-real";
 
 /** The Checkpoint office, loaded after the page so HQ's drawings stay out of
  *  this page's bundle (see "bundle isolation" in hq.test.tsx). */
@@ -1153,6 +1154,8 @@ export function KarthikLabPage({ variant = "karthik" }: { variant?: "karthik" | 
       <CheckpointLive />
       {/* UAE and USA clocks (Karthik, 2026-10-04). */}
       <WorldClocks />
+      {/* USER 1's real trades on this lab (Karthik, 2026-10-27). */}
+      {variant === "pump" ? <User1Real /> : null}
       {/* Two columns from 1150px: the counts and their boxes on the right, and
           the header grows to fit them rather than lying over the rule book. */}
       <div className="grid gap-x-8 gap-y-2 min-[1150px]:grid-cols-[minmax(0,1fr)_auto]">
