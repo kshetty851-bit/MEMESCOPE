@@ -21,6 +21,7 @@ lifecycle's, and each has its own barrier.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from decimal import ROUND_DOWN, Decimal
@@ -642,12 +643,34 @@ class RealWalletDriver:
         if not key or not grad_config.KARTHIK_LAB_RUGGED_NAME_BAN:
             return False
         window = timedelta(hours=grad_config.KARTHIK_RUGGED_NAME_HOURS)
-        rugged = (await self._session.scalars(select(GradPaperPosition.symbol).where(
+        rug = float(grad_config.OPERATOR_RUG_MOVE)
+        rows = (await self._session.execute(select(
+            GradPaperPosition.id, GradPaperPosition.symbol, GradPaperPosition.opened_at,
+            GradPaperPosition.closed_at, GradPaperPosition.net_return).where(
             GradPaperPosition.book.in_(PUMP_FEED),
-            GradPaperPosition.closed_at > now - window,
-            GradPaperPosition.closed_at <= now,
-            GradPaperPosition.net_return <= grad_config.OPERATOR_RUG_MOVE))).all()
-        return key in {name_key(s) for s in rugged}
+            GradPaperPosition.opened_at > now - window - timedelta(minutes=15),
+            GradPaperPosition.closed_at.is_not(None)))).all()
+        rows = [r for r in rows if name_key(r.symbol) == key]
+        if not rows:
+            return False
+        # The lab's OWN result (its 10-minute exit) where it has priced one: a coin
+        # fine at 5 minutes can rug by 10, and the lab blocks its name then
+        # (Grok, 27 Oct: refused by the lab, bought here).
+        from app.core.redis import init_redis
+        from app.labs.graduation import pump_catcher
+
+        priced = await (await init_redis()).hmget(pump_catcher.KEY, [str(r.id) for r in rows])
+        for r, raw in zip(rows, priced, strict=True):
+            ex = json.loads(raw) if raw else None
+            if ex is not None and ex["net"] <= rug:
+                at = r.opened_at + timedelta(seconds=ex["held_s"])
+            elif r.net_return is not None and float(r.net_return) <= rug:
+                at = r.closed_at
+            else:
+                continue
+            if now - window < at <= now:
+                return True
+        return False
 
     @staticmethod
     def _too_old(strategy_id: str, features: dict | None, now: datetime) -> bool:

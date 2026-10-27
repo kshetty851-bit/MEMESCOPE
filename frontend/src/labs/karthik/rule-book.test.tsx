@@ -47,8 +47,8 @@ describe("Karthik's Lab rule book", () => {
     expect(screen.getByText(/do not follow this book's newer rules/)).toBeInTheDocument();
     unmount();
     render(<RuleBook data={{ ...base, capital_usd: "500", pump_catcher: { target_pct: 30, hold_min: 10, check_min: 5, priced: 1, settling: 0 } } as unknown as KarthikBook} />);
-    expect(screen.getByText(/up 30% \(at the next price reading\)\. If it is down at 5 minutes it sells then.*otherwise 10 minutes/)).toBeInTheDocument();
+    expect(screen.getByText(/up 30% after fees and price impact \(at the next price reading\)\. If it is down at 5 minutes it sells then.*otherwise 10 minutes/)).toBeInTheDocument();
     expect(screen.queryByText(/Exactly 5 minutes/)).not.toBeInTheDocument();
-    expect(screen.getByText(/No real wallet follows this lab/)).toBeInTheDocument();
+    expect(screen.getByText(/USER 1 followed it with real money/)).toBeInTheDocument();
   });
 });

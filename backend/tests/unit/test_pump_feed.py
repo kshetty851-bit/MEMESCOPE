@@ -16,10 +16,12 @@ class _Rows:
 
 
 class _Session:
+    """First execute: the feed rows; later ones: the rug-name query's rows."""
     def __init__(self, rows, rugged=()):
-        self.rows, self.rugged = rows, list(rugged)
-    async def execute(self, _stmt): return _Rows(self.rows)
-    async def scalars(self, _stmt): return _Rows(self.rugged)
+        self.rows, self.rugged, self.calls = rows, list(rugged), 0
+    async def execute(self, _stmt):
+        self.calls += 1
+        return _Rows(self.rows if self.calls == 1 else self.rugged)
 
 
 def _row(mint, symbol, pool, age_s=40, book="KARTHIK_Q50_5M"):
@@ -48,11 +50,32 @@ async def test_the_book_pool_rules_decide_the_coin():
     assert await _pick([_row("BAD", "LONGNAME", 45_000), _row("OK", "ROCK", 60_000)]) == "OK"
 
 
+class _Redis:
+    def __init__(self, exits): self.exits = exits
+    async def hmget(self, _key, ids): return [self.exits.get(i) for i in ids]
+
+
+def _closed(i, symbol, net5, hours_ago=2):
+    from types import SimpleNamespace
+    opened = NOW - timedelta(hours=hours_ago)
+    return SimpleNamespace(id=i, symbol=symbol, opened_at=opened, closed_at=opened + timedelta(minutes=5),
+                           net_return=Decimal(str(net5)))
+
+
 @pytest.mark.asyncio
-async def test_a_name_that_rugged_in_the_last_12_hours_is_refused():
+async def test_a_name_that_rugged_in_the_last_12_hours_is_refused(monkeypatch):
+    import json
+
+    import app.core.redis as r
     assert config.KARTHIK_LAB_RUGGED_NAME_BAN and config.KARTHIK_RUGGED_NAME_HOURS == 12
-    assert await _pick([_row("R", "Grok", 80_000)], rugged=["GROK"]) is None
-    assert await _pick([_row("R", "Grok", 80_000)], rugged=["ELON"]) == "R"
+    exits = {"2": json.dumps({"net": -0.8, "held_s": 600})}     # fine at 5 min, rugged by 10
+    async def redis(): return _Redis(exits)
+    monkeypatch.setattr(r, "init_redis", redis)
+    assert await _pick([_row("R", "Grok", 80_000)], rugged=[_closed("1", "Grok", -0.9)]) is None
+    assert await _pick([_row("R", "Grok", 80_000)], rugged=[_closed("2", "Grok", 0.05)]) is None
+    assert await _pick([_row("R", "Grok", 80_000)], rugged=[_closed("3", "Grok", 0.05)]) == "R"
+    assert await _pick([_row("R", "Grok", 80_000)], rugged=[_closed("1", "ELON", -0.9)]) == "R"
+    assert await _pick([_row("R", "Grok", 80_000)], rugged=[_closed("1", "Grok", -0.9, hours_ago=13)]) == "R"
 
 
 def test_g_pump_is_registered_and_sized_like_the_lab():
