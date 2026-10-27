@@ -60,8 +60,10 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from types import SimpleNamespace
+from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -117,6 +119,28 @@ def exit_verdict(exits: spec.Exits, state: MarkState, *, pump: bool) -> ExitVerd
             and PUMP_CHECK_HOURS[0] <= state.held_hours < PUMP_CHECK_HOURS[1]):
         return ExitVerdict("CLOSE", "down_at_5m")
     return verdict
+
+
+#: The newest reading of a coin, socket or DexScreener, and its SOL rate from its
+#: own newest DexScreener reading (bounded: a USDC pool reads 1.00).
+_LIVE_MARK_SQL = text("""
+    select s.ts, s.price_native, s.liquidity_usd,
+           (select d.price_usd / d.price_native from grad_postgrad_samples d
+             where d.mint = s.mint and d.source = 'dexscreener' and d.price_native > 0
+               and d.price_usd / d.price_native between 20 and 2000
+             order by d.ts desc limit 1) rate
+    from grad_postgrad_samples s
+    where s.mint = :m and s.source in ('held_ws', 'dexscreener') and s.price_native > 0
+    order by s.ts desc limit 1""")
+
+
+def freshest(snapshot: Any | None, live: Any | None) -> Any | None:
+    """Whichever priced mark was captured last; a tie keeps the snapshot."""
+    if live is None or live.price_usd is None or live.captured_at is None:
+        return snapshot
+    if snapshot is None or snapshot.price_usd is None or snapshot.captured_at is None:
+        return live
+    return live if live.captured_at > snapshot.captured_at else snapshot
 
 
 def strategy_for(strategy_id: str | None) -> spec.Strategy | None:
@@ -179,7 +203,7 @@ class RealWalletExitDriver:
                     skip(waiting)
                     continue
                 reason = pos.exit_reason or "retry"
-            elif (state := await self._mark(pos, exits, now, started)) is not None:
+            elif (state := await self._mark(pos, exits, now, started, fast=pump)) is not None:
                 marked += 1
                 verdict = exit_verdict(exits, state, pump=pump)
                 if verdict.action is None:
@@ -234,7 +258,7 @@ class RealWalletExitDriver:
 
     async def _mark(
         self, pos: RealWalletPosition, exits: spec.Exits, now: datetime,
-        started: datetime,
+        started: datetime, *, fast: bool = False,
     ) -> MarkState | None:
         """Update the position's live state and return what the rules read.
 
@@ -244,6 +268,8 @@ class RealWalletExitDriver:
         way, and the two records have to agree.
         """
         snapshot = await self._markets.latest_for_mint(pos.mint_address)
+        if fast:
+            snapshot = freshest(snapshot, await self._live_mark(pos.mint_address))
         if snapshot is None or snapshot.price_usd is None:
             return None
         captured = snapshot.captured_at
@@ -299,6 +325,16 @@ class RealWalletExitDriver:
             partial_done=bool(pos.partial_done),
             flat_hours=flat_hours,
         )
+
+    async def _live_mark(self, mint: str) -> Any | None:
+        """The graduation lab's newest same-pool reading of this coin: the vault
+        socket's 1-2 s marks, or DexScreener's, in USD at the coin's own
+        DexScreener SOL rate. None when there is none or no rate."""
+        row = (await self._session.execute(_LIVE_MARK_SQL, {"m": mint})).first()
+        if row is None or row.rate is None:
+            return None
+        return SimpleNamespace(price_usd=Decimal(str(row.price_native)) * Decimal(str(row.rate)),
+                               liquidity_usd=row.liquidity_usd, captured_at=row.ts)
 
     async def _retry_wait(self, pos: RealWalletPosition, now: datetime) -> str | None:
         """Why not to ask again yet, or None when it is time to."""
