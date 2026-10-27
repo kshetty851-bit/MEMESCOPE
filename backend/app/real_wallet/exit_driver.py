@@ -86,7 +86,10 @@ logger = get_logger(__name__)
 #: below cost there, else at 10 minutes. What they BUY is unchanged (their
 #: strategy's), and every other wallet on the same strategy keeps its own hold.
 PUMP_EXIT_MEMBERS = frozenset({"USER1"})
-PUMP_EXITS = spec.Exits(take_profit=Decimal("1.30"), time_exit_hours=10 / 60)  # type: ignore[arg-type]
+#: x1.25 on the EXECUTABLE quote (Karthik, 2026-10-27, "yes do both"): the lab's
+#: +30% is on DexScreener's raw price, which after fees and impact is about
+#: x1.25-1.27 here. At x1.30 USER1 missed Apple (27 Oct): peak x1.278, then a rug.
+PUMP_EXITS = spec.Exits(take_profit=Decimal("1.25"), time_exit_hours=10 / 60)  # type: ignore[arg-type]
 #: The one look at five minutes: a mark in this minute below cost sells. A dip
 #: after it does not (the lab decides once, at five), and no mark in it holds on.
 PUMP_CHECK_HOURS = (5 / 60, 6 / 60)
