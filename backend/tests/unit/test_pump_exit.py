@@ -17,7 +17,8 @@ def _at(minutes: float, multiple: str) -> MarkState:
 
 def test_pump_wallet_sells_at_30pct_down_at_5m_else_10m():
     v = lambda m, x: ed.exit_verdict(ed.PUMP_EXITS, _at(m, x), pump=True)
-    assert v(1, "1.31").action == "CLOSE"                        # +30% any time
+    assert v(1, "1.26").action == "CLOSE"                        # x1.25 executable = the lab's +30%
+    assert v(1, "1.24").action is None
     assert v(4.9, "0.80").action is None                         # before five: holds
     assert v(5.0, "0.99").reason == "down_at_5m"                 # down at five: out
     assert v(5.2, "1.05").action is None                         # up at five: stays
