@@ -1611,10 +1611,14 @@ FAMILY_DAYS = 30
 
 def _wallet_run(rows: Sequence[Any], buys_before: dict, sol: Decimal | None,
                 n: int, start_usd: float = FAMILY_START,
-                share: float = 0.0, share_max: float = 0.0) -> list[dict[str, Any]]:
+                share: float = 0.0, share_max: float = 0.0,
+                per_coin: int = 0) -> list[dict[str, Any]]:
     """`n` user wallets of `FAMILY_START` on the book's trades: each wallet's
     profit, in the order the queue reaches them (USER 1 buys first). `share` >
-    0 stakes that share of each wallet's own balance, at most `share_max`."""
+    0 stakes that share of each wallet's own balance, at most `share_max`.
+    `per_coin` > 0 lets only that many wallets into one coin, always USER 1
+    first: each later buyer pays the earlier ones' impact, and past ~7 the
+    last wallet's buy costs more than the move (Karthik, 2026-10-28)."""
     from app.labs.graduation import pool_lab as pl
 
     wallets = [pl.Wallet(f"USER {i}", cash=start_usd, low=start_usd) for i in range(1, n + 1)]
@@ -1629,6 +1633,8 @@ def _wallet_run(rows: Sequence[Any], buys_before: dict, sol: Decimal | None,
             return (min(share_max, share * (w.cash + sum(h[2] for h in w.held)))
                     if share else flat)
         ready = sorted((w for w in wallets if w.cash >= stake_of(w)), key=lambda w: (w.last_buy, w.name))
+        if per_coin:
+            ready = sorted(ready, key=lambda w: int(w.name.split()[1]))[:per_coin]
         for place, w in enumerate(ready):
             stake = stake_of(w)
             k = pl.queue_k(place, stake)
@@ -1650,7 +1656,8 @@ def _wallet_run(rows: Sequence[Any], buys_before: dict, sol: Decimal | None,
 def _wallet_counts(rows: Sequence[Any], buys_before: dict, sol: Decimal | None,
                    start: datetime, now: datetime,
                    start_usd: float = FAMILY_START,
-                   share: float = 0.0, share_max: float = 0.0) -> dict[str, Any]:
+                   share: float = 0.0, share_max: float = 0.0,
+                   per_coin: int = 0) -> dict[str, Any]:
     """1 to `FAMILY_MAX` user wallets on the book's trades, now and at day 30.
 
     Day 30 is the pace so far carried forward: profit per elapsed day x 30.
@@ -1658,7 +1665,7 @@ def _wallet_counts(rows: Sequence[Any], buys_before: dict, sol: Decimal | None,
     elapsed = max((now - start).total_seconds() / 86400, 1.0)
     counts = []
     for n in range(1, FAMILY_MAX + 1):
-        each = _wallet_run(rows, buys_before, sol, n, start_usd, share, share_max)
+        each = _wallet_run(rows, buys_before, sol, n, start_usd, share, share_max, per_coin)
         pnl = sum(w["pnl_usd"] for w in each)
         put_in = start_usd * n
         day30 = pnl / elapsed * FAMILY_DAYS
@@ -1668,7 +1675,8 @@ def _wallet_counts(rows: Sequence[Any], buys_before: dict, sol: Decimal | None,
                        "day30_pnl_usd": round(day30, 2), "day30_balance_usd": round(put_in + day30, 2)})
     return {"start_usd": start_usd, "days_elapsed": round(elapsed, 1), "days_target": FAMILY_DAYS,
             "tickets_by_pool": [list(t) for t in config.KARTHIK_TICKETS_BY_POOL], "counts": counts,
-            "share_pct": round(100 * share) or None, "share_max_usd": share_max or None}
+            "share_pct": round(100 * share) or None, "share_max_usd": share_max or None,
+            "per_coin": per_coin or None}
 
 
 def _fresh_entry(row: Any) -> bool:
@@ -2355,7 +2363,8 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
         "floor_test": _floor_test(rows),
         # Three $500 user wallets on the same trades, month by month (2026-10-20).
         "wallet_counts": _wallet_counts(rows, buys_before, sol, spec.start, datetime.now(UTC),
-                                        float(capital) if pump else FAMILY_START, **sizing),
+                                        float(capital) if pump else FAMILY_START, **sizing,
+                                        per_coin=pump_catcher.WALLETS_PER_COIN if pump else 0),
         "start_dates": _start_dates(rows, sol, ticket=float(spec.ticket_usd),
                                     capital=float(capital),
                                     now=datetime.now(UTC), cents=Decimal("0.01"),

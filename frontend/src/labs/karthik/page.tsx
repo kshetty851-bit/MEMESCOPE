@@ -917,7 +917,7 @@ export function WalletCountsBox({ w }: { w: WalletCounts }) {
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">What if · user wallets</p>
           <h3 className="mt-1 font-brand text-xl font-semibold text-ink sm:text-2xl">1 to {w.counts.length} wallets on this book</h3>
           <p className="mt-1 max-w-[70ch] text-[12px] leading-relaxed text-ink-2">
-            Each wallet starts with {money(w.start_usd)} at {w.share_pct ? `${w.share_pct}% of its balance a trade (max $${w.share_max_usd})` : sizeWords(w.tickets_by_pool)} and buys every coin the book buys.
+            Each wallet starts with {money(w.start_usd)} at {w.share_pct ? `${w.share_pct}% of its balance a trade (max $${w.share_max_usd})` : sizeWords(w.tickets_by_pool)} and buys every coin the book buys{w.per_coin ? `, at most ${w.per_coin} wallets per coin (USER 1 first): later buyers pay the earlier ones' price push, and past ${w.per_coin} the last one would lose, so the rest stay out ("no room")` : ""}.
             They buy one after another, so each extra wallet pays a little more price impact and adds a little less.
           </p>
         </div>
@@ -964,7 +964,7 @@ export function WalletCountsBox({ w }: { w: WalletCounts }) {
                   <div className="flex flex-wrap gap-1">
                     {c.per_wallet.map((p, i) => (
                       <span key={i} title={`USER ${i + 1}: ${p.trades} trades, ${p.rugs} rugs`}
-                            className={`wallet-counts__chip ${p.pnl_usd < 0 ? "is-down" : ""}`}>{signed(p.pnl_usd)}</span>
+                            className={`wallet-counts__chip ${p.pnl_usd < 0 ? "is-down" : ""}`}>{p.trades === 0 ? "no room" : signed(p.pnl_usd)}</span>
                     ))}
                   </div>
                 </td>
