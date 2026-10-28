@@ -917,7 +917,7 @@ export function WalletCountsBox({ w }: { w: WalletCounts }) {
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-accent">What if · user wallets</p>
           <h3 className="mt-1 font-brand text-xl font-semibold text-ink sm:text-2xl">1 to {w.counts.length} wallets on this book</h3>
           <p className="mt-1 max-w-[70ch] text-[12px] leading-relaxed text-ink-2">
-            Each wallet starts with {money(w.start_usd)} at {sizeWords(w.tickets_by_pool)} and buys every coin the book buys.
+            Each wallet starts with {money(w.start_usd)} at {w.share_pct ? `${w.share_pct}% of its balance a trade (max $${w.share_max_usd})` : sizeWords(w.tickets_by_pool)} and buys every coin the book buys.
             They buy one after another, so each extra wallet pays a little more price impact and adds a little less.
           </p>
         </div>
@@ -1245,7 +1245,8 @@ export function KarthikLabPage({ variant = "karthik" }: { variant?: "karthik" | 
       </div>
       {data.start_dates?.length ? (
         <StartDates book="$40k book" lines={data.start_dates} capital={Number(data.capital_usd)} ticket={Number(data.ticket_usd)}
-                    sizeText={data.tickets_by_pool?.length ? sizeWords(data.tickets_by_pool) : undefined} />
+                    sizeText={data.pump_catcher?.share_pct ? `${data.pump_catcher.share_pct}% of the balance a trade (max $${data.pump_catcher.share_max_usd})`
+                      : data.tickets_by_pool?.length ? sizeWords(data.tickets_by_pool) : undefined} />
       ) : null}
       {data.wallet_counts?.counts.length ? <WalletCountsBox w={data.wallet_counts} /> : null}
 

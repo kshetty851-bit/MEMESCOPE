@@ -1610,20 +1610,27 @@ FAMILY_DAYS = 30
 
 
 def _wallet_run(rows: Sequence[Any], buys_before: dict, sol: Decimal | None,
-                n: int, start_usd: float = FAMILY_START) -> list[dict[str, Any]]:
+                n: int, start_usd: float = FAMILY_START,
+                share: float = 0.0, share_max: float = 0.0) -> list[dict[str, Any]]:
     """`n` user wallets of `FAMILY_START` on the book's trades: each wallet's
-    profit, in the order the queue reaches them (USER 1 buys first)."""
+    profit, in the order the queue reaches them (USER 1 buys first). `share` >
+    0 stakes that share of each wallet's own balance, at most `share_max`."""
     from app.labs.graduation import pool_lab as pl
 
     wallets = [pl.Wallet(f"USER {i}", cash=start_usd, low=start_usd) for i in range(1, n + 1)]
     rugs = {w.name: 0 for w in wallets}
     base = float(config.PAPER_NOTIONAL_USD)
     for r in sorted(rows, key=_opened_order):
-        stake = config.karthik_ticket(r.liq_open_usd, buys_before.get(r.id))
+        flat = config.karthik_ticket(r.liq_open_usd, buys_before.get(r.id))
         for w in wallets:
             w.settle_until(r.opened_at)
-        ready = sorted((w for w in wallets if w.cash >= stake), key=lambda w: (w.last_buy, w.name))
+
+        def stake_of(w: Any) -> float:
+            return (min(share_max, share * (w.cash + sum(h[2] for h in w.held)))
+                    if share else flat)
+        ready = sorted((w for w in wallets if w.cash >= stake_of(w)), key=lambda w: (w.last_buy, w.name))
         for place, w in enumerate(ready):
+            stake = stake_of(w)
             k = pl.queue_k(place, stake)
             multiple = (pl.legs_multiple(float(r.net_return), (float(r.impact_open or 0),
                                          float(r.impact_close or 0)), k, k)
@@ -1642,7 +1649,8 @@ def _wallet_run(rows: Sequence[Any], buys_before: dict, sol: Decimal | None,
 
 def _wallet_counts(rows: Sequence[Any], buys_before: dict, sol: Decimal | None,
                    start: datetime, now: datetime,
-                   start_usd: float = FAMILY_START) -> dict[str, Any]:
+                   start_usd: float = FAMILY_START,
+                   share: float = 0.0, share_max: float = 0.0) -> dict[str, Any]:
     """1 to `FAMILY_MAX` user wallets on the book's trades, now and at day 30.
 
     Day 30 is the pace so far carried forward: profit per elapsed day x 30.
@@ -1650,7 +1658,7 @@ def _wallet_counts(rows: Sequence[Any], buys_before: dict, sol: Decimal | None,
     elapsed = max((now - start).total_seconds() / 86400, 1.0)
     counts = []
     for n in range(1, FAMILY_MAX + 1):
-        each = _wallet_run(rows, buys_before, sol, n, start_usd)
+        each = _wallet_run(rows, buys_before, sol, n, start_usd, share, share_max)
         pnl = sum(w["pnl_usd"] for w in each)
         put_in = start_usd * n
         day30 = pnl / elapsed * FAMILY_DAYS
@@ -1659,7 +1667,8 @@ def _wallet_counts(rows: Sequence[Any], buys_before: dict, sol: Decimal | None,
                        "return_pct": round(100 * pnl / put_in, 1),
                        "day30_pnl_usd": round(day30, 2), "day30_balance_usd": round(put_in + day30, 2)})
     return {"start_usd": start_usd, "days_elapsed": round(elapsed, 1), "days_target": FAMILY_DAYS,
-            "tickets_by_pool": [list(t) for t in config.KARTHIK_TICKETS_BY_POOL], "counts": counts}
+            "tickets_by_pool": [list(t) for t in config.KARTHIK_TICKETS_BY_POOL], "counts": counts,
+            "share_pct": round(100 * share) or None, "share_max_usd": share_max or None}
 
 
 def _fresh_entry(row: Any) -> bool:
@@ -1738,7 +1747,8 @@ def _start_dates(rows: Sequence[Any], rate: Decimal | None, *, ticket: float, ca
                  now: datetime, cents: Decimal,
                  ticket_of: Callable[[Any], float] | None = None,
                  loss_streak_limit: int = 0,
-                 cooldown_minutes: int = 0) -> list[dict[str, Any]]:
+                 cooldown_minutes: int = 0,
+                 share: float = 0.0, share_max: float = 0.0) -> list[dict[str, Any]]:
     """The same book started fresh at each Dubai midnight since its first trade,
     newest start first (Karthik, 2026-10-14: "show me profit if we started on
     2nd oct, then 3rd oct ... and keep updating"): only the trades from that
@@ -1756,7 +1766,7 @@ def _start_dates(rows: Sequence[Any], rate: Decimal | None, *, ticket: float, ca
                          rate, ticket=ticket, start=capital,
                          tickets=[ticket_of(r) for r in xs] if ticket_of else None,
                          loss_streak_limit=loss_streak_limit,
-                         cooldown_minutes=cooldown_minutes)
+                         cooldown_minutes=cooldown_minutes, share=share, share_max=share_max)
         took = [r for r, m in zip(xs, w.pnl, strict=True) if m is not None]
         out.append({"start": day, "days": round((now - day).total_seconds() / 86400, 1),
                     "balance_usd": Decimal(str(w.cash)).quantize(cents),
@@ -2218,6 +2228,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
     # 10 minutes instead of at 5; positions not yet priced are still settling.
     pump: dict[str, Any] | None = None
     capital = spec.capital_usd          # Pump Catcher Lab has its own (2026-10-24)
+    sizing: dict[str, float] = {}       # and its own trade size (2026-10-28)
     if exit_rule == "pump":
         from app.core.redis import init_redis
         from app.labs.graduation import pump_catcher
@@ -2231,6 +2242,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
                 "check_min": pump_catcher.CHECK_S // 60,
                 "share_pct": round(100 * pump_catcher.SHARE), "share_max_usd": pump_catcher.SHARE_MAX,
                 "priced": len(rows) + len(small), "settling": before - len(rows) - len(small)}
+        sizing = {"share": pump_catcher.SHARE, "share_max": pump_catcher.SHARE_MAX}
     # Every $75k+ signal his arm took: what the grid beside the book reads.
     signals = rows
     # The book counts only its pool range (KARTHIK_BOOK_POOLS, 2026-09-26).
@@ -2267,7 +2279,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
           float(p.impact_open or 0), float(p.impact_close or 0)) for p in rows],
         sol, ticket=float(spec.ticket_usd), start=float(capital),
         tickets=[config.karthik_ticket(p.liq_open_usd, buys_before.get(p.id)) for p in rows],
-        **({"share": pump_catcher.SHARE, "share_max": pump_catcher.SHARE_MAX} if pump else {}))
+        **sizing)
     # The size grid follows the book's rules too (Karthik, 2026-10-16: "fix this
     # in 50k pool lab as per new rules"): the book's skips on every pool size,
     # in the book's order, and each size staking like the book.
@@ -2307,7 +2319,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
         [(p.opened_at, p.closed_at, float(p.net_return),
           float(p.impact_open or 0), float(p.impact_close or 0)) for p in refused],
         sol, ticket=float(spec.ticket_usd), start=1e9,
-        tickets=[config.karthik_ticket(p.liq_open_usd, None) for p in refused])
+        tickets=[config.karthik_ticket(p.liq_open_usd, None) for p in refused], **sizing)
     refused_took = [(row, money) for row, money in zip(refused, refused_walk.pnl, strict=True)
                     if money is not None]
     # Every pump.fun graduation seen since the book opened, bought or not, at
@@ -2343,12 +2355,12 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
         "floor_test": _floor_test(rows),
         # Three $500 user wallets on the same trades, month by month (2026-10-20).
         "wallet_counts": _wallet_counts(rows, buys_before, sol, spec.start, datetime.now(UTC),
-                                        float(capital) if pump else FAMILY_START),
+                                        float(capital) if pump else FAMILY_START, **sizing),
         "start_dates": _start_dates(rows, sol, ticket=float(spec.ticket_usd),
                                     capital=float(capital),
                                     now=datetime.now(UTC), cents=Decimal("0.01"),
                                     ticket_of=lambda r: config.karthik_ticket(
-                                        r.liq_open_usd, buys_before.get(r.id))),
+                                        r.liq_open_usd, buys_before.get(r.id)), **sizing),
         "hold_minutes": arm.hold,
         "started_at": spec.start,
         "judge_at": config.KARTHIK_JUDGE_AT,
@@ -2406,7 +2418,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
         # The same trades at other sizes, and on $150k+ pools only. A check,
         # shown beside the book; the book itself stays on its own rule.
         "whatif": _karthik_whatif(grid, sol, capital=float(capital),
-                                  ticket=float(spec.ticket_usd), cents=cents,
+                                  ticket=0.0 if sizing else float(spec.ticket_usd), cents=cents,
                                   stake=lambda r: config.karthik_ticket(
                                       r.liq_open_usd, grid_buys.get(r.id))
                                   / float(spec.ticket_usd)),

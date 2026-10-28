@@ -20,6 +20,9 @@ export interface WalletCounts {
   days_elapsed: number;
   days_target: number;
   tickets_by_pool: [number | null, number][];
+  /** Pump Catcher only: share of each wallet's balance a trade, and its cap (2026-10-28). */
+  share_pct?: number | null;
+  share_max_usd?: number | null;
   counts: {
     wallets: number;
     put_in_usd: number;
