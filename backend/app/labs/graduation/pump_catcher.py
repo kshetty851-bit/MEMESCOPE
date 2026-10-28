@@ -41,8 +41,11 @@ CAPITAL = Decimal(500)
 #: 1-2 points under the lab's and twice missed the target by a hair (Apple x1.278
 #: and x1.248 real against x1.32 on paper), then rugged. Re-priced from day 1:
 #: +$2,492 -> about +$977 at $50.
-KEY = "pumpcatcher:exit:v3"
-REAL_SLIP = 0.03
+#: v4 (Karthik, 2026-10-28: "yes set it to 1%"): USER 1's real $2 trades came in
+#: 0.3-0.5 points under the lab before any allowance (18 trades), so 3% was
+#: too harsh; 1% keeps a margin for bigger trades moving the price more.
+KEY = "pumpcatcher:exit:v4"
+REAL_SLIP = 0.01
 CHECK_S = 300
 BATCH = 250
 #: Wait this long after the buy before deciding: the 10-minute reading plus slack.
