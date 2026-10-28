@@ -658,7 +658,9 @@ export function RuleBook({ data }: { data: KarthikBook }) {
     data.many_at_once_since
       ? ["Several at once", `It buys every coin that passes while at least ${usd(data.ticket_usd)} of the balance is free, so it can hold several at once.`]
       : ["One at a time", "While it holds a coin, the next one is skipped. It can never be caught in two bad coins at once."],
-    ["Trade size", data.tickets_by_pool?.length
+    ["Trade size", data.pump_catcher?.share_pct
+      ? `${data.pump_catcher.share_pct}% of the balance on each trade, never more than ${usd(data.pump_catcher.share_max_usd ?? 0).replace(".00", "")}, from a ${usd(data.capital_usd)} start. Bigger orders move these young pools' price more, so the cap stays.`
+      : data.tickets_by_pool?.length
       ? `${sizeWords(data.tickets_by_pool)}${data.tickets_by_pool.length === 1 ? " on every coin" : ""}, from a ${usd(data.capital_usd)} balance${data.tickets_by_pool.length > 1 ? ": more where the profit is (small pools), less where it is thin" : ""}.${data.quiet_stake && data.quiet_stake[1] !== data.tickets_by_pool[0]?.[1] ? ` A quiet small-pool coin (at most ${data.quiet_stake[0]} buys in the 5 minutes before) gets $${data.quiet_stake[1]}: those earned about five times more.` : ""}`
       : `${usd(data.ticket_usd)} per trade, from a ${usd(data.capital_usd)} balance.`],
     data.pump_catcher
@@ -1185,7 +1187,7 @@ export function KarthikLabPage({ variant = "karthik" }: { variant?: "karthik" | 
           </p>
         ) : null}
         <p className="mt-1 max-w-[78ch] text-[13px] leading-relaxed text-ink-dim">
-          {usd(data.capital_usd)} at {data.tickets_by_pool?.length ? sizeWords(data.tickets_by_pool) : `${usd(data.ticket_usd)} a trade`} on one
+          {usd(data.capital_usd)} at {data.pump_catcher?.share_pct ? `${data.pump_catcher.share_pct}% of the balance a trade (max ${usd(data.pump_catcher.share_max_usd ?? 0).replace(".00", "")})` : data.tickets_by_pool?.length ? sizeWords(data.tickets_by_pool) : `${usd(data.ticket_usd)} a trade`} on one
           rule: <b>{data.rule}</b>. Started {day(data.started_at)},{" "}
           <b>judged {day(data.judge_at)}</b>. Paper only: this book holds no
           wallet and has never placed an order.
