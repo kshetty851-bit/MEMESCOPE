@@ -45,6 +45,10 @@ CAPITAL = Decimal(500)
 #: 0.3-0.5 points under the lab before any allowance (18 trades), so 3% was
 #: too harsh; 1% keeps a margin for bigger trades moving the price more.
 KEY = "pumpcatcher:exit:v4"
+#: Trade size (Karthik, 2026-10-28: "yes set lab to 10% max $100 since day 1"):
+#: 10% of the balance a trade, never more than $100 -- about the most these
+#: young pools take without the price running away; impact grows with size.
+SHARE, SHARE_MAX = 0.10, 100.0
 REAL_SLIP = 0.01
 CHECK_S = 300
 BATCH = 250

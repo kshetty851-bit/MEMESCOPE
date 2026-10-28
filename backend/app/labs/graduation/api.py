@@ -1101,6 +1101,7 @@ def _funded_walk(
     tickets: Sequence[float] | None = None,
     loss_streak_limit: int = 0,
     cooldown_minutes: int = 0,
+    share: float = 0.0, share_max: float = 0.0,
 ) -> Walk:
     """What a real $100 account could have taken — equity, funded, skipped,
     and the lowest it stood.
@@ -1117,6 +1118,9 @@ def _funded_walk(
     only once known — one at the very instant of a buy counts after it — so no
     entry is decided by an outcome that had not happened yet. At 0 (every other
     book) the walk is exactly what it always was.
+
+    `share` > 0 (Pump Catcher Lab, 2026-10-28): each stake is that share of the
+    balance (cash plus what is held, at cost), never more than `share_max`.
 
     `_wallet_walk` walks the arm's returns one after another and never asks
     whether the account could have held them at the same time. That is right
@@ -1177,6 +1181,9 @@ def _funded_walk(
             paused += 1
             pnl.append(None)
             continue
+        if share:
+            cap = min(share_max, share * (cash + sum(h[2] for h in held)))
+            floor = config.wallet_floor(cap)
         # The wallet's own rule (`live_spec.fundable`), so this balance is the
         # one the real wallet would reach. Rounded to shed float dust that
         # would otherwise make a whole ticket read a hair short.
@@ -2222,6 +2229,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
         pump = {"target_pct": round(100 * pump_catcher.TARGET), "hold_min": pump_catcher.HOLD_S // 60,
                 "real_slip_pct": round(100 * pump_catcher.REAL_SLIP),
                 "check_min": pump_catcher.CHECK_S // 60,
+                "share_pct": round(100 * pump_catcher.SHARE), "share_max_usd": pump_catcher.SHARE_MAX,
                 "priced": len(rows) + len(small), "settling": before - len(rows) - len(small)}
     # Every $75k+ signal his arm took: what the grid beside the book reads.
     signals = rows
@@ -2258,7 +2266,8 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
         [(p.opened_at, p.closed_at, float(p.net_return),
           float(p.impact_open or 0), float(p.impact_close or 0)) for p in rows],
         sol, ticket=float(spec.ticket_usd), start=float(capital),
-        tickets=[config.karthik_ticket(p.liq_open_usd, buys_before.get(p.id)) for p in rows])
+        tickets=[config.karthik_ticket(p.liq_open_usd, buys_before.get(p.id)) for p in rows],
+        **({"share": pump_catcher.SHARE, "share_max": pump_catcher.SHARE_MAX} if pump else {}))
     # The size grid follows the book's rules too (Karthik, 2026-10-16: "fix this
     # in 50k pool lab as per new rules"): the book's skips on every pool size,
     # in the book's order, and each size staking like the book.
