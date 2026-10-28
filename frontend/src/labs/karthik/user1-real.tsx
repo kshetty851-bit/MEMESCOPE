@@ -14,7 +14,8 @@ import { cleanName } from "@/lib/clean-name";
 interface Trade { mint: string; symbol: string | null; opened_at: string; closed_at: string | null; open: boolean;
   stake_usd: number | null; pnl_usd: number | null; pct: number | null; how: string | null; lab_pct: number | null }
 interface User1 { since: string; balance_usd: string | null; balance_sol: string | null; balance_error: string | null;
-  trades: number; open: number; wins: number; pnl_usd: number; lab_pnl_same_coins_usd: number; trades_list: Trade[] }
+  trades: number; open: number; wins: number; pnl_usd: number; lab_pnl_same_coins_usd: number; trades_list: Trade[];
+  ready?: { title: string; met: boolean; now: string }[] }
 
 const DUBAI = { timeZone: "Asia/Dubai" } as const;
 const usd = (v: number) => `${v < 0 ? "−" : "+"}$${Math.abs(v).toFixed(2)}`;
@@ -43,6 +44,7 @@ export function User1Real() {
         <Fig label="Trades" value={String(d.trades)} sub={`${d.trades ? Math.round((100 * d.wins) / d.trades) : 0}% won`} />
         <Fig label="Open now" value={String(d.open)} sub="sells at +30%, at 5 min if down, else 10 min" />
       </div>
+      {d.ready?.length ? <ReadyCheck items={d.ready} /> : null}
       <div className="mt-3 overflow-x-auto">
         <table className="w-full min-w-[34rem] text-sm">
           <thead className="text-[11px] uppercase tracking-wider text-ink-faint">
@@ -83,6 +85,32 @@ function Fig({ label, value, sub, cls = "text-ink" }: { label: string; value: st
       <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-dim">{label}</div>
       <div className={`mt-0.5 font-mono text-lg font-semibold tabular-nums ${cls}`}>{value}</div>
       {sub ? <div className="mt-0.5 truncate text-[11px] text-ink-faint">{sub}</div> : null}
+    </div>
+  );
+}
+
+/** What the data should show before more money goes in (Karthik, 2026-10-28).
+ *  Data only: the decision stays his. */
+function ReadyCheck({ items }: { items: { title: string; met: boolean; now: string }[] }) {
+  const done = items.filter((i) => i.met).length;
+  return (
+    <div className="mt-3 rounded-xl border border-line bg-sunken px-3 py-2.5" data-testid="user1-ready">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-dim">Ready-check before more money</span>
+        <span className={`text-[12px] font-semibold ${done === items.length ? "text-up" : "text-ink-dim"}`}>{done} of {items.length} met</span>
+      </div>
+      <ul className="mt-1.5 space-y-1.5">
+        {items.map((i) => (
+          <li key={i.title} className="flex gap-2 text-[13px]">
+            <span aria-hidden className={i.met ? "text-up" : "text-ink-faint"}>{i.met ? "✓" : "○"}</span>
+            <span>
+              <span className={i.met ? "text-ink" : "text-ink-2"}>{i.title}</span>
+              <span className="block text-[11px] text-ink-faint">{i.now}</span>
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1.5 text-[11px] text-ink-faint">Also decide in advance how much you could lose in full: the worst single trade so far lost 108%. All three met is a sign from the data, not a promise.</p>
     </div>
   );
 }
