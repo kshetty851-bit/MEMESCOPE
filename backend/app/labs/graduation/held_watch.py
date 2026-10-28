@@ -282,6 +282,9 @@ class FirstMinute:
     last_price: dict[str, Decimal] = field(default_factory=dict)
     #: mint -> the pool address the chain's migration event named, when heard.
     pools: dict[str, str] = field(default_factory=dict)
+    #: mint -> when its last row was kept: at most one row a second (28 Oct, the
+    #: table grew ~300 MB a day at one row per slot and stopped a deploy).
+    kept_at: dict[str, datetime] = field(default_factory=dict)
 
     def add(self, mint: str, migrated_at: datetime, signature: str,
             pool: str | None = None) -> None:
@@ -298,6 +301,7 @@ class FirstMinute:
         self.due.pop(mint, None)
         self.last_price.pop(mint, None)
         self.pools.pop(mint, None)
+        self.kept_at.pop(mint, None)
         return rows
 
     def expire(self, now: datetime) -> list[dict[str, Any]]:
@@ -327,6 +331,13 @@ class FirstMinute:
         slot, at, held = got
         if not held.base or not held.quote:
             return []
+        if held.quote_mint != config.WSOL_MINT:
+            # A pool quoted in anything but SOL is no use to the tests: stop watching.
+            self.due.pop(mint, None)
+            return []
+        last = self.kept_at.get(mint)
+        if last is not None and (at - last).total_seconds() < 1.0:
+            return []
         base = Decimal(held.base).scaleb(-held.base_decimals)
         # Vaults only. The pool's virtual quote field read 17.58 SOL on some new
         # pools and 2^64 minus a few million lamports on others (25 Oct dry
@@ -335,6 +346,7 @@ class FirstMinute:
         if self.last_price.get(mint) == price:
             return []
         self.last_price[mint] = price
+        self.kept_at[mint] = at
         v = held.virtual_quote
         return [{"mint": mint, "pool": held.pool, "slot": slot, "ts": at,
                  "migrated_at": entry[0], "price_native": price,

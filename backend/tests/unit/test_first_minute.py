@@ -55,3 +55,18 @@ def test_a_pool_hint_is_kept_only_for_watched_mints_and_dropped_with_them():
     assert fm.pools == {"M": "POOL"}
     fm.expire(T0 + timedelta(seconds=481))
     assert fm.pools == {}
+
+
+def test_at_most_one_row_a_second_and_no_non_sol_pools():
+    fm = FirstMinute(window_s=480)
+    fm.add("M", T0, "sig")
+    rows = []
+    for i, (slot, secs) in enumerate([(5, 1.0), (6, 1.3), (7, 1.6), (8, 2.2), (9, 2.5)]):
+        rows += fm.observe(_held(1_000_000_000 - i * 1_000_000, 10_000_000_000, slot), T0 + timedelta(seconds=secs))
+    assert [r["slot"] for r in rows] == [5, 8]           # slots 6 and 7 fell inside slot 5's second
+    other = FirstMinute(window_s=480)
+    other.add("M", T0, "sig")
+    h = _held(1_000_000_000, 10_000_000_000, 5)
+    h.quote_mint = "USDC"
+    other.observe(h, T0)
+    assert other.observe(_held(1, 1, 6), T0 + timedelta(seconds=2)) == [] and "M" not in other.due
