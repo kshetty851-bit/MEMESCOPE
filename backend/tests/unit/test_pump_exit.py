@@ -48,3 +48,29 @@ def test_user1_sells_on_the_freshest_price():
     assert ed.freshest(live, N(price_usd=Decimal("1"), captured_at=t)) is live
     assert ed.freshest(snap, None) is snap and ed.freshest(None, live) is live
     assert ed.freshest(snap, N(price_usd=None, captured_at=t + timedelta(seconds=9))) is snap
+
+
+def test_a_fresh_on_chain_mark_beats_a_dexscreener_glitch():
+    import asyncio
+    from datetime import UTC, datetime, timedelta
+    from types import SimpleNamespace as N
+
+    now = datetime(2026, 10, 28, 12, 10, 21, tzinfo=UTC)
+
+    class _Rows:
+        def __init__(self, rows): self._rows = rows
+        def all(self): return self._rows
+
+    def session(rows):
+        async def execute(_stmt, _params): return _Rows(rows)
+        return N(execute=execute)
+
+    chain = N(source="held_ws", ts=now - timedelta(seconds=10), price_native=Decimal("1.0"), liquidity_usd=1, rate=Decimal("100"))
+    glitch = N(source="dexscreener", ts=now - timedelta(seconds=1), price_native=Decimal("1.44"), liquidity_usd=1, rate=Decimal("100"))
+    d = ed.RealWalletExitDriver.__new__(ed.RealWalletExitDriver)
+    d._session = session([chain, glitch])
+    mark, on_chain = asyncio.run(d._live_mark("M", now))
+    assert on_chain and mark.price_usd == Decimal("100")              # the vaults, not the glitch
+    d._session = session([N(**{**chain.__dict__, "ts": now - timedelta(seconds=60)}), glitch])
+    mark, on_chain = asyncio.run(d._live_mark("M", now))
+    assert not on_chain and mark.price_usd == Decimal("144.00")       # stale chain: DexScreener
