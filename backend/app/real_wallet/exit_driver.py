@@ -121,17 +121,30 @@ def exit_verdict(exits: spec.Exits, state: MarkState, *, pump: bool) -> ExitVerd
     return verdict
 
 
-#: The newest reading of a coin, socket or DexScreener, and its SOL rate from its
-#: own newest DexScreener reading (bounded: a USDC pool reads 1.00).
+#: The newest readings of a coin's OWN pool (the one it first listed on, which
+#: the lab buys in), one per source, and its SOL rate from that pool's newest
+#: DexScreener reading (bounded: a USDC pool reads 1.00).
 _LIVE_MARK_SQL = text("""
-    select s.ts, s.price_native, s.liquidity_usd,
+    with pool as (
+        select pair_address from grad_postgrad_samples
+        where mint = :m and source = 'dexscreener' and pair_address is not null
+        order by ts limit 1)
+    select distinct on (s.source) s.source, s.ts, s.price_native, s.liquidity_usd,
            (select d.price_usd / d.price_native from grad_postgrad_samples d
              where d.mint = s.mint and d.source = 'dexscreener' and d.price_native > 0
+               and d.pair_address = (select pair_address from pool)
                and d.price_usd / d.price_native between 20 and 2000
              order by d.ts desc limit 1) rate
     from grad_postgrad_samples s
     where s.mint = :m and s.source in ('held_ws', 'dexscreener') and s.price_native > 0
-    order by s.ts desc limit 1""")
+      and s.pair_address = (select pair_address from pool)
+      and s.ts >= now() - interval '15 minutes'
+    order by s.source, s.ts desc""")
+#: An on-chain (vault) mark this recent is the price: DexScreener and the
+#: snapshots are then ignored. On 28 Oct one DexScreener reading of the coin's
+#: own pool said x1.44 for a single poll while its vaults sat at x1.03, and
+#: USER 1 sold at "target" for +1.6%.
+CHAIN_FRESH_S = 30
 
 
 def freshest(snapshot: Any | None, live: Any | None) -> Any | None:
@@ -269,7 +282,9 @@ class RealWalletExitDriver:
         """
         snapshot = await self._markets.latest_for_mint(pos.mint_address)
         if fast:
-            snapshot = freshest(snapshot, await self._live_mark(pos.mint_address))
+            live, on_chain = await self._live_mark(pos.mint_address, now)
+            # A fresh on-chain mark IS the price; otherwise the newest of the two.
+            snapshot = live if on_chain else freshest(snapshot, live)
         if snapshot is None or snapshot.price_usd is None:
             return None
         captured = snapshot.captured_at
@@ -326,15 +341,21 @@ class RealWalletExitDriver:
             flat_hours=flat_hours,
         )
 
-    async def _live_mark(self, mint: str) -> Any | None:
-        """The graduation lab's newest same-pool reading of this coin: the vault
-        socket's 1-2 s marks, or DexScreener's, in USD at the coin's own
-        DexScreener SOL rate. None when there is none or no rate."""
-        row = (await self._session.execute(_LIVE_MARK_SQL, {"m": mint})).first()
-        if row is None or row.rate is None:
-            return None
-        return SimpleNamespace(price_usd=Decimal(str(row.price_native)) * Decimal(str(row.rate)),
-                               liquidity_usd=row.liquidity_usd, captured_at=row.ts)
+    async def _live_mark(self, mint: str, now: datetime) -> tuple[Any | None, bool]:
+        """(mark, on_chain): the coin's own pool's on-chain mark when one is
+        `CHAIN_FRESH_S` fresh, else its newest DexScreener reading, in USD at
+        the pool's own SOL rate. (None, False) when neither, or no rate."""
+        rows = {r.source: r for r in (await self._session.execute(_LIVE_MARK_SQL, {"m": mint})).all()}
+        chain, dex = rows.get("held_ws"), rows.get("dexscreener")
+        rate = (chain or dex).rate if (chain or dex) else None
+        if rate is None:
+            return None, False
+        on_chain = chain is not None and (now - chain.ts).total_seconds() <= CHAIN_FRESH_S
+        row = chain if on_chain else dex
+        if row is None:
+            return None, False
+        return SimpleNamespace(price_usd=Decimal(str(row.price_native)) * Decimal(str(rate)),
+                               liquidity_usd=row.liquidity_usd, captured_at=row.ts), on_chain
 
     async def _retry_wait(self, pos: RealWalletPosition, now: datetime) -> str | None:
         """Why not to ask again yet, or None when it is time to."""
