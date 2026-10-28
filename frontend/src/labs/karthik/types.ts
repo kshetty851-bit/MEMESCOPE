@@ -23,6 +23,8 @@ export interface WalletCounts {
   /** Pump Catcher only: share of each wallet's balance a trade, and its cap (2026-10-28). */
   share_pct?: number | null;
   share_max_usd?: number | null;
+  /** Pump Catcher only: most user wallets that buy one coin (2026-10-28). */
+  per_coin?: number | null;
   counts: {
     wallets: number;
     put_in_usd: number;

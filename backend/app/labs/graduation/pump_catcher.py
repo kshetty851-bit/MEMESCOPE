@@ -49,6 +49,9 @@ KEY = "pumpcatcher:exit:v4"
 #: 10% of the balance a trade, never more than $100 -- about the most these
 #: young pools take without the price running away; impact grows with size.
 SHARE, SHARE_MAX = 0.10, 100.0
+#: At most this many user wallets buy one coin (Karthik, 2026-10-28: "add max 7
+#: wallets per coin rule"): the 8th onward paid more impact than the move.
+WALLETS_PER_COIN = 7
 REAL_SLIP = 0.01
 CHECK_S = 300
 BATCH = 250
