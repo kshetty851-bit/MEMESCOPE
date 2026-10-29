@@ -1,24 +1,22 @@
 "use client";
 
 /*
- * THESIS: a live crypto broadsheet, not a dashboard of identical cards — one lead story at tabloid scale,
- *   a 60-second briefing, then sections set like a newspaper (rules, columns, a nameplate), refusing
- *   the glowing-neon crypto dashboard.
- * OWN-WORLD: ink-black newsprint with grain, warm off-white type, hairline column rules and double
- *   rules; blackletter nameplate (UnifrakturMaguntia), condensed tabloid heads (Big Shoulders Display),
- *   serif reading text (Source Serif 4), mono figures (Geist Mono); lime = live/up, orange = down/alerts,
- *   cyan = links and MEMESCOPE's own data.
- * STORY: first, MEMESCOPE's own pump.fun day (graduations, first-hour drains and survivors, the
- *   lab's result; 2026-10-20), then the day's biggest story, prices moving, and three lines on what
- *   to watch; scrolling adds the wire, the world, sectors, security and events; every figure says
- *   where it came from and when.
- * FIRST VIEWPORT: date rail + live status + Lab link; centred nameplate over a double rule; slow ticker;
- *   lead headline across ~70% with image and timeline; "Crypto in 60 seconds" in the right column.
- * FORM: brief-pinned, cited — world: "newspaper-inspired grid with contemporary crypto dashboards",
- *   "rich dark background, warm off-white text, electric lime, cyan, or orange accents", "subtle grain,
- *   fine separators"; type: "oversized, expressive headlines … crisp monospace typography for prices,
- *   timestamps"; first viewport: "a dramatic lead story"; masthead: "distinctive". No concept seed:
- *   every axis above was pinned by the brief, so the roll had nothing free to assign.
+ * THESIS: a live crypto broadsheet printed as a morning paper, not a dashboard of identical cards: one
+ *   lead story at front-page scale, a 60-second briefing, then sections set like a newspaper (rules,
+ *   columns, a nameplate), refusing the glowing-neon crypto dashboard.
+ * OWN-WORLD: aged newsprint (#e9e3d3) with multiplied fibre grain, an edge tan and a fold crease; press
+ *   ink type (#1c1a15); blackletter flag and drop cap (UnifrakturMaguntia), Didone heads (Bodoni Moda)
+ *   with letterpress spread, News Gothic labels (News Cycle), a 19th-century news roman for reading
+ *   (Old Standard TT), typewriter figures (Courier Prime); green ink = live/up, vermilion = down/alerts,
+ *   prussian blue = links and MEMESCOPE's own data; photographs print as sepia halftone.
+ * STORY: first, MEMESCOPE's own pump.fun day, then the day's biggest story, prices moving, and three
+ *   lines on what to watch; scrolling adds the wire, the world, sectors, security and events; every
+ *   figure says where it came from and when.
+ * FIRST VIEWPORT: date rail + live status + Lab link; centred nameplate stamped letter by letter over a
+ *   double rule that rolls out; ticker; the front page unfolds, the lead head prints word by word,
+ *   "Crypto in 60 seconds" is typed in the right column.
+ * FORM: brief-pinned (Karthik, 2026-10-29: "white background like a newspaper, stylish font and
+ *   animations"; chose "Vintage newsprint" and "Lively"). No concept seed: the world was pinned.
  * FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
  */
 
@@ -26,7 +24,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { cn } from "@/lib/utils";
 
-import { body, figures, headline, nameplate } from "./fonts";
+import { body, figures, headline, label, nameplate } from "./fonts";
 import { ago, clock, pct, trend, usd } from "./format";
 import { useLastVisit, useNewsroom, useNow, useWatchlist } from "./hooks";
 import { IconArrow, IconPause, IconPlay } from "./icons";
@@ -56,17 +54,22 @@ export function Newspaper() {
   useEffect(() => setJs(true), []);
 
   return (
-    <div className={cn("np", js && "np-js", nameplate.variable, headline.variable, body.variable, figures.variable)}>
+    <div className={cn("np", js && "np-js", nameplate.variable, headline.variable, label.variable, body.variable, figures.variable)}>
       <div className="np-grain" aria-hidden />
-      {/* Duotone for photographs: dark ink to warm paper (2026-10-20), full colour on hover. */}
+      {/* Photographs print in sepia press ink on the paper tone, full colour on hover; heads get a
+          letterpress edge (#np-press): a hair of roughness, as type pressed into newsprint. */}
       <svg width="0" height="0" aria-hidden style={{ position: "absolute" }}>
         <filter id="np-duo" colorInterpolationFilters="sRGB">
           <feColorMatrix type="saturate" values="0" />
           <feComponentTransfer>
-            <feFuncR type="table" tableValues="0.051 0.937" />
-            <feFuncG type="table" tableValues="0.051 0.910" />
-            <feFuncB type="table" tableValues="0.043 0.847" />
+            <feFuncR type="table" tableValues="0.137 0.914" />
+            <feFuncG type="table" tableValues="0.118 0.890" />
+            <feFuncB type="table" tableValues="0.090 0.827" />
           </feComponentTransfer>
+        </filter>
+        <filter id="np-press" x="-2%" y="-10%" width="104%" height="120%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="1" seed="7" result="n" />
+          <feDisplacementMap in="SourceGraphic" in2="n" scale="1.4" xChannelSelector="R" yChannelSelector="G" />
         </filter>
       </svg>
       <Masthead data={data} now={now} failed={nr.isError} />
@@ -117,7 +120,9 @@ function Masthead({ data, now, failed }: { data?: Newsroom; now: number; failed:
           </span>
         </span>
       </div>
-      <h1 className="np-flag"><span className="np-flag__ink">Memescope</span></h1>
+      <h1 className="np-flag" aria-label="Memescope"><span className="np-flag__ink" aria-hidden>
+        {[..."Memescope"].map((ch, i) => <span key={i} className="np-flag__l" style={{ ["--i" as string]: i }}>{ch}</span>)}
+      </span></h1>
       <p className="np-motto">All the crypto that moved today — sourced, timed, and checked against our own on-chain lab.</p>
       <NewsTV data={data} />
     </header>
@@ -135,7 +140,8 @@ function Ticker({ coins }: { coins: Coin[] }) {
       {row.map((c) => (
         <li key={c.id}>
           <span className="np-ticker__sym">{c.symbol}</span>
-          <span className="np-mono">{usd(c.price, c.price && c.price < 1 ? 4 : 2)}</span>
+          {/* keyed by price: a new print re-inks the figure */}
+          <span key={c.price ?? "none"} className="np-mono np-inked">{usd(c.price, c.price && c.price < 1 ? 4 : 2)}</span>
           <span className={cn("np-mono", `t-${trend(c.ch24h)}`)}>{pct(c.ch24h)}</span>
         </li>
       ))}
@@ -175,7 +181,9 @@ function Lead({ story, now }: { story: Story | null; now: number }) {
   if (!story) return <article className="np-lead"><h2 className="np-lead__head">No lead story yet</h2></article>;
   return (
     <article className="np-lead">
-      <h2 className="np-lead__head"><a href={story.url} target="_blank" rel="noopener noreferrer">{story.title}</a></h2>
+      <h2 className="np-lead__head"><a href={story.url} target="_blank" rel="noopener noreferrer">
+        {story.title.split(" ").map((w, i) => <span key={i}><span className="np-w" style={{ ["--i" as string]: i }}>{w}</span>{" "}</span>)}
+      </a></h2>
       <p className="np-byline">
         <span>{story.publishers.join(" · ")}</span>
         <span className="np-mono">{ago(story.last_at, now)}</span>
