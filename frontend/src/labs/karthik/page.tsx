@@ -669,7 +669,7 @@ export function RuleBook({ data }: { data: KarthikBook }) {
       : ["Always sells", `Exactly ${data.hold_minutes} minutes after buying. No price targets, no stop-loss — the clock decides.`],
     ["The risk", `If a coin's creator drains the pool (a “rug”), that trade loses almost all of it.${rugEvery ? ` So far about 1 in ${rugEvery} trades.` : ""}`],
     ["Paper money", data.pump_catcher
-      ? "A simulation on real market prices. USER 1 follows it with real money (at $2 a trade since 27 Oct) and does not use the 30 Oct pool-size skip."
+      ? "A simulation on real market prices. USER 1 follows it with real money (at $2 a trade since 27 Oct), the 30 Oct pool-size skip included."
       : "A simulation on real market prices. The real wallets run their own settings ($50k+ pools, their own trade sizes) and do not follow this book's newer rules."],
   ];
   return (

@@ -586,7 +586,7 @@ class RealWalletDriver:
         own pool and name. The crew block is the safety check's
         (`REAL_WALLET_CREW_BLOCK_ENABLED`)."""
         from app.labs.graduation import config as grad_config
-        from app.labs.graduation import live_spec
+        from app.labs.graduation import live_spec, pump_catcher
         from app.labs.graduation.models import GradPaperPosition
         from app.labs.graduation.pool_lab import ai_name
 
@@ -616,6 +616,8 @@ class RealWalletDriver:
             depth = float(pool or 0)
             if skip_lo <= depth < skip_hi or (ai_lo <= depth < ai_hi and ai_name(symbol)):
                 continue
+            if pump_catcher.skipped_pool(pool):
+                continue                                  # Karthik, 2026-10-30: "apply same rule to user 1 too"
             if await self._quiet_big_pool(mint, pool, opened_at):
                 continue                                  # $200k+ needs its buys
             if grad_config.unnamed_evening(symbol, opened_at):

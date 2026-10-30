@@ -45,9 +45,12 @@ async def test_the_book_pool_rules_decide_the_coin():
     assert await _pick([_row("LOW", "ABC", 39_000)]) is None             # under $40k
     assert await _pick([_row("BAND", "ABCDEF", 160_000)]) is None        # $150-200k skipped
     assert await _pick([_row("AI", "DeepSeek", 55_000)]) is None         # AI name, $50-60k
-    assert await _pick([_row("SPC", "GTA 6", 80_000)]) is None           # spaced name
-    assert await _pick([_row("OLD", "ABC", 80_000, age_s=130)]) is None  # past the 2-minute guard
+    assert await _pick([_row("SPC", "GTA 6", 60_000)]) is None           # spaced name
+    assert await _pick([_row("OLD", "ABC", 60_000, age_s=130)]) is None  # past the 2-minute guard
     assert await _pick([_row("BAD", "LONGNAME", 45_000), _row("OK", "ROCK", 60_000)]) == "OK"
+    assert await _pick([_row("B80", "ABC", 80_000)]) is None             # Pump Catcher's skips (30 Oct)
+    assert await _pick([_row("B300", "ABC", 300_000)]) is None
+    assert await _pick([_row("B1M", "ABC", 1_000_000)]) is None
 
 
 class _Redis:
