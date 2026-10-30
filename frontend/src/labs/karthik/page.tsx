@@ -647,6 +647,7 @@ export function RuleBook({ data }: { data: KarthikBook }) {
         ? ` Below ${usd(data.short_name_pool[0]).replace(".00", "")} only coins with a name of ${data.short_name_pool[1]} letters or fewer (spaces not counted).` : "")] as [string, string]] : []),
     ...(data.big_pool_usd ? [["Big pools only when busy", `A pool of ${usd(data.big_pool_usd).replace(".00", "")} or more is bought only if it already had ${data.big_min_buys} or more buys in the 5 minutes before. Busy big pools kept rising; quiet ones drifted and held the rugs. Applied from the first trade.`] as [string, string]] : []),
     ...(data.skip_pools_usd ? [["Skips $150k–$200k pools", `No pools between ${usd(data.skip_pools_usd[0]).replace(".00", "")} and ${usd(data.skip_pools_usd[1]).replace(".00", "")}: they lost money in every period tested, and on the real wallet too. Applied from the first trade.`] as [string, string]] : []),
+    ...(data.pump_catcher?.skip_pools_usd?.length ? [["Skips 3 losing pool sizes", `No pools of ${data.pump_catcher.skip_pools_usd.map(([lo, hi]) => hi ? `${usd(lo).replace(".00", "")}–${usd(hi).replace(".00", "")}` : `${usd(lo).replace(".00", "")} or more`).join(", ")}: together they lost $232 on the first 936 trades. Added on 30 Oct after looking, applied from the first trade, so only trades from 30 Oct on test it.`] as [string, string]] : []),
     ...(data.rugged_name_hours ? [["No rebuying a rugged name", `A name is not bought again for ${data.rugged_name_hours} hours after one of this book's coins with that name rugged.${data.rugged_name_skipped ? ` ${data.rugged_name_skipped} skipped so far.` : ""}`] as [string, string]] : []),
     ...(data.skip_spaced_names ? [["No spaced names", `It skips coins whose name has a space (“GTA 6 Coin”, “Riot Games”): about one in five of them rugged.${data.spaced_name_skipped ? ` ${data.spaced_name_skipped} skipped so far.` : ""}`] as [string, string]] : []),
     ...(data.skip_unnamed_dubai_hours ? [["No unnamed coins in the evening", `It skips coins with no name bought from ${data.skip_unnamed_dubai_hours[0]}:00 to midnight Dubai: they rugged far more often.${data.unnamed_evening_skipped ? ` ${data.unnamed_evening_skipped} skipped so far.` : ""}`] as [string, string]] : []),
@@ -668,7 +669,7 @@ export function RuleBook({ data }: { data: KarthikBook }) {
       : ["Always sells", `Exactly ${data.hold_minutes} minutes after buying. No price targets, no stop-loss — the clock decides.`],
     ["The risk", `If a coin's creator drains the pool (a “rug”), that trade loses almost all of it.${rugEvery ? ` So far about 1 in ${rugEvery} trades.` : ""}`],
     ["Paper money", data.pump_catcher
-      ? "A simulation on real market prices. USER 1 followed it with real money from 26 Oct; paused on 27 Oct."
+      ? "A simulation on real market prices. USER 1 follows it with real money (at $2 a trade since 27 Oct) and does not use the 30 Oct pool-size skip."
       : "A simulation on real market prices. The real wallets run their own settings ($50k+ pools, their own trade sizes) and do not follow this book's newer rules."],
   ];
   return (
