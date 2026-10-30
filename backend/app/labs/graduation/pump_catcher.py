@@ -53,6 +53,15 @@ SHARE, SHARE_MAX = 0.10, 100.0
 #: wallets per coin rule"): the 8th onward paid more impact than the move.
 WALLETS_PER_COIN = 7
 REAL_SLIP = 0.01
+#: Pool sizes it never buys (Karthik, 2026-10-30: "remove and revise day 1"):
+#: the three that lost on 936 trades, -$232 together and down on both sides of
+#: every split -- chosen after looking, so its new days are the test.
+SKIP_POOLS: tuple[tuple[float, float], ...] = (
+    (75_000, 100_000), (250_000, 500_000), (1_000_000, float("inf")))
+
+
+def skipped_pool(pool: Any) -> bool:
+    return any(lo <= float(pool or 0) < hi for lo, hi in SKIP_POOLS)
 CHECK_S = 300
 BATCH = 250
 #: Wait this long after the buy before deciding: the 10-minute reading plus slack.

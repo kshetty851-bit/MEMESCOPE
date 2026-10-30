@@ -2249,7 +2249,9 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
                 "real_slip_pct": round(100 * pump_catcher.REAL_SLIP),
                 "check_min": pump_catcher.CHECK_S // 60,
                 "share_pct": round(100 * pump_catcher.SHARE), "share_max_usd": pump_catcher.SHARE_MAX,
-                "priced": len(rows) + len(small), "settling": before - len(rows) - len(small)}
+                "priced": len(rows) + len(small), "settling": before - len(rows) - len(small),
+                "skip_pools_usd": [[lo, None if hi == float("inf") else hi]
+                                   for lo, hi in pump_catcher.SKIP_POOLS]}
         sizing = {"share": pump_catcher.SHARE, "share_max": pump_catcher.SHARE_MAX}
     # Every $75k+ signal his arm took: what the grid beside the book reads.
     signals = rows
@@ -2261,7 +2263,8 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
              if config.karthik_book_pool(r.liq_open_usd, r.symbol)
              and not skip_lo <= float(r.liq_open_usd or 0) < skip_hi
              and not (config.KARTHIK_SKIP_AI_POOL_USD[0] <= float(r.liq_open_usd or 0)
-                      < config.KARTHIK_SKIP_AI_POOL_USD[1] and pl.ai_name(r.symbol))]
+                      < config.KARTHIK_SKIP_AI_POOL_USD[1] and pl.ai_name(r.symbol))
+             and not (pump and pump_catcher.skipped_pool(r.liq_open_usd))]
     # Repeat creators are bought again since 2026-10-06, here and on the real
     # wallets (Karthik: "remove repeat creator block from 50k pool ... assume we
     # had rule since day 1"): the block refused 57 coins, 54 winners, 1 rug.
@@ -2296,7 +2299,8 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
                 or config.karthik_short_name(r.symbol))
             and not skip_lo <= float(r.liq_open_usd or 0) < skip_hi
             and not (config.KARTHIK_SKIP_AI_POOL_USD[0] <= float(r.liq_open_usd or 0)
-                     < config.KARTHIK_SKIP_AI_POOL_USD[1] and pl.ai_name(r.symbol))]
+                     < config.KARTHIK_SKIP_AI_POOL_USD[1] and pl.ai_name(r.symbol))
+            and not (pump and pump_catcher.skipped_pool(r.liq_open_usd))]
     grid = [r for r in await moneyblock.without_crew(db, grid, datetime.now(UTC))
             if not _unnamed_evening(r) and r.mint not in no_open_buy]
     grid = _without_bad_names(grid)[0]
