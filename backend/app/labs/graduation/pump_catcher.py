@@ -62,6 +62,29 @@ SKIP_POOLS: tuple[tuple[float, float], ...] = (
 
 def skipped_pool(pool: Any) -> bool:
     return any(lo <= float(pool or 0) < hi for lo, hi in SKIP_POOLS)
+
+
+#: Three refused-coin groups let back in on the LAB only (Karthik, 2026-10-31:
+#: "add those 3 rules since day 1"); USER 1 keeps `SKIP_POOLS` and the book's
+#: name and open-buy rules. Found by a search of 114 groups (6 passed, about
+#: what luck gives), so trades from 31 Oct on are the test. Replayed: +$507.
+#: 1. $1M+ pools of `BIG_POOL_OK` or more are bought again.
+BIG_POOL_OK = 1_200_000
+#: 2. A coin nobody bought at the open is bought anyway if the buy came this
+#:    many seconds or more after graduating, or its pool is under this.
+OPEN_BUY_OK_AGE_S, OPEN_BUY_OK_POOL = 45, 50_000
+#: 3. Names with a space are bought (its 30 refusals would have made +$218).
+SKIP_SPACED = False
+
+
+def lab_skipped_pool(pool: Any) -> bool:
+    return skipped_pool(pool) and float(pool or 0) < BIG_POOL_OK
+
+
+def open_buy_waived(row: Any) -> bool:
+    graduated = getattr(row, "graduated_at", None)
+    late = graduated is not None and (row.opened_at - graduated).total_seconds() >= OPEN_BUY_OK_AGE_S
+    return late or float(row.liq_open_usd or 0) < OPEN_BUY_OK_POOL
 CHECK_S = 300
 BATCH = 250
 #: Wait this long after the buy before deciding: the 10-minute reading plus slack.
