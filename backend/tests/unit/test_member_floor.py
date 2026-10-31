@@ -14,6 +14,7 @@ from app.real_wallet import rug_brake
 pytestmark = pytest.mark.unit
 NOW = datetime(2026, 10, 12, 12, tzinfo=UTC)
 NOV = datetime(2026, 11, 2, tzinfo=UTC)
+OCT28 = datetime(2026, 10, 28, tzinfo=UTC)
 
 
 class _Session:
@@ -55,11 +56,12 @@ def test_the_main_wallet_skips_only_measured_150_to_200k_pools():
 
 async def test_user1_floor_is_110_then_50_from_26_oct():
     assert rug_brake.member_floor("USER1", NOW) == Decimal(110)
-    assert rug_brake.member_floor("USER1", NOV) == Decimal(50)   # $50 from 26 Oct
+    assert rug_brake.member_floor("USER1", OCT28) == Decimal(50)   # $50 from 26 Oct
+    assert rug_brake.member_floor("USER1", NOV) == Decimal(20)     # $20 from 31 Oct ($15 test)
     assert rug_brake.member_floor("USER2", NOV) is None
     s = _Session(SimpleNamespace(own_enabled=True, own_updated_at=None, own_updated_by=None))
     assert not await rug_brake.stop_member_below_floor(s, "USER1", Decimal("200"), NOW)
-    assert await rug_brake.stop_member_below_floor(s, "USER1", Decimal("40"), NOV)
+    assert await rug_brake.stop_member_below_floor(s, "USER1", Decimal("19"), NOV)
 
 
 def test_user1_skips_150_to_200k_pools_too():

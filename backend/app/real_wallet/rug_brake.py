@@ -106,8 +106,11 @@ async def stop_below_floor(session: AsyncSession, now: datetime, worth: Decimal)
 #: $50 a trade was $60). Karthik, 2026-10-12: "do changes now".
 #: Karthik, 2026-10-26: USER1 follows the Pump Catcher Lab at $10 a trade on
 #: its ~$95, with a $50 floor ("Floor $50"); the $300 November plan is off.
+#: Karthik, 2026-10-31: "lets test 15$ trade on user 1" at a $20 floor, so the
+#: ~$60 wallet has room for the ready-check's 30 trades at $15.
 MEMBER_FLOOR_USD: dict[str, list[tuple[datetime, Decimal]]] = {
-    "USER1": [(datetime(2026, 10, 26, tzinfo=UTC), Decimal(50)),
+    "USER1": [(datetime(2026, 10, 31, 14, tzinfo=UTC), Decimal(20)),
+              (datetime(2026, 10, 26, tzinfo=UTC), Decimal(50)),
               (datetime(2026, 10, 12, tzinfo=UTC), Decimal(110))],
 }
 
