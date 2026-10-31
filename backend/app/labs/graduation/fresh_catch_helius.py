@@ -26,7 +26,9 @@ logger = get_logger(__name__)
 KEY = "freshcatch:helius:v1"
 WINDOWS_S = (10, 20, 30)
 POOL = (10_000, 30_000)
-STOP_AT = datetime(2026, 11, 3, 20, tzinfo=UTC)        # one week: 4 Nov 00:00 Dubai
+#: Ended early (Karthik, 2026-10-31: "change the due date, and proceed now to
+#: analyze"): 1,463 pools by then; every 10 s buy-share rule lost after costs.
+STOP_AT = datetime(2026, 10, 31, 14, tzinfo=UTC)       # 31 Oct 18:00 Dubai
 
 #: Each new pool's readings in its first 10 s; the last one is its size at 10 s.
 _DUE = text("""
