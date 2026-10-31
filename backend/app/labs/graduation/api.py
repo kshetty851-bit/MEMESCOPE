@@ -1531,7 +1531,7 @@ def _real_status(state: str | None, failure: str | None,
     return {"status": "skipped", "why": why}
 
 
-async def _real_did(db: AsyncSession, rows: Sequence[Any]
+async def _real_did(db: AsyncSession, rows: Sequence[Any], member: str | None = None
                     ) -> tuple[dict[str, dict[str, str | None]], datetime]:
     """Since the main wallet's current Start: what it did with each of the
     book's coins (2026-10-05). A tag, never a figure the book rests on, so an
@@ -1542,8 +1542,13 @@ async def _real_did(db: AsyncSession, rows: Sequence[Any]
         from app.core.config import settings as app_settings
         from app.real_wallet.autotrade import AutotradeSwitchService
 
-        started = (await AutotradeSwitchService(db).state()).started_at or never
-        owner = app_settings.REAL_WALLET_PUBLIC_KEY.strip()
+        if member:      # a user wallet's own trades (Karthik, 2026-10-31: Pump Catcher = USER 1)
+            from app.real_wallet import family_wallets, user1_view
+
+            started, owner = user1_view.SINCE, (family_wallets.address(member) or "")
+        else:
+            started = (await AutotradeSwitchService(db).state()).started_at or never
+            owner = app_settings.REAL_WALLET_PUBLIC_KEY.strip()
         recent = [r.mint for r in rows if r.opened_at >= started]
         real: dict[str, dict[str, str | None]] = {}
         if owner and recent:
@@ -2316,7 +2321,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
     # populations on one line -- it read "0 rugs of 11 trades, 12 wins" -- and
     # would have credited the book with dodging a rug it simply had no money
     # for, or blamed it for one it never bought.
-    real, real_from = await _real_did(db, rows)
+    real, real_from = await _real_did(db, rows, "USER1" if pump else None)
     took = [(row, money) for row, money in zip(rows, walk.pnl, strict=True)
             if money is not None]
     pnl = [money for _, money in took]
@@ -2354,6 +2359,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
                  + (f"out at +{pump['target_pct']}%, at {pump['check_min']}m if down there, else {pump['hold_min']}m"
                     if pump else f"out at {arm.hold}m")),
         "pump_catcher": pump,
+        "real_wallet": "USER 1" if pump else "main wallet",
         "pools_usd": list(config.KARTHIK_BOOK_POOLS),
         "short_name_pool": list(config.KARTHIK_SHORT_NAME_POOL),
         "skip_pools_usd": list(config.KARTHIK_SKIP_POOL_USD),

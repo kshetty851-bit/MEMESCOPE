@@ -279,7 +279,7 @@ export function FloorTest({ data }: { data: KarthikBook }) {
 }
 
 export function Days({ days, judgeAt, trades, real = true }: {
-  days: KarthikDay[]; judgeAt?: string; trades?: KarthikTrade[]; real?: boolean;
+  days: KarthikDay[]; judgeAt?: string; trades?: KarthikTrade[]; real?: boolean | string;
 }) {
   const [open, setOpen] = useState<number | null>(null);
   if (days.length === 0) return null;
@@ -372,7 +372,7 @@ export function Days({ days, judgeAt, trades, real = true }: {
                 <McapHeads />
                 <th className="py-1 pr-3 text-right font-normal">result</th>
                 <th className="py-1 text-right font-normal">money</th>
-                {real ? <th className="py-1 pl-3 text-right font-normal">real wallet</th> : null}
+                {real ? <th className="py-1 pl-3 text-right font-normal">{typeof real === "string" ? real : "real wallet"}</th> : null}
               </tr>
             </thead>
             <tbody>
@@ -440,7 +440,8 @@ export function McapHeads() {
   );
 }
 
-export function Row({ trade, real = true }: { trade: KarthikTrade; real?: boolean }) {
+export function Row({ trade, real = true }: { trade: KarthikTrade; real?: boolean | string }) {
+  const who = typeof real === "string" ? real : "main wallet";
   const pct = Number(trade.pct);
   return (
     <tr className="border-t border-line/60">
@@ -496,13 +497,13 @@ export function Row({ trade, real = true }: { trade: KarthikTrade; real?: boolea
       </td>
       {real ? <td className="py-1.5 pl-3 text-right text-[11px]" data-testid="trade-real">
         {trade.real?.status === "bought" ? (
-          <span className="text-up" title="The real main wallet bought this coin too">✓ bought</span>
+          <span className="text-up" title={`The real ${who} bought this coin too`}>✓ bought</span>
         ) : trade.real ? (
-          <span className="text-ink-3" title={`The real main wallet did not: ${trade.real.why ?? ""}`}>
+          <span className="text-ink-3" title={`The real ${who} did not: ${trade.real.why ?? ""}`}>
             ✗ {trade.real.why}
           </span>
         ) : (
-          <span className="text-ink-dim" title="Before the main wallet's current start">—</span>
+          <span className="text-ink-dim" title={`Before the ${who}'s current start`}>—</span>
         )}
       </td> : null}
     </tr>
@@ -763,12 +764,12 @@ export function TradeList({ data }: { data: KarthikBook }) {
                     <McapHeads />
                     <th className="py-1 pr-3 text-right font-normal">result</th>
                     <th className="py-1 text-right font-normal">money</th>
-                    <th className="py-1 pl-3 text-right font-normal">real wallet</th>
+                    <th className="py-1 pl-3 text-right font-normal">{data.real_wallet ?? "real wallet"}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {data.trades_list.map((trade) => (
-                    <Row key={`${trade.symbol}-${trade.opened_at}`} trade={trade} />
+                    <Row key={`${trade.symbol}-${trade.opened_at}`} trade={trade} real={data.real_wallet ?? true} />
                   ))}
                 </tbody>
               </table>
@@ -1240,7 +1241,7 @@ export function KarthikLabPage({ variant = "karthik" }: { variant?: "karthik" | 
           <div className="mb-1 text-[11px] uppercase tracking-wider text-ink-dim">
             Every 24 hours · profit that day
           </div>
-          <Days days={solDays} judgeAt={data.judge_at} trades={data.trades_list} />
+          <Days days={solDays} judgeAt={data.judge_at} trades={data.trades_list} real={data.real_wallet ?? true} />
         </div>
         {data.refused_days?.length ? <RefusedDays days={data.refused_days} total={data.refused_pnl_usd} /> : null}
       </div>
