@@ -91,3 +91,15 @@ async def test_no_buy_at_open_is_checked_only_where_the_book_checks_it():
     # The $40-50k arm is never read by the book, so a coin from it is bought (Grok, 26 Oct).
     assert await _pick([_row("G", "Grok", 48_000, book="KARTHIK_Q25_5M")], no_open_buy=True) == "G"
     assert await _pick([_row("Q", "ROCK", 60_000, book="KARTHIK_Q50_5M")], no_open_buy=True) is None
+
+
+def test_lab_lets_three_groups_back_but_user1_keeps_its_skips():
+    from types import SimpleNamespace
+
+    from app.labs.graduation import pump_catcher as pc
+    assert pc.skipped_pool(1_300_000) and not pc.lab_skipped_pool(1_300_000)   # lab only (31 Oct)
+    assert pc.lab_skipped_pool(1_100_000) and pc.lab_skipped_pool(300_000)
+    row = lambda age, pool: SimpleNamespace(opened_at=NOW, graduated_at=NOW - timedelta(seconds=age),
+                                            liq_open_usd=Decimal(pool))
+    assert pc.open_buy_waived(row(50, 80_000)) and pc.open_buy_waived(row(20, 45_000))
+    assert not pc.open_buy_waived(row(20, 80_000))

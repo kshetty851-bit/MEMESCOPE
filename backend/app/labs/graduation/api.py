@@ -2129,7 +2129,7 @@ def _unnamed_evening(row: Any) -> bool:
     return config.unnamed_evening(row.symbol, row.opened_at)
 
 
-def _without_bad_names(rows: Sequence[Any]) -> tuple[list[Any], int, int, int]:
+def _without_bad_names(rows: Sequence[Any], skip_spaced: bool = True) -> tuple[list[Any], int, int, int]:
     """Karthik's book less a coin named like one of its own coins that closed at
     a rug's loss in the `KARTHIK_RUGGED_NAME_HOURS` before it (only rugs it
     actually took, closed before the buy), and less the blocked names."""
@@ -2145,7 +2145,7 @@ def _without_bad_names(rows: Sequence[Any]) -> tuple[list[Any], int, int, int]:
         if key and key in config.KARTHIK_BLOCKED_NAMES:
             blocked += 1
             continue
-        if config.spaced_name(r.symbol):
+        if skip_spaced and config.spaced_name(r.symbol):
             spaced += 1
             continue
         if (config.KARTHIK_LAB_RUGGED_NAME_BAN and key
@@ -2255,8 +2255,9 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
                 "check_min": pump_catcher.CHECK_S // 60,
                 "share_pct": round(100 * pump_catcher.SHARE), "share_max_usd": pump_catcher.SHARE_MAX,
                 "priced": len(rows) + len(small), "settling": before - len(rows) - len(small),
-                "skip_pools_usd": [[lo, None if hi == float("inf") else hi]
-                                   for lo, hi in pump_catcher.SKIP_POOLS]}
+                "skip_pools_usd": [[lo, pump_catcher.BIG_POOL_OK if hi == float("inf") else hi]
+                                   for lo, hi in pump_catcher.SKIP_POOLS],
+                "open_buy_ok": [pump_catcher.OPEN_BUY_OK_AGE_S, pump_catcher.OPEN_BUY_OK_POOL]}
         sizing = {"share": pump_catcher.SHARE, "share_max": pump_catcher.SHARE_MAX}
     # Every $75k+ signal his arm took: what the grid beside the book reads.
     signals = rows
@@ -2269,7 +2270,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
              and not skip_lo <= float(r.liq_open_usd or 0) < skip_hi
              and not (config.KARTHIK_SKIP_AI_POOL_USD[0] <= float(r.liq_open_usd or 0)
                       < config.KARTHIK_SKIP_AI_POOL_USD[1] and pl.ai_name(r.symbol))
-             and not (pump and pump_catcher.skipped_pool(r.liq_open_usd))]
+             and not (pump and pump_catcher.lab_skipped_pool(r.liq_open_usd))]
     # Repeat creators are bought again since 2026-10-06, here and on the real
     # wallets (Karthik: "remove repeat creator block from 50k pool ... assume we
     # had rule since day 1"): the block refused 57 coins, 54 winners, 1 rug.
@@ -2283,10 +2284,13 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
     rows = [r for r in rows if not _unnamed_evening(r)]
     unnamed_evening = named - len(rows)
     no_open_buy = await _no_open_buy(db, [*rows, *small, *signals])
+    if pump:            # late or small coins are bought without one (2026-10-31)
+        no_open_buy -= {r.mint for r in [*rows, *small, *signals] if pump_catcher.open_buy_waived(r)}
     opened = len(rows)
     rows = [r for r in rows if r.mint not in no_open_buy]
     no_open_buy_skipped = opened - len(rows)
-    rows, rugged_names, blocked_names, spaced_names = _without_bad_names(rows)
+    spaced_rule = not pump or pump_catcher.SKIP_SPACED
+    rows, rugged_names, blocked_names, spaced_names = _without_bad_names(rows, spaced_rule)
     buys_before = dict((await db.execute(_BUYS_BEFORE_SQL, {
         "ids": [p.id for p in rows], "mints": [p.mint for p in rows],
         "ats": [p.opened_at for p in rows]})).all()) if rows else {}
@@ -2305,10 +2309,10 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
             and not skip_lo <= float(r.liq_open_usd or 0) < skip_hi
             and not (config.KARTHIK_SKIP_AI_POOL_USD[0] <= float(r.liq_open_usd or 0)
                      < config.KARTHIK_SKIP_AI_POOL_USD[1] and pl.ai_name(r.symbol))
-            and not (pump and pump_catcher.skipped_pool(r.liq_open_usd))]
+            and not (pump and pump_catcher.lab_skipped_pool(r.liq_open_usd))]
     grid = [r for r in await moneyblock.without_crew(db, grid, datetime.now(UTC))
             if not _unnamed_evening(r) and r.mint not in no_open_buy]
-    grid = _without_bad_names(grid)[0]
+    grid = _without_bad_names(grid, spaced_rule)[0]
     grid = await _busy_if_big(db, grid)     # the book's big-pool rule, every column
     grid_buys = dict((await db.execute(_BUYS_BEFORE_SQL, {
         "ids": [p.id for p in grid], "mints": [p.mint for p in grid],
@@ -2400,7 +2404,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
                               if config.KARTHIK_LAB_RUGGED_NAME_BAN else None),
         "rugged_name_skipped": rugged_names,
         "blocked_names": sorted(config.KARTHIK_BLOCKED_NAMES),
-        "skip_spaced_names": config.KARTHIK_SKIP_SPACED_NAMES,
+        "skip_spaced_names": config.KARTHIK_SKIP_SPACED_NAMES and spaced_rule,
         "spaced_name_skipped": spaced_names,
         "skip_unnamed_dubai_hours": (list(config.KARTHIK_SKIP_UNNAMED_DUBAI_HOURS)
                                      if config.KARTHIK_SKIP_UNNAMED_DUBAI_HOURS else None),
