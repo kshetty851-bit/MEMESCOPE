@@ -1143,9 +1143,22 @@ export function KarthikLabPage({ variant = "karthik" }: { variant?: "karthik" | 
       {variant === "pump" ? <User1Real /> : null}
       <BookBody data={data} variant={variant} />
       {/* One month at a time (Karthik, 2026-11-01): October closed into its own box. */}
-      {variant === "pump" ? <MonthBox month="2026-10" title="October 2026" /> : null}
+      {variant === "pump" ? closedMonths().map(([m, title]) => <MonthBox key={m} month={m} title={title} />) : null}
     </div>
   );
+}
+
+/** Every finished Dubai month since the lab opened (October 2026), newest first. */
+function closedMonths(now = new Date()): [string, string][] {
+  const dubai = new Date(now.getTime() + 4 * 3_600_000);
+  const out: [string, string][] = [];
+  for (let y = dubai.getUTCFullYear(), m = dubai.getUTCMonth() - 1; y > 2026 || (y === 2026 && m >= 9); m--) {
+    if (m < 0) { m = 11; y--; if (y < 2026 || (y === 2026 && m < 9)) break; }
+    const d = new Date(Date.UTC(y, m, 1));
+    out.push([`${y}-${String(m + 1).padStart(2, "0")}`,
+              d.toLocaleString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" })]);
+  }
+  return out;
 }
 
 /** A finished month of the Pump Catcher Lab, folded away until opened. */
