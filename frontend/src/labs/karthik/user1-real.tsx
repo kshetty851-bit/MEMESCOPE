@@ -32,11 +32,20 @@ export function User1Real() {
   if (isError) return <p className="text-sm text-down">USER 1&apos;s trades could not be read.</p>;
   if (!d) return null;
   return (
-    <section className="rounded-2xl border border-accent/40 bg-accent/[0.04] p-4" data-testid="user1-real">
-      <div className="flex flex-wrap items-baseline justify-between gap-3">
-        <h2 className="text-base font-semibold text-ink">USER 1 · real money, following this lab</h2>
-        <span className="text-[11px] text-ink-dim">since {at(d.since)} · updates every 30 s</span>
-      </div>
+    // Folded to one line by default (Karthik, 2026-11-01: "minimize user 1 and lab compare").
+    <details className="group rounded-2xl border border-accent/40 bg-accent/[0.04] px-4 py-3" data-testid="user1-real">
+      <summary className="flex cursor-pointer select-none flex-wrap items-baseline justify-between gap-3 [&::-webkit-details-marker]:hidden">
+        <h2 className="text-base font-semibold text-ink">
+          <span className="mr-1.5 inline-block text-ink-dim transition-transform group-open:rotate-90">›</span>
+          USER 1 · real money vs lab
+        </h2>
+        <span className="text-[12px] text-ink-dim tabular-nums">
+          {d.balance_usd ? `$${Number(d.balance_usd).toFixed(2)}` : "balance unread"} ·{" "}
+          <span className={tone(d.pnl_usd)}>{usd(d.pnl_usd)}</span> · {d.trades} trades
+          {d.open ? ` · ${d.open} open` : ""} · tap to open
+        </span>
+      </summary>
+      <div className="mt-1 text-[11px] text-ink-dim">since {at(d.since)} · updates every 30 s</div>
       <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Fig label="Balance" value={d.balance_usd ? `$${Number(d.balance_usd).toFixed(2)}` : "unread"}
              sub={d.balance_sol ? `${Number(d.balance_sol).toFixed(3)} SOL` : d.balance_error ?? ""} />
@@ -75,7 +84,7 @@ export function User1Real() {
         </table>
       </div>
       <p className="mt-2 text-[11px] text-ink-faint">“Lab” is the Pump Catcher Lab&apos;s paper result on the same coin; “—” means the lab did not buy it or has not priced it yet. Not financial advice.</p>
-    </section>
+    </details>
   );
 }
 
