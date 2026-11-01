@@ -8,9 +8,20 @@ import { fetchKarthikBook, fetchPumpCatcherBook, fetchPumpfunDays, fetchWalletsP
 export function useKarthikBook(variant: "karthik" | "pump" = "karthik") {
   return useQuery({
     queryKey: ["karthik-lab", "book", variant],
-    queryFn: variant === "pump" ? fetchPumpCatcherBook : fetchKarthikBook,
+    queryFn: variant === "pump" ? () => fetchPumpCatcherBook() : fetchKarthikBook,
     refetchInterval: 60_000,
     staleTime: 30_000,
+  });
+}
+
+/** A closed month of the Pump Catcher Lab ("2026-10"): fixed, so fetched once,
+ *  and only when its box is opened. */
+export function usePumpCatcherMonth(month: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["karthik-lab", "book", "pump", month],
+    queryFn: () => fetchPumpCatcherBook(month),
+    enabled,
+    staleTime: Infinity,
   });
 }
 

@@ -63,7 +63,7 @@ async def user1(session: DbSession) -> dict[str, Any]:
         return _CACHE[1]
     wallet = family_wallets.address("USER1")
     own = await family_api._own_wallet("USER1") if wallet else {}
-    book = (await grad_api.pump_catcher_book_cached(session))["trades_list"]
+    book = (await grad_api.pump_catcher_book_cached(session, month="all"))["trades_list"]
     lab = {t["mint"]: t for t in book}
     rows = (await session.execute(_TRADES, {"w": wallet, "s": SINCE})).all() if wallet else []
     trades = []

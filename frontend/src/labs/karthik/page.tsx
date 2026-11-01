@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState, ErrorState } from "@/components/ui/states";
 import { WorldClocks } from "./world-clocks";
 
-import { useKarthikBook, usePumpfunDays, useWalletsProfit } from "./hooks";
+import { useKarthikBook, usePumpCatcherMonth, usePumpfunDays, useWalletsProfit } from "./hooks";
 import type {
   WalletCounts, KarthikBook, KarthikDay, KarthikFlows, KarthikTrade, KarthikWhatIfLine, PumpfunDay,
   StartDate, WalletProfit,
@@ -1122,9 +1122,6 @@ function RealWalletsLive() {
  *  coins and rules, every trade sold at +30% or 10 minutes instead of 5. */
 export function KarthikLabPage({ variant = "karthik" }: { variant?: "karthik" | "pump" } = {}) {
   const { data, isLoading, isError, refetch } = useKarthikBook(variant);
-  // Before the early returns: a hook may not sit behind a condition, and the
-  // loading and error branches below are exactly that.
-  const elapsed = useElapsed(data?.started_at);
 
   if (isLoading) return <Skeleton className="h-64 w-full" />;
   if (isError || !data) {
@@ -1136,6 +1133,44 @@ export function KarthikLabPage({ variant = "karthik" }: { variant?: "karthik" | 
       />
     );
   }
+  return (
+    <div className="min-w-0 space-y-4">
+      {/* The thirty pre-buy checks, live, on top (Karthik, 2026-10-03). */}
+      <CheckpointLive />
+      {/* UAE and USA clocks (Karthik, 2026-10-04). */}
+      <WorldClocks />
+      {/* USER 1's real trades on this lab (Karthik, 2026-10-27). */}
+      {variant === "pump" ? <User1Real /> : null}
+      <BookBody data={data} variant={variant} />
+      {/* One month at a time (Karthik, 2026-11-01): October closed into its own box. */}
+      {variant === "pump" ? <MonthBox month="2026-10" title="October 2026" /> : null}
+    </div>
+  );
+}
+
+/** A finished month of the Pump Catcher Lab, folded away until opened. */
+function MonthBox({ month, title }: { month: string; title: string }) {
+  const [open, setOpen] = useState(false);
+  const { data, isLoading, isError } = usePumpCatcherMonth(month, open);
+  return (
+    <details className="rounded-xl border border-line bg-surface" onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary className="cursor-pointer select-none px-4 py-3 text-sm font-semibold text-ink">
+        {title} · closed month{data ? ` · ${Number(data.pnl_usd) >= 0 ? "+" : "−"}${usd(Math.abs(Number(data.pnl_usd)))} on ${usd(data.capital_usd)}, ${data.trades} trades` : ""}
+      </summary>
+      <div className="space-y-4 border-t border-line p-4">
+        {isLoading ? <Skeleton className="h-64 w-full" /> : isError || !data
+          ? <p className="text-[13px] text-ink-dim">{title} could not be loaded.</p>
+          : <BookBody data={data} variant="pump" archive />}
+      </div>
+    </details>
+  );
+}
+
+/** Everything the page says about one book: a month, or the whole run. */
+function BookBody({ data, variant, archive = false }: {
+  data: KarthikBook; variant: "karthik" | "pump"; archive?: boolean;
+}) {
+  const elapsed = useElapsed(data.started_at);
 
   // Profits move with SOL (Karthik, 2026-10-20: "the profit shud flactuate as
   // per Sol value"): each figure is its SOL at SOL's price now. The fixed-dollar
@@ -1154,25 +1189,19 @@ export function KarthikLabPage({ variant = "karthik" }: { variant?: "karthik" | 
 
   return (
     <div className="min-w-0 space-y-4">
-      {/* The thirty pre-buy checks, live, on top (Karthik, 2026-10-03). */}
-      <CheckpointLive />
-      {/* UAE and USA clocks (Karthik, 2026-10-04). */}
-      <WorldClocks />
-      {/* USER 1's real trades on this lab (Karthik, 2026-10-27). */}
-      {variant === "pump" ? <User1Real /> : null}
       {/* Two columns from 1150px: the counts and their boxes on the right, and
           the header grows to fit them rather than lying over the rule book. */}
       <div className="grid gap-x-8 gap-y-2 min-[1150px]:grid-cols-[minmax(0,1fr)_auto]">
         <h1 className="text-xl font-semibold min-[1150px]:col-start-1 min-[1150px]:row-start-1">
-          {variant === "pump" ? "Pump Catcher Lab" : <>Karthik&apos;s Lab</>}
+          {variant === "pump" ? <>Pump Catcher Lab{data.month_until ? ` · ${new Date(data.started_at).toLocaleString("en-GB", { month: "long", year: "numeric", timeZone: "Asia/Dubai" })}` : ""}</> : <>Karthik&apos;s Lab</>}
         </h1>
         <div className="min-[1150px]:col-start-2 min-[1150px]:row-span-2 min-[1150px]:row-start-1">
           <div className="flex items-baseline justify-end gap-6">
             <GraduationsSeen count={data.graduations_seen} rugs={data.graduations_rugged} />
             <div className="text-right">
-              <div className="text-lg font-semibold tabular-nums">{elapsed}</div>
+              <div className="text-lg font-semibold tabular-nums">{archive ? "closed" : elapsed}</div>
               <div className="text-[11px] uppercase tracking-wider text-ink-dim">
-                running &middot; {days} days to judgement
+                {archive ? `${data.days.length} days` : <>running &middot; {days} days to judgement</>}
               </div>
             </div>
           </div>
@@ -1275,16 +1304,18 @@ export function KarthikLabPage({ variant = "karthik" }: { variant?: "karthik" | 
       </div>
 
 
-      <PumpfunMoney />
+      {archive ? null : <PumpfunMoney />}
 
       <SizeGrid data={data} />
 
       <FloorTest data={data} />
 
-      <div className="grid items-start gap-3 md:grid-cols-2">
-        <RealWalletsLive />
-        <RugsPreventedLive />
-      </div>
+      {archive ? null : (
+        <div className="grid items-start gap-3 md:grid-cols-2">
+          <RealWalletsLive />
+          <RugsPreventedLive />
+        </div>
+      )}
 
       <TradeList data={data} />
     </div>
