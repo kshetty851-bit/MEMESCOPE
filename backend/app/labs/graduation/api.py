@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import re
 from collections.abc import Callable, Iterable, Sequence
 from functools import lru_cache
 from datetime import UTC, date, datetime, timedelta
@@ -1815,7 +1816,8 @@ def _in_sol(took: Sequence[tuple[Any, float]], capital: float,
 
 
 def _karthik_days(took: Sequence[tuple[Any, float]], start: datetime,
-                  capital: float, cents: Decimal, sol_now: float | None = None) -> list[dict[str, Any]]:
+                  capital: float, cents: Decimal, sol_now: float | None = None,
+                  until: datetime | None = None) -> list[dict[str, Any]]:
     """One row per 24 hours since the book opened, newest first.
 
     A trade counts on the day it CLOSED, because that is when its money landed:
@@ -1828,11 +1830,14 @@ def _karthik_days(took: Sequence[tuple[Any, float]], start: datetime,
     # trades must never be dropped for being in the future by a few seconds.
     now = datetime.now(UTC)
     end = max([now, *(row.closed_at for row, _ in took)]) if took else now
+    if until is not None:                 # a closed month stops at its last day
+        end = min(end, until)
     for n in range(1, 400):
         lo, hi = start + timedelta(days=n - 1), start + timedelta(days=n)
-        if lo > end:
+        if lo > end or (until is not None and lo >= until):
             break
-        closed = [(row, m) for row, m in took if lo <= row.closed_at < hi]
+        closed = [(row, m) for row, m in took if lo <= row.closed_at
+                  and (row.closed_at < hi or (until is not None and hi >= until))]
         money = [m for _, m in closed]
         opened = balance
         balance += sum(money)
@@ -2173,20 +2178,41 @@ async def karthik_book_cached(db: AsyncSession = Depends(get_db)) -> dict[str, A
     return _KARTHIK_BOOK[1]
 
 
-_PUMP_BOOK: tuple[datetime, dict[str, Any]] | None = None
+_PUMP_BOOK: dict[str, tuple[datetime, dict[str, Any]]] = {}
+
+
+def _dubai_month(month: str | None, now: datetime) -> tuple[datetime | None, datetime | None]:
+    """A calendar month in Dubai time as UTC bounds: "2026-10", None for this
+    month, "all" for no bounds."""
+    if month == "all":
+        return None, None
+    y, m = (int(x) for x in month.split("-")) if month else ((now + DUBAI).year, (now + DUBAI).month)
+    lo = datetime(y, m, 1, tzinfo=UTC) - DUBAI
+    hi = datetime(y + m // 12, m % 12 + 1, 1, tzinfo=UTC) - DUBAI
+    return lo, hi
 
 
 @router.get("/karthik/pump-catcher",
             summary="Karthik Lab's trades sold at +30% or 10 minutes (Pump Catcher Lab)")
-async def pump_catcher_book_cached(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
-    global _PUMP_BOOK
+async def pump_catcher_book_cached(db: AsyncSession = Depends(get_db),
+                                   month: str | None = None) -> dict[str, Any]:
+    """One calendar month (Karthik, 2026-11-01: "wrap up ... inside oct box and
+    start new for november"), each from its own $500; `month` is "2026-10",
+    "all", or empty for this month."""
+    if month and month != "all" and not re.fullmatch(r"20\d\d-(0[1-9]|1[0-2])", month):
+        raise HTTPException(status_code=422, detail="month is YYYY-MM or all")
     now = datetime.now(UTC)
-    if _PUMP_BOOK is None or (now - _PUMP_BOOK[0]).total_seconds() >= _KARTHIK_PUBLIC_TTL_S:
-        _PUMP_BOOK = (now, await karthik_book(db, exit_rule="pump"))
-    return _PUMP_BOOK[1]
+    since, until = _dubai_month(month, now)
+    key = f"{since}|{until}"
+    ttl = 86_400 if until and until <= now - timedelta(hours=1) else _KARTHIK_PUBLIC_TTL_S
+    hit = _PUMP_BOOK.get(key)
+    if hit is None or (now - hit[0]).total_seconds() >= ttl:
+        _PUMP_BOOK[key] = hit = (now, await karthik_book(db, exit_rule="pump", since=since, until=until))
+    return hit[1]
 
 
-async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m") -> dict[str, Any]:
+async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m",
+                       since: datetime | None = None, until: datetime | None = None) -> dict[str, Any]:
     """His book alone, with the two things a balance cannot say.
 
     `judge_at` is fixed in config and reported rather than computed, because a
@@ -2291,6 +2317,12 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
     no_open_buy_skipped = opened - len(rows)
     spaced_rule = not pump or pump_catcher.SKIP_SPACED
     rows, rugged_names, blocked_names, spaced_names = _without_bad_names(rows, spaced_rule)
+    # One month only (2026-11-01): every rule above ran over the whole history,
+    # so a month starts exactly as the running book would, then walks its own $500.
+    start = max(since, spec.start) if since else spec.start
+    end = min(until, datetime.now(UTC)) if until else datetime.now(UTC)
+    inside = lambda r: start <= r.opened_at and (until is None or r.opened_at < until)  # noqa: E731
+    rows = [r for r in rows if inside(r)]
     buys_before = dict((await db.execute(_BUYS_BEFORE_SQL, {
         "ids": [p.id for p in rows], "mints": [p.mint for p in rows],
         "ats": [p.opened_at for p in rows]})).all()) if rows else {}
@@ -2313,7 +2345,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
     grid = [r for r in await moneyblock.without_crew(db, grid, datetime.now(UTC))
             if not _unnamed_evening(r) and r.mint not in no_open_buy]
     grid = _without_bad_names(grid, spaced_rule)[0]
-    grid = await _busy_if_big(db, grid)     # the book's big-pool rule, every column
+    grid = [r for r in await _busy_if_big(db, grid) if inside(r)]   # the book's big-pool rule, every column
     grid_buys = dict((await db.execute(_BUYS_BEFORE_SQL, {
         "ids": [p.id for p in grid], "mints": [p.mint for p in grid],
         "ats": [p.opened_at for p in grid]})).all()) if grid else {}
@@ -2335,7 +2367,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
     # book's own stake, as if there were always cash for it.
     kept_ids = {p.id for p in rows}
     refused = [r for r in sorted([*small, *signals], key=_opened_order)
-               if config.karthik_book_pool(r.liq_open_usd, r.symbol) and r.id not in kept_ids]
+               if config.karthik_book_pool(r.liq_open_usd, r.symbol) and r.id not in kept_ids and inside(r)]
     refused_walk = _funded_walk(
         [(p.opened_at, p.closed_at, float(p.net_return),
           float(p.impact_open or 0), float(p.impact_close or 0)) for p in refused],
@@ -2346,7 +2378,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
     # Every pump.fun graduation seen since the book opened, bought or not, at
     # any pool size (Karthik, 2026-09-27: "doesnt matter we took trade or not").
     seen = await db.scalar(select(func.count()).select_from(GradMigration)
-                           .where(GradMigration.ts >= spec.start))
+                           .where(GradMigration.ts >= start, GradMigration.ts < end))
     flow_rows = {f.mint: f for f in (await db.execute(
         select(GradTradeFlow).where(GradTradeFlow.mint.in_([r.mint for r, _ in took]))
     )).scalars().all()}
@@ -2354,7 +2386,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
         "book": spec.book,
         "graduations_seen": int(seen or 0),
         # Of those, how many rugged in their first hour (Karthik, 2026-09-27).
-        "graduations_rugged": await _graduation_rugs(db, spec.start),
+        "graduations_rugged": await _graduation_rugs(db, start),
         # Who put money into the coins the book bought, graduation to its sell.
         "flows": _flows(took, flow_rows),
         "rule": (("Pump Catcher — Karthik's coins" if pump else "Karthik's book")
@@ -2376,16 +2408,17 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
         "pools_since": config.KARTHIK_BOOK_POOLS_AT,
         "floor_test": _floor_test(rows),
         # Three $500 user wallets on the same trades, month by month (2026-10-20).
-        "wallet_counts": _wallet_counts(rows, buys_before, sol, spec.start, datetime.now(UTC),
+        "wallet_counts": _wallet_counts(rows, buys_before, sol, start, end,
                                         float(capital) if pump else FAMILY_START, **sizing,
                                         per_coin=pump_catcher.WALLETS_PER_COIN if pump else 0),
         "start_dates": _start_dates(rows, sol, ticket=float(spec.ticket_usd),
                                     capital=float(capital),
-                                    now=datetime.now(UTC), cents=Decimal("0.01"),
+                                    now=end - timedelta(seconds=1), cents=Decimal("0.01"),
                                     ticket_of=lambda r: config.karthik_ticket(
                                         r.liq_open_usd, buys_before.get(r.id)), **sizing),
         "hold_minutes": arm.hold,
-        "started_at": spec.start,
+        "started_at": start,
+        "month_until": until,
         "judge_at": config.KARTHIK_JUDGE_AT,
         "resized_at": config.KARTHIK_RESIZED_AT,
         "previous_capital_usd": config.KARTHIK_PREVIOUS_SIZE[0],
@@ -2432,10 +2465,10 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
         # which is what a day's return means. The figures above are percentages
         # of the starting $500, a different denominator for a different
         # question, so this one carries its own label on the page.
-        "days": _karthik_days(took, spec.start, float(capital), cents,
-                              float(sol) if sol else None),
+        "days": _karthik_days(took, start, float(capital), cents,
+                              float(sol) if sol else None, until=until),
         "refused_days": [{k: d[k] for k in ("n", "running", "trades", "rugs", "pnl_usd")}
-                         for d in _karthik_days(refused_took, spec.start, 1e9, cents)],
+                         for d in _karthik_days(refused_took, start, 1e9, cents, until=until)],
         "refused_pnl_usd": Decimal(str(sum(m for _, m in refused_took))).quantize(cents),
         "in_sol": _in_sol(took, float(capital), float(sol) if sol else None),
         # The same trades at other sizes, and on $150k+ pools only. A check,
