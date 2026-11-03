@@ -37,6 +37,11 @@ def test_only_user1_is_on_the_pump_exit():
     assert ed.pump_exit(None) is False
 
 
+def test_a_g_pump_position_sells_like_the_lab_on_any_wallet():
+    assert ed.pump_exit("main-wallet", "G-PUMP") is True
+    assert ed.pump_exit("main-wallet", "G-Q50") is False
+
+
 def test_user1_sells_on_the_freshest_price():
     from datetime import UTC, datetime, timedelta
     from types import SimpleNamespace as N

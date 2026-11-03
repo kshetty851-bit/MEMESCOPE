@@ -354,7 +354,9 @@ x-backend-env: &backend-env
   # Karthik, 2026-10-05: stop the trading if the main wallet falls below $107.
   # Karthik, 2026-10-17 ("floor 80$"): $80, so the ~$111 wallet can trade at
   # $10 tickets without adding money (was $120, above the balance).
-  REAL_WALLET_BALANCE_FLOOR_USD: 80
+  # Karthik, 2026-11-03 ("lower the floor to 50$"): $50, after the $80 floor
+  # stopped the ~$80 wallet; it now trades the Pump Catcher's coins at $5.
+  REAL_WALLET_BALANCE_FLOOR_USD: 50
   # The buy-time holder check. Here and not only in config.py: a value the
   # anchor does not name never reaches a container.
   REAL_WALLET_HOLDER_GATE_ENABLED: ${REAL_WALLET_HOLDER_GATE_ENABLED:-false}

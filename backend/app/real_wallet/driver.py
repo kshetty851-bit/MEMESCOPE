@@ -127,8 +127,9 @@ def lab_sized(strategy_id: str, ticket: Decimal, pool_usd: Decimal | float | Non
 
     if strategy_id.upper() not in LAB_RULES_STRATEGIES or pool_usd is None:
         return ticket
-    table = (grad_config.USER1_TICKETS_BY_POOL if (member or "").upper() in LAB_SIZED_MEMBERS
-             else grad_config.WALLET_TICKETS_BY_POOL)
+    # G-PUMP trades its ticket flat on every wallet, as USER 1 always has.
+    flat = (member or "").upper() in LAB_SIZED_MEMBERS or strategy_id.upper() == PUMP_STRATEGY
+    table = grad_config.USER1_TICKETS_BY_POOL if flat else grad_config.WALLET_TICKETS_BY_POOL
     stake = Decimal(str(grad_config.karthik_ticket(pool_usd, buys_before, table)))
     base = Decimal(str(grad_config.WALLET_TICKETS_BY_POOL[0][1]))
     return (ticket * stake / base).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
