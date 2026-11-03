@@ -113,6 +113,10 @@ LAB_RULES_STRATEGIES = frozenset({LAB_RULES_STRATEGY, PUMP_STRATEGY})
 #: $25 above, scaled so a ticket buys what the lab's $75 used to. Every other
 #: wallet keeps the 16 Oct table (`WALLET_TICKETS_BY_POOL`).
 LAB_SIZED_MEMBERS = frozenset({"USER1"})
+#: User wallets that keep trading when the main wallet is stopped (Karthik,
+#: 2026-11-03: "let user 1 trade on its own", after the main wallet's $80
+#: floor stopped it). Their own switch, floor and the kill switches still apply.
+OWN_SWITCH_MEMBERS = frozenset({"USER1"})
 
 
 def lab_sized(strategy_id: str, ticket: Decimal, pool_usd: Decimal | float | None,
@@ -194,7 +198,7 @@ class RealWalletDriver:
         for account in accounts:
             if not account.enabled:
                 out[account.member] = "own_wallet_off"
-            elif not switch.enabled:
+            elif not switch.enabled and account.member not in OWN_SWITCH_MEMBERS:
                 out[account.member] = "owner_wallet_stopped"
             elif not switch.nominated_strategy:
                 out[account.member] = "no_strategy_nominated"
