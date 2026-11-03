@@ -52,6 +52,8 @@ def _configured(monkeypatch):
         return Decimal("100")
 
     monkeypatch.setattr(RealWalletDriver, "_sol_usd", _price)
+    # G-QUIET was retired from Start; these tests still drive it.
+    monkeypatch.setattr("app.labs.graduation.live_spec.OFFERED", ("G-Q50", "G-QUIET"))
     for name, value in (
         ("REAL_WALLET_PUBLIC_KEY", OWNER),
         ("REAL_WALLET_WITHDRAWAL_ADDRESS", KARTHIK),
