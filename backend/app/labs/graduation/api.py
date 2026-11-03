@@ -2375,6 +2375,15 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
         tickets=[config.karthik_ticket(p.liq_open_usd, None) for p in refused], **sizing)
     refused_took = [(row, money) for row, money in zip(refused, refused_walk.pnl, strict=True)
                     if money is not None]
+    refused_days = _karthik_days(refused_took, start, 1e9, cents, until=until)
+
+    def refused_day(row: Any) -> int | None:
+        """The refused-coins box a coin sits in: the day it closed, the last
+        box taking late closes, as `_karthik_days` counts it."""
+        for d in refused_days:
+            if d["from"] <= row.closed_at < d["to"]:
+                return int(d["n"])
+        return int(refused_days[-1]["n"]) if refused_days else None
     # Every pump.fun graduation seen since the book opened, bought or not, at
     # any pool size (Karthik, 2026-09-27: "doesnt matter we took trade or not").
     seen = await db.scalar(select(func.count()).select_from(GradMigration)
@@ -2468,7 +2477,17 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
         "days": _karthik_days(took, start, float(capital), cents,
                               float(sol) if sol else None, until=until),
         "refused_days": [{k: d[k] for k in ("n", "running", "trades", "rugs", "pnl_usd")}
-                         for d in _karthik_days(refused_took, start, 1e9, cents, until=until)],
+                         for d in refused_days],
+        # Each refused coin, newest first, so a day's box opens onto its coins
+        # (Karthik, 2026-11-03: "if i click on refused coins, it shud show all
+        # trades inside the box").
+        "refused_list": [{
+            "day": refused_day(row), "symbol": row.symbol, "mint": row.mint,
+            "opened_at": row.opened_at, "closed_at": row.closed_at,
+            "pct": Decimal(str(100 * float(row.net_return))).quantize(cents),
+            "pnl_usd": Decimal(str(money)).quantize(cents),
+            "pool_usd": row.liq_open_usd, **_mcaps(row),
+        } for row, money in reversed(refused_took)],
         "refused_pnl_usd": Decimal(str(sum(m for _, m in refused_took))).quantize(cents),
         "in_sol": _in_sol(took, float(capital), float(sol) if sol else None),
         # The same trades at other sizes, and on $150k+ pools only. A check,

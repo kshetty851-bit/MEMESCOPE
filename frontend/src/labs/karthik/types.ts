@@ -131,6 +131,8 @@ export interface KarthikBook {
   /** What the coins the rules refused would have made each day, at the book's stake (2026-10-22). */
   refused_days?: { n: number; running: boolean; trades: number; rugs: number; pnl_usd: string }[];
   refused_pnl_usd?: string;
+  /** Each refused coin, newest first, tagged with its refused-day box (2026-11-03). */
+  refused_list?: (KarthikTrade & { day: number | null })[];
   whatif: KarthikWhatIf;
   trades_list: KarthikTrade[];
 }

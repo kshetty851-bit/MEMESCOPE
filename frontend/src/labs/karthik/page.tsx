@@ -387,10 +387,15 @@ export function Days({ days, judgeAt, trades, real = true }: {
 }
 
 /** What the coins the rules refused would have made, per day (2026-10-22). */
-export function RefusedDays({ days, total }: {
+export function RefusedDays({ days, total, coins }: {
   days: NonNullable<KarthikBook["refused_days"]>; total?: string;
+  coins?: KarthikBook["refused_list"];
 }) {
   const sum = Number(total ?? 0);
+  // Karthik, 2026-11-03: a day's box opens onto the coins refused that day.
+  const [open, setOpen] = useState<number | null>(null);
+  const toggle = (n: number) => setOpen(open === n ? null : n);
+  const inDay = coins && open != null ? coins.filter((c) => c.day === open) : [];
   return (
     <div data-testid="refused-days">
       <div className="mb-1 flex items-baseline justify-between gap-2 text-[11px] uppercase tracking-wider text-ink-dim">
@@ -404,7 +409,16 @@ export function RefusedDays({ days, total }: {
           const pnl = Number(d.pnl_usd);
           return (
             <div key={d.n} data-testid={`refused-day-${d.n}`}
-                 className={`rounded-md border p-1.5 ${d.running ? "border-dashed border-line" : "border-line"} bg-ink/[0.02]`}>
+                 {...(coins ? {
+                   role: "button", tabIndex: 0, "aria-pressed": open === d.n,
+                   title: "Show the coins refused this day",
+                   onClick: () => toggle(d.n),
+                   onKeyDown: (e: React.KeyboardEvent) => {
+                     if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(d.n); }
+                   },
+                 } : {})}
+                 className={`rounded-md border p-1.5 ${open === d.n ? "border-accent ring-1 ring-accent"
+                   : d.running ? "border-dashed border-line" : "border-line"} bg-ink/[0.02]${coins ? " cursor-pointer hover:border-accent/60" : ""}`}>
               <div className="text-[9px] uppercase tracking-wider text-ink-dim">Day {d.n}{d.running ? " · so far" : ""}</div>
               <div className={`text-[13px] font-semibold tabular-nums ${pnl > 0 ? "text-up" : pnl < 0 ? "text-down" : "text-ink-dim"}`}>
                 {pnl > 0 ? "+" : ""}{usd(d.pnl_usd)}
@@ -416,6 +430,33 @@ export function RefusedDays({ days, total }: {
           );
         })}
       </div>
+      {open != null ? (
+        <div className="mt-2 overflow-x-auto rounded-lg border border-line p-2" data-testid="refused-day-coins">
+          <div className="mb-1 flex items-center justify-between text-[11px] uppercase tracking-wider text-ink-2">
+            <span>Refused · day {open} · {inDay.length} coins</span>
+            <button type="button" className="text-accent hover:underline" onClick={() => setOpen(null)}>close</button>
+          </div>
+          {inDay.length === 0 ? (
+            <p className="text-[12px] text-ink-dim">No refused coins closed this day.</p>
+          ) : (
+            <table className="w-full text-[13px]">
+              <thead className="text-[11px] uppercase tracking-wider text-ink-dim">
+                <tr>
+                  <th className="py-1 pr-3 text-left font-normal">bought</th>
+                  <th className="py-1 pr-3 text-left font-normal">coin</th>
+                  <th className="py-1 pr-3 text-right font-normal">pool</th>
+                  <McapHeads />
+                  <th className="py-1 pr-3 text-right font-normal">result</th>
+                  <th className="py-1 text-right font-normal">money</th>
+                </tr>
+              </thead>
+              <tbody>
+                {inDay.map((t) => <Row key={`${t.mint}${t.opened_at}`} trade={t} real={false} />)}
+              </tbody>
+            </table>
+          )}
+        </div>
+      ) : null}
       <p className="mt-1 text-[10px] text-ink-faint">
         $40k+ quiet coins (short names under $50k) the book&apos;s skips turned away, at its own stake, as if cash were always free.
       </p>
@@ -1285,7 +1326,7 @@ function BookBody({ data, variant, archive = false }: {
           </div>
           <Days days={solDays} judgeAt={data.judge_at} trades={data.trades_list} real={data.real_wallet ?? true} />
         </div>
-        {data.refused_days?.length ? <RefusedDays days={data.refused_days} total={data.refused_pnl_usd} /> : null}
+        {data.refused_days?.length ? <RefusedDays days={data.refused_days} total={data.refused_pnl_usd} coins={data.refused_list} /> : null}
       </div>
       {data.start_dates?.length ? (
         <StartDates book="$40k book" lines={data.start_dates} capital={Number(data.capital_usd)} ticket={Number(data.ticket_usd)}
