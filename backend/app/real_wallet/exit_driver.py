@@ -105,10 +105,13 @@ RETRY_FIRST_S = 15
 RETRY_MAX_S = 1800
 
 
-def pump_exit(public_key: str | None) -> bool:
-    """Does this wallet sell like the Pump Catcher Lab?"""
+def pump_exit(public_key: str | None, strategy_id: str | None = None) -> bool:
+    """Does this position sell like the Pump Catcher Lab? Its wallet is a
+    pump member, or it was bought as G-PUMP (the main wallet, 2026-11-03)."""
     from app.real_wallet.family_wallets import member_for
 
+    if (strategy_id or "").upper() == "G-PUMP":
+        return True
     return bool(public_key) and member_for(public_key) in PUMP_EXIT_MEMBERS
 
 
@@ -205,7 +208,7 @@ class RealWalletExitDriver:
                 skip("unknown_strategy")
                 continue
 
-            pump = pump_exit(pos.wallet_public_key)
+            pump = pump_exit(pos.wallet_public_key, pos.strategy_id)
             exits = PUMP_EXITS if pump else strategy.exits
             started = await self._clock_start(pos)
             if pos.exit_intent_id is not None:

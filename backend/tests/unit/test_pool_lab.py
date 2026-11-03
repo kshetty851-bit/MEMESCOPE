@@ -128,6 +128,8 @@ def test_real_wallets_size_like_karthik_lab() -> None:
     assert lab_sized("G-Q50", d("50"), 60_000, 13) == d("66.66")      # quiet small coin
     assert lab_sized("G-Q50", d("50"), 60_000, 14) == d("50.00")      # busier small coin
     assert lab_sized("G-Q50", d("50"), 400_000, 3) == d("16.66")      # $150k+ pool
+    assert lab_sized("G-PUMP", d("5"), 400_000, 3) == d("5.00")       # G-PUMP is flat
+    assert lab_sized("G-PUMP", d("5"), 60_000, 3) == d("5.00")
     assert lab_sized("G-Q50", d("50"), None, 3) == d("50")            # pool unread: plain
     assert lab_sized("G-Q150", d("50"), 60_000, 3) == d("50")         # other strategies: plain
     # USER1 follows the Pump Catcher Lab (26 Oct): the same ticket on every coin.

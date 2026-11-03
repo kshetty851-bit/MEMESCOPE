@@ -584,7 +584,9 @@ BY_ID = {s.id: s for s in STRATEGIES}
 #: Karthik, 2026-10-17 ("remove the other 75k and 150k stratergy from wallet"):
 #: G-Q50 alone, the strategy that matches Karthik Lab. The others stay in
 #: STRATEGIES so anything they hold can still exit.
-OFFERED: tuple[str, ...] = ("G-Q50",)
+#: Karthik, 2026-11-03 ("use stratergy pump catcher lab, trade at 5$"): the
+#: main wallet may run G-PUMP too, the coins USER 1 already trades.
+OFFERED: tuple[str, ...] = ("G-Q50", "G-PUMP")
 
 
 def _entry_age_s() -> int:
