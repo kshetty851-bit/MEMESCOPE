@@ -68,8 +68,8 @@ def skipped_pool(pool: Any) -> bool:
 #: "add those 3 rules since day 1"); USER 1 keeps `SKIP_POOLS` and the book's
 #: name and open-buy rules. Found by a search of 114 groups (6 passed, about
 #: what luck gives), so trades from 31 Oct on are the test. Replayed: +$507.
-#: 1. $1M+ pools of `BIG_POOL_OK` or more are bought again.
-BIG_POOL_OK = 1_200_000
+#: 1. $1.2M+ pools were bought again until Karthik, 2026-11-03 ("make lab skip
+#:    1.2M+ pools again"): over the lab's history they lost -$93 on 75 trades.
 #: 2. A coin nobody bought at the open is bought anyway if the buy came this
 #:    many seconds or more after graduating, or its pool is under this.
 OPEN_BUY_OK_AGE_S, OPEN_BUY_OK_POOL = 45, 50_000
@@ -78,7 +78,8 @@ SKIP_SPACED = False
 
 
 def lab_skipped_pool(pool: Any) -> bool:
-    return skipped_pool(pool) and float(pool or 0) < BIG_POOL_OK
+    """The lab's pool skips: USER 1's own since 2026-11-03."""
+    return skipped_pool(pool)
 
 
 def open_buy_waived(row: Any) -> bool:
