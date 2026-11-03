@@ -24,6 +24,7 @@ from app.core.config import settings
 from app.labs.graduation import live_decisions
 from app.models.real_wallet_execution import RealWalletLiveIntent, RealWalletPosition
 from app.models.real_wallet_family import RealWalletFamilyMember
+from app.real_wallet import driver as driver_mod
 from app.real_wallet import executor as ex
 from app.real_wallet import sol_price
 from app.real_wallet.autotrade import AutotradeSwitchService
@@ -51,6 +52,8 @@ def _configured(monkeypatch):
         return Decimal("100")
 
     monkeypatch.setattr(RealWalletDriver, "_sol_usd", _price)
+    # G-QUIET was retired from Start; these tests still drive it.
+    monkeypatch.setattr("app.labs.graduation.live_spec.OFFERED", ("G-Q50", "G-QUIET"))
     for name, value in (
         ("REAL_WALLET_PUBLIC_KEY", OWNER),
         ("REAL_WALLET_WITHDRAWAL_ADDRESS", KARTHIK),
@@ -171,6 +174,7 @@ async def test_the_user_wallets_together_stop_at_the_coin_cap(db_session, monkey
 async def test_stopping_the_owner_stops_the_member_wallet_too(db_session, monkeypatch):
     """Karthik, 2026-09-25: "stop family wallets when I stop mine"."""
     _funded(monkeypatch)
+    monkeypatch.setattr(driver_mod, "OWN_SWITCH_MEMBERS", frozenset())
     await _user1(db_session, own=True)
     now = datetime.now(UTC)
     await _signal(db_session, now, owner_on=False)
@@ -184,6 +188,18 @@ async def test_stopping_the_owner_stops_the_member_wallet_too(db_session, monkey
         actor="op@x.com", reason="back on", strategy_id="G-QUIET", at=now)
     again = await RealWalletDriver(db_session).tick(now=now)
     assert again.family == {"USER1": f"created:{MINT}"}
+
+
+async def test_user1_trades_while_the_owner_is_stopped(db_session, monkeypatch):
+    """Karthik, 2026-11-03: "let user 1 trade on its own"."""
+    _funded(monkeypatch)
+    await _user1(db_session, own=True)
+    now = datetime.now(UTC)
+    await _signal(db_session, now, owner_on=False)
+    out = await RealWalletDriver(db_session).tick(now=now)
+    assert out.skipped == "autotrade_switch_off"
+    assert out.family == {"USER1": f"created:{MINT}"}
+    assert set(await _intents(db_session)) == {USER1}
 
 
 async def test_an_empty_member_wallet_sits_out(db_session, monkeypatch):
