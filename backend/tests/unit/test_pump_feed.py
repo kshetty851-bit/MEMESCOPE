@@ -97,7 +97,7 @@ def test_lab_lets_three_groups_back_but_user1_keeps_its_skips():
     from types import SimpleNamespace
 
     from app.labs.graduation import pump_catcher as pc
-    assert pc.skipped_pool(1_300_000) and not pc.lab_skipped_pool(1_300_000)   # lab only (31 Oct)
+    assert pc.lab_skipped_pool(1_300_000)                                       # skipped again (3 Nov)
     assert pc.lab_skipped_pool(1_100_000) and pc.lab_skipped_pool(300_000)
     row = lambda age, pool: SimpleNamespace(opened_at=NOW, graduated_at=NOW - timedelta(seconds=age),
                                             liq_open_usd=Decimal(pool))

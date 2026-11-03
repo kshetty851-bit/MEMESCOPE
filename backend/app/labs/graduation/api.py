@@ -2281,7 +2281,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
                 "check_min": pump_catcher.CHECK_S // 60,
                 "share_pct": round(100 * pump_catcher.SHARE), "share_max_usd": pump_catcher.SHARE_MAX,
                 "priced": len(rows) + len(small), "settling": before - len(rows) - len(small),
-                "skip_pools_usd": [[lo, pump_catcher.BIG_POOL_OK if hi == float("inf") else hi]
+                "skip_pools_usd": [[lo, None if hi == float("inf") else hi]
                                    for lo, hi in pump_catcher.SKIP_POOLS],
                 "open_buy_ok": [pump_catcher.OPEN_BUY_OK_AGE_S, pump_catcher.OPEN_BUY_OK_POOL]}
         sizing = {"share": pump_catcher.SHARE, "share_max": pump_catcher.SHARE_MAX}
