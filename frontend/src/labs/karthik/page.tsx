@@ -1064,8 +1064,8 @@ export function PumpfunMoneyTable({ days, graduationSol }: {
                 <td className="px-2 text-right text-ink">{d.into_curves_usd ? short(d.into_curves_usd) : "—"}</td>
                 <td className="px-2 text-right text-ink">{short(d.pools_usd)}</td>
                 <td className="px-2 text-right text-accent">{d.pools_40k}</td>
-                <td className="px-2 text-right text-ink" data-testid="first-buy-big">{d.first_buy_big ?? "—"}</td>
-                <td className="pl-2 text-right text-ink-2">{d.first_buy_mid ?? "—"}</td>
+                <td className="px-2 text-right text-ink" data-testid="first-buy-big">{d.first_buy_big == null ? "—" : `${d.first_buy_estimated ? "≈" : ""}${d.first_buy_big}`}</td>
+                <td className="pl-2 text-right text-ink-2">{d.first_buy_mid == null ? "—" : `${d.first_buy_estimated ? "≈" : ""}${d.first_buy_mid}`}</td>
               </tr>
             ))}
           </tbody>
@@ -1079,6 +1079,8 @@ export function PumpfunMoneyTable({ days, graduationSol }: {
           in the second they graduated, read on chain. Hundreds a day until 27 Oct; they made the
           lab&apos;s October profit. &ldquo;Small first buy&rdquo;: the same buy at about 60 SOL, as since
           27 Oct. When the big count climbs back toward 100+ a day, the lab&apos;s trades should return.
+          &ldquo;≈&rdquo; (1–25 Oct, before the recorder): estimated from 60 random graduations a day
+          read on chain, good to about a third either way.
         </p>
       </div>
     </Panel>
