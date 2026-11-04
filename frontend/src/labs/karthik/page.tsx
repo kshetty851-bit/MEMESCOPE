@@ -1037,7 +1037,7 @@ export function PumpfunMoneyTable({ days, graduationSol }: {
         <PanelTitle>Money into pump.fun, day by day</PanelTitle>
       </PanelHeader>
       <div className="overflow-x-auto p-3">
-        <table className="w-full min-w-[36rem] text-[12px] tabular-nums" data-testid="pumpfun-days">
+        <table className="w-full min-w-[44rem] text-[12px] tabular-nums" data-testid="pumpfun-days">
           <thead className="text-[11px] uppercase tracking-wider text-ink-dim">
             <tr>
               <th className="py-1.5 pr-2 text-left font-normal">Day (Dubai)</th>
@@ -1045,7 +1045,9 @@ export function PumpfunMoneyTable({ days, graduationSol }: {
               <th className="px-2 text-right font-normal">Graduated</th>
               <th className="px-2 text-right font-normal">Paid into graduated coins</th>
               <th className="px-2 text-right font-normal">In new pools at 2 min</th>
-              <th className="pl-2 text-right font-normal">$40k+ pools</th>
+              <th className="px-2 text-right font-normal">$40k+ pools</th>
+              <th className="px-2 text-right font-normal">Big first buy</th>
+              <th className="pl-2 text-right font-normal">Small first buy</th>
             </tr>
           </thead>
           <tbody>
@@ -1061,7 +1063,9 @@ export function PumpfunMoneyTable({ days, graduationSol }: {
                 <td className="px-2 text-right text-ink-2">{d.graduations.toLocaleString()}</td>
                 <td className="px-2 text-right text-ink">{d.into_curves_usd ? short(d.into_curves_usd) : "—"}</td>
                 <td className="px-2 text-right text-ink">{short(d.pools_usd)}</td>
-                <td className="pl-2 text-right text-accent">{d.pools_40k}</td>
+                <td className="px-2 text-right text-accent">{d.pools_40k}</td>
+                <td className="px-2 text-right text-ink" data-testid="first-buy-big">{d.first_buy_big ?? "—"}</td>
+                <td className="pl-2 text-right text-ink-2">{d.first_buy_mid ?? "—"}</td>
               </tr>
             ))}
           </tbody>
@@ -1071,7 +1075,10 @@ export function PumpfunMoneyTable({ days, graduationSol }: {
           paid into it, so &ldquo;paid into graduated coins&rdquo; is {graduationSol} SOL a graduation at
           that day&apos;s SOL price. &ldquo;In new pools&rdquo; is every graduated pool&apos;s depth two
           minutes in, owners&apos; bait money included. Hours the server was off are missing (30
-          Sep, 2:09–6:27 AM).
+          Sep, 2:09–6:27 AM). &ldquo;Big first buy&rdquo;: pools one buyer filled with about 150 SOL
+          in the second they graduated, read on chain. Hundreds a day until 27 Oct; they made the
+          lab&apos;s October profit. &ldquo;Small first buy&rdquo;: the same buy at about 60 SOL, as since
+          27 Oct. When the big count climbs back toward 100+ a day, the lab&apos;s trades should return.
         </p>
       </div>
     </Panel>

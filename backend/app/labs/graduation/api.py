@@ -1940,6 +1940,12 @@ _PUMPFUN_TODAY: tuple[datetime, dict[str, Any]] | None = None
 _PUMPFUN_TODAY_TTL_S = 600
 
 _PUMPFUN_DAY_SQL = text("""
+    with fm as (
+      select distinct on (mint) quote_reserve as sol from grad_first_minute
+      where sol_quoted and migrated_at >= :a and migrated_at < :b
+        and ts >= :a and ts < :b + interval '10 seconds'      -- the ts index
+        and ts - migrated_at <= interval '10 seconds'
+      order by mint, ts)
     select
       (select count(*) from grad_tokens
         where first_seen_at >= :a and first_seen_at < :b) as launches,
@@ -1947,7 +1953,10 @@ _PUMPFUN_DAY_SQL = text("""
       coalesce(sum(p.liq), 0) as pools_usd,
       count(*) filter (where p.liq >= 40000) as pools_40k,
       (select avg(sol_usd_at_open) from grad_paper_positions
-        where book = 'KARTHIK_QUIET_5M' and opened_at >= :a and opened_at < :b) as sol_usd
+        where book = 'KARTHIK_QUIET_5M' and opened_at >= :a and opened_at < :b) as sol_usd,
+      (select count(*) from fm) as fm_read,
+      (select count(*) from fm where sol >= :big and sol < :top) as first_buy_big,
+      (select count(*) from fm where sol >= :mid and sol < :big) as first_buy_mid
     from grad_migrations m
     left join lateral (
       select s.liquidity_usd as liq from grad_postgrad_samples s
@@ -1957,9 +1966,21 @@ _PUMPFUN_DAY_SQL = text("""
 """)
 
 
+#: A new pool's SOL in its first 10 seconds (Karthik, 2026-11-04: "yes add the
+#: counter"). Every pool starts near 67 SOL; until 27 Oct hundreds a day got one
+#: ~150 SOL buy in the graduation's own block (pool ~220-240 SOL), the coins
+#: the lab's October profit came from. From 27 Oct that buy is ~60 SOL (pool
+#: ~125-135 SOL). Pools past `FIRST_BUY_TOP_SOL` are a separate, unchanged
+#: kind (mostly $1M+ pools the lab skips). The chain recorder starts 25 Oct;
+#: earlier days read None.
+FIRST_BUY_MID_SOL, FIRST_BUY_BIG_SOL, FIRST_BUY_TOP_SOL = 110, 190, 260
+
+
 async def _pumpfun_day(db: AsyncSession, day: date, sol_now: Decimal | None) -> dict[str, Any]:
     a = datetime(day.year, day.month, day.day, tzinfo=UTC) - DUBAI
-    row = (await db.execute(_PUMPFUN_DAY_SQL, {"a": a, "b": a + timedelta(days=1)})).one()
+    row = (await db.execute(_PUMPFUN_DAY_SQL, {"a": a, "b": a + timedelta(days=1),
+                                               "big": FIRST_BUY_BIG_SOL, "mid": FIRST_BUY_MID_SOL,
+                                               "top": FIRST_BUY_TOP_SOL})).one()
     sol = row.sol_usd or sol_now
     return {
         "day": day.isoformat(),
@@ -1970,6 +1991,8 @@ async def _pumpfun_day(db: AsyncSession, day: date, sol_now: Decimal | None) -> 
                                 .quantize(Decimal(1)))),
         "pools_usd": str(Decimal(row.pools_usd).quantize(Decimal(1))),
         "pools_40k": int(row.pools_40k),
+        "first_buy_big": int(row.first_buy_big) if row.fm_read else None,
+        "first_buy_mid": int(row.first_buy_mid) if row.fm_read else None,
     }
 
 
