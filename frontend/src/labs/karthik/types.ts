@@ -209,6 +209,9 @@ export interface PumpfunDay {
   /** Money in the new pools two minutes after graduating. */
   pools_usd: string;
   pools_40k: number;
+  /** Pools that got the big first buy (~150 SOL) / the smaller one (~60 SOL) at graduation; null before 25 Oct. */
+  first_buy_big?: number | null;
+  first_buy_mid?: number | null;
 }
 
 export interface PumpfunDays {
