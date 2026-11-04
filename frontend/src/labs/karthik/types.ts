@@ -212,6 +212,8 @@ export interface PumpfunDay {
   /** Pools that got the big first buy (~150 SOL) / the smaller one (~60 SOL) at graduation; null before 25 Oct. */
   first_buy_big?: number | null;
   first_buy_mid?: number | null;
+  /** Before the chain recorder (1-25 Oct): estimated from a daily sample. */
+  first_buy_estimated?: boolean;
 }
 
 export interface PumpfunDays {

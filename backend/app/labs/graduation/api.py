@@ -1974,6 +1974,38 @@ _PUMPFUN_DAY_SQL = text("""
 #: kind (mostly $1M+ pools the lab skips). The chain recorder starts 25 Oct;
 #: earlier days read None.
 FIRST_BUY_MID_SOL, FIRST_BUY_BIG_SOL, FIRST_BUY_TOP_SOL = 110, 190, 260
+#: The days before the recorder (Karthik, 2026-11-04: "can u put that since 1st
+#: oct?"): (big, small) ESTIMATED from 60 random graduations a day read on chain
+#: (Helius, oldest first, the pool's SOL at 10 s), scaled to the day's count.
+#: Checked against the recorder: 26 Oct 252/56 vs 237/41, 1 Nov 0/278 vs 3/253.
+#: A day's estimate is good to about a third either way.
+FIRST_BUY_ESTIMATED: dict[date, tuple[int, int]] = {
+    date(2026, 10, 1): (420, 49),
+    date(2026, 10, 2): (313, 104),
+    date(2026, 10, 3): (309, 24),
+    date(2026, 10, 4): (304, 0),
+    date(2026, 10, 5): (350, 27),
+    date(2026, 10, 6): (414, 73),
+    date(2026, 10, 7): (369, 0),
+    date(2026, 10, 8): (454, 45),
+    date(2026, 10, 9): (189, 27),
+    date(2026, 10, 10): (422, 26),
+    date(2026, 10, 11): (470, 21),
+    date(2026, 10, 12): (229, 23),
+    date(2026, 10, 13): (211, 47),
+    date(2026, 10, 14): (481, 0),
+    date(2026, 10, 15): (232, 84),
+    date(2026, 10, 16): (250, 58),
+    date(2026, 10, 17): (344, 72),
+    date(2026, 10, 18): (222, 0),
+    date(2026, 10, 19): (105, 26),
+    date(2026, 10, 20): (278, 93),
+    date(2026, 10, 21): (429, 23),
+    date(2026, 10, 22): (343, 21),
+    date(2026, 10, 23): (231, 0),
+    date(2026, 10, 24): (258, 37),
+    date(2026, 10, 25): (282, 75),
+}
 
 
 async def _pumpfun_day(db: AsyncSession, day: date, sol_now: Decimal | None) -> dict[str, Any]:
@@ -1991,8 +2023,10 @@ async def _pumpfun_day(db: AsyncSession, day: date, sol_now: Decimal | None) -> 
                                 .quantize(Decimal(1)))),
         "pools_usd": str(Decimal(row.pools_usd).quantize(Decimal(1))),
         "pools_40k": int(row.pools_40k),
-        "first_buy_big": int(row.first_buy_big) if row.fm_read else None,
-        "first_buy_mid": int(row.first_buy_mid) if row.fm_read else None,
+        **({"first_buy_big": FIRST_BUY_ESTIMATED[day][0], "first_buy_mid": FIRST_BUY_ESTIMATED[day][1],
+            "first_buy_estimated": True} if day in FIRST_BUY_ESTIMATED else
+           {"first_buy_big": int(row.first_buy_big) if row.fm_read else None,
+            "first_buy_mid": int(row.first_buy_mid) if row.fm_read else None}),
     }
 
 
