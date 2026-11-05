@@ -14,6 +14,7 @@ import type {
   WalletCounts, KarthikBook, KarthikDay, KarthikFlows, KarthikTrade, KarthikWhatIfLine, PumpfunDay,
   StartDate, WalletProfit,
 } from "./types";
+import { SmallFirstBox } from "./small-first";
 import { User1Real } from "./user1-real";
 
 /** The Checkpoint office, loaded after the page so HQ's drawings stay out of
@@ -1191,6 +1192,8 @@ export function KarthikLabPage({ variant = "karthik" }: { variant?: "karthik" | 
       <WorldClocks />
       {/* USER 1's real trades on this lab (Karthik, 2026-10-27). */}
       {variant === "pump" ? <User1Real /> : null}
+      {/* The Small First Buy paper test (Karthik, 2026-11-05). */}
+      {variant === "pump" ? <SmallFirstBox /> : null}
       <BookBody data={data} variant={variant} />
       {/* One month at a time (Karthik, 2026-11-01): October closed into its own box. */}
       {variant === "pump" ? closedMonths().map(([m, title]) => <MonthBox key={m} month={m} title={title} />) : null}
