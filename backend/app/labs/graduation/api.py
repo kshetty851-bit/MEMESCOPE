@@ -28,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.logging import get_logger
 from app.db.session import get_db
-from app.labs.graduation import config, live_spec, moneyblock
+from app.labs.graduation import config, dip_buy, live_spec, moneyblock
 from app.labs.graduation.models import (
     GradCheckpoint,
     GradCurveSample,
@@ -2380,9 +2380,17 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
     end = min(until, datetime.now(UTC)) if until else datetime.now(UTC)
     inside = lambda r: start <= r.opened_at and (until is None or r.opened_at < until)  # noqa: E731
     rows = [r for r in rows if inside(r)]
+    # From 1 Nov the Pump Catcher is the Dip Buy rule (Karthik, 2026-11-06: "apply
+    # this rule from 1st Nov"). The lab only: the real wallets and USER 1 still
+    # follow the old coins (`pump_feed`).
+    new_rule = bool(pump) and start >= dip_buy.START
+    if new_rule:
+        from app.core.redis import init_redis
+
+        rows = [r for r in await dip_buy.positions(await init_redis(), sol) if inside(r)]
     buys_before = dict((await db.execute(_BUYS_BEFORE_SQL, {
         "ids": [p.id for p in rows], "mints": [p.mint for p in rows],
-        "ats": [p.opened_at for p in rows]})).all()) if rows else {}
+        "ats": [p.opened_at for p in rows]})).all()) if rows and not new_rule else {}
     walk = _funded_walk(
         [(p.opened_at, p.closed_at, float(p.net_return),
           float(p.impact_open or 0), float(p.impact_close or 0)) for p in rows],
@@ -2403,9 +2411,11 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
             if not _unnamed_evening(r) and r.mint not in no_open_buy]
     grid = _without_bad_names(grid, spaced_rule)[0]
     grid = [r for r in await _busy_if_big(db, grid) if inside(r)]   # the book's big-pool rule, every column
+    if new_rule:
+        grid = rows
     grid_buys = dict((await db.execute(_BUYS_BEFORE_SQL, {
         "ids": [p.id for p in grid], "mints": [p.mint for p in grid],
-        "ats": [p.opened_at for p in grid]})).all()) if grid else {}
+        "ats": [p.opened_at for p in grid]})).all()) if grid and not new_rule else {}
     cents = Decimal("0.01")
     # EVERY FIGURE BELOW COUNTS THE SAME TRADES: the ones this $500 book could
     # actually fund. `walk.pnl` is aligned to `rows` and is None where the book
@@ -2424,7 +2434,8 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
     # book's own stake, as if there were always cash for it.
     kept_ids = {p.id for p in rows}
     refused = [r for r in sorted([*small, *signals], key=_opened_order)
-               if config.karthik_book_pool(r.liq_open_usd, r.symbol) and r.id not in kept_ids and inside(r)]
+               if config.karthik_book_pool(r.liq_open_usd, r.symbol) and r.id not in kept_ids and inside(r)
+               and not new_rule]      # a different rule refuses nothing of the old one's
     refused_walk = _funded_walk(
         [(p.opened_at, p.closed_at, float(p.net_return),
           float(p.impact_open or 0), float(p.impact_close or 0)) for p in refused],
@@ -2455,12 +2466,20 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
         "graduations_rugged": await _graduation_rugs(db, start),
         # Who put money into the coins the book bought, graduation to its sell.
         "flows": _flows(took, flow_rows),
-        "rule": (("Pump Catcher — Karthik's coins" if pump else "Karthik's book")
+        "rule": (f"Dip Buy — every graduation {dip_buy.DIP_MIN:.0%}-{dip_buy.DIP_MAX:.0%} under its peak "
+                 f"{dip_buy.ENTRY_S} seconds in whose name has 1-{dip_buy.NAME_MAX} letters, "
+                 f"out at +{dip_buy.TARGET:.0%} after costs, else at {dip_buy.HOLD_S // 60}m")
+        if new_rule else (("Pump Catcher — Karthik's coins" if pump else "Karthik's book")
                  + f" — every graduation with a {_pools_words()} pool that is "
                  f"still quiet (under {config.QUIET_MAX_POOL_TXS} trades) when it is bought, "
                  + (f"out at +{pump['target_pct']}%, at {pump['check_min']}m if down there, else {pump['hold_min']}m"
                     if pump else f"out at {arm.hold}m")),
         "pump_catcher": pump,
+        # Which rule this month's trades are (2026-11-06): what the page explains.
+        "dip_buy": {"since": dip_buy.START, "entry_s": dip_buy.ENTRY_S,
+                    "dip_pct": [round(100 * dip_buy.DIP_MIN), round(100 * dip_buy.DIP_MAX)],
+                    "name_max": dip_buy.NAME_MAX, "hold_min": dip_buy.HOLD_S // 60,
+                    "target_pct": round(100 * dip_buy.TARGET)} if new_rule else None,
         "real_wallet": "USER 1" if pump else "main wallet",
         "pools_usd": list(config.KARTHIK_BOOK_POOLS),
         "short_name_pool": list(config.KARTHIK_SHORT_NAME_POOL),

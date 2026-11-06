@@ -57,6 +57,7 @@ export interface KarthikBook {
   /** Pump Catcher Lab only: its exit, and how many positions are priced / still settling. */
   real_wallet?: string;
   month_until?: string | null;
+  dip_buy?: { since: string; entry_s: number; dip_pct: [number, number]; name_max: number; hold_min: number; target_pct: number } | null;
   pump_catcher?: { target_pct: number; hold_min: number; check_min?: number; real_slip_pct?: number; share_pct?: number; share_max_usd?: number; skip_pools_usd?: [number, number | null][]; open_buy_ok?: [number, number]; priced: number; settling: number } | null;
   /** Big pools bought only when busy (2026-10-22). */
   big_pool_usd?: number;

@@ -32,7 +32,7 @@ from app.karthik import api as karthik
 from app.karthik_ops import api as karthik_ops
 from app.lab import api as lab
 from app.labs.graduation import api as graduation_lab
-from app.labs.graduation import first_minute_api, fresh_catch_api, small_first
+from app.labs.graduation import first_minute_api, fresh_catch_api
 from app.real_wallet import user1_view
 from app.momentum import api as momentum
 from app.news import api as news
@@ -136,7 +136,6 @@ api_router.include_router(karthik_ops.router)
 # `running: false` without a query when LAB_GRADUATION_ENABLED is off.
 api_router.include_router(first_minute_api.router)
 api_router.include_router(fresh_catch_api.router)
-api_router.include_router(small_first.router)
 api_router.include_router(user1_view.router)
 api_router.include_router(graduation_lab.router)
 # BTC Range Lab. Paper only: two GETs and one POST that computes a backtest

@@ -1,17 +1,17 @@
-"""Small First Buy test (Karthik, 2026-11-05: "yes add it since day 1 for
-november and revise it"). Paper only; nothing real trades on it.
+"""Dip Buy, the Pump Catcher Lab's rule from 1 Nov (Karthik, 2026-11-06: "apply
+this rule from 1st Nov and show revised profits"). Paper only; the real wallets
+and USER 1 keep following the old coins (`pump_feed`).
 
-The rule a search of 738 on the first-minute recorder found (28 Oct - 4 Nov,
-picked on 28-31 Oct, checked on 1-4 Nov and against random coins): buy 45
-seconds after graduating when the pool's SOL side 10 seconds in is under 110
-SOL and the name has 1-5 letters; sell at the first reading +30% up after fees,
-else at 5 minutes. Replayed 25 Oct - 4 Nov: +$154 on 684 trades at $5 -- found
-after looking, so its days from 5 Nov on are the test.
+30 seconds after graduating, buy when the price is 20-40% below its peak so far,
+the name has 1-5 letters and the pool's SOL side holds at least 30 SOL; sell at
++60% after costs (filled at the next reading), else at 5 minutes. Picked from
+about 38,000 rules on 26-31 Oct; one of the 12 best there, and chosen among those
+after seeing 1-6 Nov, so its days from 7 Nov on are the test.
 
-Priced from `grad_first_minute` (on-chain, every change) exactly as the search
-priced it: fees by pool tier plus Jupiter's cut plus `SLIP` each way, readings
-forward-filled (no change = no trade). `refresh` (every 5 minutes) walks the
-graduations in time order from `START` and stores each trade in Redis.
+Priced from `grad_first_minute` (on-chain, every change), readings forward-filled
+(no change = no trade): fees by pool tier plus Jupiter's cut plus `SLIP` each
+way. `refresh` (every 5 minutes) walks the graduations in time order from `START`
+and stores each trade in Redis.
 """
 
 from __future__ import annotations
@@ -23,17 +23,16 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter
 from sqlalchemy import text
 
-from app.labs.graduation import config
+from app.labs.graduation import config, pump_catcher
 
 START = datetime(2026, 10, 31, 20, tzinfo=UTC)       # 1 Nov, Dubai
-ENTRY_S, HOLD_S, TARGET = 45, 300, 0.30
-FIRST_MAX_SOL, POOL_MIN_SOL, NAME_MAX = 110.0, 60.0, 5
-SLIP, TICKET = 0.005, 5.0
-KEY, CURSOR = "smallfirst:v1", "smallfirst:v1:cursor"
-CHUNK = timedelta(hours=12)
+ENTRY_S, HOLD_S, TARGET = 30, 300, 0.60
+DIP_MIN, DIP_MAX, POOL_MIN_SOL, NAME_MAX = 0.20, 0.40, 30.0, 5
+SLIP = 0.005
+KEY, CURSOR = "dipbuy:v1", "dipbuy:v1:cursor"
+CHUNK = timedelta(hours=24)
 #: After the hold plus the recorder's slack, a graduation is final.
 SETTLE = timedelta(seconds=ENTRY_S + HOLD_S + 120)
 
@@ -53,23 +52,29 @@ def _fee(p: float) -> float:
 
 def decide(path: list[tuple[float, float, float]], symbol: str | None) -> dict[str, Any] | None:
     """One graduation's (seconds after graduating, SOL price, SOL side) readings.
-    None when the rule does not buy it."""
+    None when the rule does not buy it. The return is before `REAL_SLIP`, which
+    the target counts and `Position` takes off."""
     if not path or path[0][0] > 10:
         return None
     ages = [a for a, _, _ in path]
-    at = lambda t: path[max(0, bisect.bisect_right(ages, t) - 1)]  # noqa: E731
+    last = lambda t: max(0, bisect.bisect_right(ages, t) - 1)  # noqa: E731
     name = (symbol or "").strip()
-    first, entry = at(10), at(ENTRY_S)
-    if not (0 < len(name) <= NAME_MAX and first[2] < FIRST_MAX_SOL and entry[2] >= POOL_MIN_SOL):
+    i = last(ENTRY_S)
+    entry = path[i]
+    dip = 1 - entry[1] / max(p for _, p, _ in path[:i + 1])
+    if not (0 < len(name) <= NAME_MAX and entry[2] >= POOL_MIN_SOL and DIP_MIN <= dip < DIP_MAX):
         return None
     buy = entry[1] * (1 + _fee(entry[1]) + SLIP)
-    px, held, how = at(ENTRY_S + HOLD_S)[1], HOLD_S, "5m"
-    for a, p, _ in path:
-        if ENTRY_S < a <= ENTRY_S + HOLD_S and p * (1 - _fee(p) - SLIP) >= buy * (1 + TARGET):
-            px, held, how = p, a - ENTRY_S, "target"
+    sold = lambda p: p * (1 - _fee(p) - SLIP) / buy - 1  # noqa: E731
+    end = last(ENTRY_S + HOLD_S)
+    out, how = end, "5m"
+    for k in range(i + 1, end + 1):
+        if sold(path[k][1]) - pump_catcher.REAL_SLIP >= TARGET:
+            out, how = min(k + 1, end), "target"      # filled at the next reading
             break
-    return {"ret": px * (1 - _fee(px) - SLIP) / buy - 1, "held_s": held, "how": how,
-            "first_sol": first[2], "pool_sol": entry[2]}
+    px = path[out][1]
+    return {"ret": sold(px), "held_s": path[out][0] - ENTRY_S if how == "target" else HOLD_S, "how": how,
+            "pool_sol": entry[2], "entry_px": entry[1], "exit_px": px}
 
 
 async def refresh(session, redis, now: datetime | None = None) -> dict[str, int]:
@@ -98,35 +103,29 @@ async def refresh(session, redis, now: datetime | None = None) -> dict[str, int]
     return {"priced": n, "graduations": len(paths)}
 
 
-router = APIRouter(prefix="/labs/graduation/small-first", tags=["graduation-lab"])
+class Position:
+    """A trade dressed as a book position, so the Pump Catcher page walks it like
+    its own. Priced like the lab's other trades: `REAL_SLIP` comes off, and the
+    walk adds its own size penalty."""
+
+    impact_open = impact_close = Decimal(0)
+
+    def __init__(self, mint: str, t: dict[str, Any], sol_usd: float | None):
+        self.id = self.mint = mint
+        self.symbol = t.get("symbol")
+        self.opened_at = datetime.fromisoformat(t["graduated_at"]) + timedelta(seconds=ENTRY_S)
+        self.closed_at = self.opened_at + timedelta(seconds=t["held_s"])
+        self.net_return = Decimal(str(round(t["ret"] - pump_catcher.REAL_SLIP, 6)))
+        self.liq_open_usd = Decimal(round(2 * t["pool_sol"] * sol_usd)) if sol_usd else None
+        self.open_quote, self.close_quote = t.get("entry_px"), t.get("exit_px")
+        self.sol_usd_at_open = sol_usd
+
+    def __getattr__(self, name: str) -> Any:     # anything else a book row has: unknown
+        return None
 
 
-@router.get("", summary="Small First Buy test: paper trades since 1 Nov")
-async def board() -> dict[str, Any]:
-    from app.core.redis import init_redis
-
-    redis = await init_redis()
+async def positions(redis, sol_usd: Any) -> list[Position]:
+    rate = float(sol_usd) if sol_usd else None
     raw = await redis.hgetall(KEY)
-    cur = await redis.get(CURSOR)
-    trades = sorted(({"mint": k.decode() if isinstance(k, bytes) else k, **json.loads(v)} for k, v in raw.items()),
-                    key=lambda t: t["graduated_at"], reverse=True)
-    days: dict[str, dict[str, Any]] = {}
-    for t in trades:
-        t["pnl_usd"] = round(TICKET * t["ret"], 2)
-        d = (datetime.fromisoformat(t["graduated_at"]) + timedelta(hours=4)).date().isoformat()
-        x = days.setdefault(d, {"day": d, "trades": 0, "wins": 0, "rugs": 0, "pnl_usd": 0.0})
-        x["trades"] += 1
-        x["wins"] += t["ret"] > 0
-        x["rugs"] += t["ret"] <= -0.5
-        x["pnl_usd"] = round(x["pnl_usd"] + t["pnl_usd"], 2)
-    return {
-        "started_at": START.isoformat(),
-        "priced_until": (cur.decode() if isinstance(cur, bytes) else cur) if cur else None,
-        "ticket_usd": TICKET,
-        "trades": len(trades),
-        "wins": sum(t["ret"] > 0 for t in trades),
-        "rugs": sum(t["ret"] <= -0.5 for t in trades),
-        "pnl_usd": round(sum(t["pnl_usd"] for t in trades), 2),
-        "days": sorted(days.values(), key=lambda x: x["day"], reverse=True),
-        "recent": trades[:30],
-    }
+    return sorted((Position(k.decode() if isinstance(k, bytes) else k, json.loads(v), rate) for k, v in raw.items()),
+                  key=lambda p: (p.opened_at, p.mint))

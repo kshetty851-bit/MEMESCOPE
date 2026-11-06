@@ -14,7 +14,6 @@ import type {
   WalletCounts, KarthikBook, KarthikDay, KarthikFlows, KarthikTrade, KarthikWhatIfLine, PumpfunDay,
   StartDate, WalletProfit,
 } from "./types";
-import { SmallFirstBox } from "./small-first";
 import { User1Real } from "./user1-real";
 
 /** The Checkpoint office, loaded after the page so HQ's drawings stay out of
@@ -1192,8 +1191,6 @@ export function KarthikLabPage({ variant = "karthik" }: { variant?: "karthik" | 
       <WorldClocks />
       {/* USER 1's real trades on this lab (Karthik, 2026-10-27). */}
       {variant === "pump" ? <User1Real /> : null}
-      {/* The Small First Buy paper test (Karthik, 2026-11-05). */}
-      {variant === "pump" ? <SmallFirstBox /> : null}
       <BookBody data={data} variant={variant} />
       {/* One month at a time (Karthik, 2026-11-01): October closed into its own box. */}
       {variant === "pump" ? closedMonths().map(([m, title]) => <MonthBox key={m} month={m} title={title} />) : null}
@@ -1275,7 +1272,16 @@ function BookBody({ data, variant, archive = false }: {
           <MoneyIn flows={data.flows} />
         </div>
         <div className="min-[1150px]:col-start-1 min-[1150px]:row-start-2">
-        {data.pump_catcher ? (
+        {data.dip_buy ? (
+          <p className="mt-1 max-w-[78ch] rounded-lg border border-accent/40 bg-accent/[0.06] px-3 py-2 text-[13px] leading-relaxed text-ink-2" data-testid="dip-buy-rule">
+            <b className="text-ink">From 1 Nov this lab runs the Dip Buy rule:</b> {data.dip_buy.entry_s} seconds after a coin graduates, it buys
+            if the price is {data.dip_buy.dip_pct[0]}–{data.dip_buy.dip_pct[1]}% below its peak so far and the name has 1–{data.dip_buy.name_max} letters,
+            and sells at +{data.dip_buy.target_pct}% after costs, else at {data.dip_buy.hold_min} minutes.
+            Priced from the on-chain recorder, giving up {data.pump_catcher?.real_slip_pct ?? 1}% more a trade like the old rule did.
+            Chosen after seeing 1–6 Nov, so only days from 7 Nov on test it. The lab only: USER 1 and the main wallet still
+            buy the old rule&apos;s coins.
+          </p>
+        ) : data.pump_catcher ? (
           <p className="mt-1 max-w-[78ch] rounded-lg border border-accent/40 bg-accent/[0.06] px-3 py-2 text-[13px] leading-relaxed text-ink-2">
             <b className="text-ink">The same coins and rules as Karthik&apos;s Lab, one difference:</b> each trade is sold the moment
             it is up {data.pump_catcher.target_pct}% after fees and price impact (at the next price reading); one that is down at {data.pump_catcher.check_min ?? 5} minutes

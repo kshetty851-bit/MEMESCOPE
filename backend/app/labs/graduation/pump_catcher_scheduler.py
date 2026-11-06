@@ -37,31 +37,31 @@ celery_app.conf.beat_schedule.setdefault(
 )
 
 
-SMALL_FIRST_TASK = "app.labs.graduation.pump_catcher_scheduler.small_first_refresh"
+DIP_BUY_TASK = "app.labs.graduation.pump_catcher_scheduler.dip_buy_refresh"
 
 
-@celery_app.task(name=SMALL_FIRST_TASK, soft_time_limit=280)
-def small_first_refresh() -> dict[str, Any]:
-    """Every 5 minutes: the Small First Buy test's next settled graduations."""
+@celery_app.task(name=DIP_BUY_TASK, soft_time_limit=280)
+def dip_buy_refresh() -> dict[str, Any]:
+    """Every 5 minutes: Dip Buy's next settled graduations."""
     from app.workers.runtime import run_async
 
-    return run_async(_small_first())
+    return run_async(_dip_buy())
 
 
-async def _small_first() -> dict[str, Any]:
+async def _dip_buy() -> dict[str, Any]:
     from app.core.redis import init_redis
     from app.db.session import SessionFactory
-    from app.labs.graduation import small_first
+    from app.labs.graduation import dip_buy
 
     try:
         async with SessionFactory() as session:
-            return await small_first.refresh(session, await init_redis())
+            return await dip_buy.refresh(session, await init_redis())
     except Exception:  # never raise into the beat
-        logger.exception("small_first_refresh_failed")
+        logger.exception("dip_buy_refresh_failed")
         return {"failed": True}
 
 
 celery_app.conf.beat_schedule.setdefault(
-    "small-first-refresh",
-    {"task": SMALL_FIRST_TASK, "schedule": 300.0, "options": {"expires": 290}},
+    "dip-buy-refresh",
+    {"task": DIP_BUY_TASK, "schedule": 300.0, "options": {"expires": 290}},
 )
