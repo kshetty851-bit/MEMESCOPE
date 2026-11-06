@@ -605,7 +605,7 @@ function GridPanel({ data, title, rows, value = false, from, testId = "size-grid
   const w = data.whatif;
   const k = (n: number) => `$${Math.round(n / 1000)}k`;
   const col = (f: KarthikBook["whatif"]["floors"][number]) =>
-    f.cap_usd ? `${k(f.floor_usd)}–${k(f.cap_usd)}` : `${k(f.floor_usd)}+`;
+    !f.floor_usd ? "all coins" : f.cap_usd ? `${k(f.floor_usd)}–${k(f.cap_usd)}` : `${k(f.floor_usd)}+`;
   const key = (f: KarthikBook["whatif"]["floors"][number]) => `${f.floor_usd}-${f.cap_usd ?? ""}`;
   return (
     <Panel>
@@ -659,7 +659,7 @@ function GridPanel({ data, title, rows, value = false, from, testId = "size-grid
         </table>
         <p className="mt-2 text-[11px] leading-relaxed text-ink-dim">
           Each cell is its own book from {day(from ?? data.started_at)} at that size, buying every
-          coin on pools at or above that floor while its balance has money free. Every size follows the book’s
+          {data.dip_buy ? "coin the rule takes" : "coin on pools at or above that floor"} while its balance has money free. Every size follows the book’s
           rules — the same skips, and the same stake on every coin (the book’s $50 is the “now” row), so the
           “now” row in the “this book” column is the book itself. Hover a cell for its trades, rugs and lowest
           balance. A look back, not a test.
@@ -684,6 +684,8 @@ export function RuleBook({ data }: { data: KarthikBook }) {
   const rugEvery = data.rugs > 0 ? Math.round(data.trades / data.rugs) : null;
   const rules: [string, string][] = [
     ["What it buys", "New pump.fun coins right after they “graduate” — finish their launch and open a real trading pool. About 1,000 do that every day."],
+    ...(data.dip_buy ? [["When it buys", `${data.dip_buy.entry_s} seconds after graduating, only if the price is ${data.dip_buy.dip_pct[0]}–${data.dip_buy.dip_pct[1]}% below its peak so far.`] as [string, string],
+      ["Only short names", `The name must have 1–${data.dip_buy.name_max} letters. Coins with no name are skipped.`] as [string, string]] : []),
     ...(pool ? [["Only big pools", (top ? `The pool must hold between ${usd(pool).replace(".00", "")} and ${usd(top).replace(".00", "")}.` : `The pool must hold ${usd(pool).replace(".00", "")} or more.`)
       + (data.short_name_pool && data.short_name_pool[0] > pool
         ? ` Below ${usd(data.short_name_pool[0]).replace(".00", "")} only coins with a name of ${data.short_name_pool[1]} letters or fewer (spaces not counted).` : "")] as [string, string]] : []),
@@ -710,7 +712,9 @@ export function RuleBook({ data }: { data: KarthikBook }) {
       ? ["Sells", `The moment it is up ${data.pump_catcher.target_pct}% after fees and price impact (at the next price reading).${data.pump_catcher.check_min ? ` If it is down at ${data.pump_catcher.check_min} minutes it sells then, like Karthik's Lab;` : ""} otherwise ${data.pump_catcher.hold_min} minutes after buying. No stop-loss.`]
       : ["Always sells", `Exactly ${data.hold_minutes} minutes after buying. No price targets, no stop-loss — the clock decides.`],
     ["The risk", `If a coin's creator drains the pool (a “rug”), that trade loses almost all of it.${rugEvery ? ` So far about 1 in ${rugEvery} trades.` : ""}`],
-    ["Paper money", data.pump_catcher
+    ["Paper money", data.dip_buy
+      ? "A simulation on real on-chain prices. USER 1 and the main wallet do not follow this rule: they still buy the old rule's coins."
+      : data.pump_catcher
       ? "A simulation on real market prices. USER 1 follows it with real money ($2 a trade from 27 Oct, $15 from 31 Oct), the 30 Oct pool-size skip included."
       : "A simulation on real market prices. The real wallets run their own settings ($50k+ pools, their own trade sizes) and do not follow this book's newer rules."],
   ];
@@ -810,7 +814,7 @@ export function TradeList({ data }: { data: KarthikBook }) {
                 </thead>
                 <tbody>
                   {data.trades_list.map((trade) => (
-                    <Row key={`${trade.symbol}-${trade.opened_at}`} trade={trade} real={data.real_wallet ?? true} />
+                    <Row key={`${trade.symbol}-${trade.opened_at}`} trade={trade} real={data.dip_buy ? false : data.real_wallet ?? true} />
                   ))}
                 </tbody>
               </table>
@@ -1295,13 +1299,13 @@ function BookBody({ data, variant, archive = false }: {
           <b>judged {day(data.judge_at)}</b>. Paper only: this book holds no
           wallet and has never placed an order.
         </p>
-        <p className="mt-1 max-w-[78ch] text-[12px] leading-relaxed text-ink-dim">
+        {data.dip_buy ? null : <p className="mt-1 max-w-[78ch] text-[12px] leading-relaxed text-ink-dim">
           Resized on {day(data.resized_at)} from {usd(data.previous_capital_usd)} at{" "}
           {usd(data.previous_ticket_usd)} a trade, after the days before it had been
           seen, and replayed from the same start at the new size. That makes those
           days a look back rather than a test: only what happens from{" "}
           {day(data.resized_at)} on is a fair measure of this size.
-        </p>
+        </p>}
         {data.pools_usd && data.pools_since ? (
           <p className="mt-1 max-w-[78ch] text-[12px] leading-relaxed text-ink-dim">
             <b className="text-ink-2">
@@ -1342,12 +1346,12 @@ function BookBody({ data, variant, archive = false }: {
           <div className="mb-1 text-[11px] uppercase tracking-wider text-ink-dim">
             Every 24 hours · profit that day
           </div>
-          <Days days={solDays} judgeAt={data.judge_at} trades={data.trades_list} real={data.real_wallet ?? true} />
+          <Days days={solDays} judgeAt={data.judge_at} trades={data.trades_list} real={data.dip_buy ? false : data.real_wallet ?? true} />
         </div>
         {data.refused_days?.length ? <RefusedDays days={data.refused_days} total={data.refused_pnl_usd} coins={data.refused_list} /> : null}
       </div>
       {data.start_dates?.length ? (
-        <StartDates book="$40k book" lines={data.start_dates} capital={Number(data.capital_usd)} ticket={Number(data.ticket_usd)}
+        <StartDates book={data.dip_buy ? "Dip Buy book" : "$40k book"} lines={data.start_dates} capital={Number(data.capital_usd)} ticket={Number(data.ticket_usd)}
                     sizeText={data.pump_catcher?.share_pct ? `${data.pump_catcher.share_pct}% of the balance a trade (max $${data.pump_catcher.share_max_usd})`
                       : data.tickets_by_pool?.length ? sizeWords(data.tickets_by_pool) : undefined} />
       ) : null}
