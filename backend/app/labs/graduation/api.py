@@ -1704,7 +1704,8 @@ def _pools_words() -> str:
 def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
                     ticket: float, cents: Decimal,
                     small: Sequence[Any] = (),
-                    stake: Callable[[Any], float] | None = None) -> dict[str, Any]:
+                    stake: Callable[[Any], float] | None = None,
+                    columns: Sequence[tuple[int, int | None]] = KARTHIK_GRID_COLUMNS) -> dict[str, Any]:
     """The book's rule at every trade size and every pool floor, one grid
     (Karthik, 2026-09-27; floors cut to $75k-$200k on 2026-09-30).
 
@@ -1733,12 +1734,12 @@ def _karthik_whatif(rows: Sequence[Any], sol: Decimal | None, *, capital: float,
 
     lo, hi = config.KARTHIK_BOOK_POOLS
     return {
-        "floors": [{"floor_usd": f, "cap_usd": c, "book": hi is None and f == lo and c is None,
-                    "replayed_below": f < 75_000} for f, c in KARTHIK_GRID_COLUMNS],
+        "floors": [{"floor_usd": f, "cap_usd": c, "book": len(columns) == 1 or (hi is None and f == lo and c is None),
+                    "replayed_below": len(columns) > 1 and f < 75_000} for f, c in columns],
         "sizes": [{"ticket_usd": t, "capital_usd": c,
                    # By trade size: on 5x no row carries the book's own balance.
                    "current": t == ticket,
-                   "cells": [cell(col, float(t), float(c)) for col in KARTHIK_GRID_COLUMNS]}
+                   "cells": [cell(col, float(t), float(c)) for col in columns]}
                   for t, c in KARTHIK_WHATIF_SIZES],
     }
 
@@ -2459,7 +2460,7 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
     flow_rows = {f.mint: f for f in (await db.execute(
         select(GradTradeFlow).where(GradTradeFlow.mint.in_([r.mint for r, _ in took]))
     )).scalars().all()}
-    return {
+    out: dict[str, Any] = {
         "book": spec.book,
         "graduations_seen": int(seen or 0),
         # Of those, how many rugged in their first hour (Karthik, 2026-09-27).
@@ -2572,7 +2573,8 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
                                   ticket=0.0 if sizing else float(spec.ticket_usd), cents=cents,
                                   stake=lambda r: config.karthik_ticket(
                                       r.liq_open_usd, grid_buys.get(r.id))
-                                  / float(spec.ticket_usd)),
+                                  / float(spec.ticket_usd),
+                                  columns=((0, None),) if new_rule else KARTHIK_GRID_COLUMNS),
         # The rows the BOOK bought, with the money the book made on them --
         # not the arm's $100-notional figure, which is the same only while the
         # ticket is $100 and silently diverges the moment it is not.
@@ -2590,6 +2592,24 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
             "real": real.get(row.mint) if row.opened_at >= real_from else None,
         } for row, money in reversed(took)],
     }
+    if new_rule:
+        # Every table and the rule book read Dip Buy (Karthik, 2026-11-07: "change
+        # all tables as per that"): the old rule's filters, its floor test and its
+        # refused coins say nothing about these trades, and USER 1 did not trade them.
+        out.update({
+            "pump_catcher": {**out["pump_catcher"], "target_pct": round(100 * dip_buy.TARGET),
+                             "hold_min": dip_buy.HOLD_S // 60, "check_min": None, "skip_pools_usd": [],
+                             "open_buy_ok": None, "priced": len(took), "settling": 0},
+            "real_wallet": None, "floor_test": None,
+            "refused_days": [], "refused_list": [], "refused_pnl_usd": Decimal(0),
+            "pools_usd": None, "pools_since": None, "short_name_pool": None, "skip_pools_usd": None,
+            "skip_ai_pools_usd": None, "big_pool_usd": None, "big_min_buys": None, "quiet_max_txs": None,
+            "max_entry_age_s": None, "max_entry_age_since": None, "rugged_name_hours": None,
+            "blocked_names": [], "skip_spaced_names": False, "skip_unnamed_dubai_hours": None,
+            "skip_no_open_buy": False, "busy_skipped": 0, "no_open_buy_skipped": 0})
+        for t in out["trades_list"]:
+            t["real"] = None
+    return out
 
 
 @router.get("/tournament", response_model=Leaderboard)

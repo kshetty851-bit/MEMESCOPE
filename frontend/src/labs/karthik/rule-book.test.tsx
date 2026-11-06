@@ -5,6 +5,21 @@ import { RuleBook } from "./page";
 import type { KarthikBook } from "./types";
 
 describe("Karthik's Lab rule book", () => {
+  it("reads Dip Buy, with none of the old rule's filters, from 1 Nov", () => {
+    const book = {
+      dip_buy: { since: "2026-10-31T20:00:00Z", entry_s: 30, dip_pct: [20, 40], name_max: 5, hold_min: 5, target_pct: 60 },
+      pump_catcher: { target_pct: 60, hold_min: 5, check_min: null, share_pct: 10, share_max_usd: 100, skip_pools_usd: [], priced: 1, settling: 0 },
+      pools_usd: null, skip_pools_usd: null, blocked_names: [], ticket_usd: "50", capital_usd: "500",
+      hold_minutes: 5, rugs: 1, trades: 6,
+    } as unknown as KarthikBook;
+    render(<RuleBook data={book} />);
+    expect(screen.getByText(/30 seconds after graduating, only if the price is 20–40% below its peak/)).toBeInTheDocument();
+    expect(screen.getByText(/The name must have 1–5 letters/)).toBeInTheDocument();
+    expect(screen.getByText(/The moment it is up 60%/)).toBeInTheDocument();
+    expect(screen.getByText(/do not follow this rule/)).toBeInTheDocument();
+    expect(screen.queryByText(/The pool must hold/)).toBeNull();
+    expect(screen.queryByText(/USER 1 follows it/)).toBeNull();
+  });
   it("states the rules in plain words, with the book's own numbers", () => {
     const book = {
       pools_usd: [75000, null], skip_pools_usd: [150000, 200000], skip_ai_pools_usd: [50000, 60000], rugged_name_hours: 48, rugged_name_skipped: 19, blocked_names: ["mrbeast"], blocked_name_skipped: 6, skip_spaced_names: true, spaced_name_skipped: 24, skip_unnamed_dubai_hours: [17, 24], unnamed_evening_skipped: 92, skip_no_open_buy: true, no_open_buy_skipped: 22, tickets_by_pool: [[150000, 75], [null, 25]], quiet_stake: [13, 100], quiet_max_txs: 100, max_entry_age_s: 120,
