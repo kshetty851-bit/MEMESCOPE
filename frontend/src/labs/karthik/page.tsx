@@ -23,6 +23,12 @@ const CheckpointLive = dynamic(
   { ssr: false },
 );
 
+/** "+$12.30" / "−$4.00" for a dollar amount. */
+export function signedUsd(v: string | number): string {
+  const n = Number(v);
+  return `${n < 0 ? "−" : "+"}$${Math.abs(n).toFixed(2)}`;
+}
+
 /**
  * KARTHIK'S LAB — ONE BOOK, PAPER ONLY.
  *
@@ -684,8 +690,8 @@ export function RuleBook({ data }: { data: KarthikBook }) {
   const rugEvery = data.rugs > 0 ? Math.round(data.trades / data.rugs) : null;
   const rules: [string, string][] = [
     ["What it buys", "New pump.fun coins right after they “graduate” — finish their launch and open a real trading pool. About 1,000 do that every day."],
-    ...(data.dip_buy ? [["When it buys", `${data.dip_buy.entry_s} seconds after graduating, only if the price is ${data.dip_buy.dip_pct[0]}–${data.dip_buy.dip_pct[1]}% below its peak so far.`] as [string, string],
-      ["Only short names", `The name must have 1–${data.dip_buy.name_max} letters. Coins with no name are skipped.`] as [string, string]] : []),
+    ...(data.dip_buy?.quiet ? [["Quiet Small Pool", `${data.dip_buy.quiet.entry_s} seconds after graduating, if the pool holds ${data.dip_buy.quiet.pool_sol[0]}–${data.dip_buy.quiet.pool_sol[1]} SOL and is down no more than ${data.dip_buy.quiet.max_drop_pct}% from its high. Sells at +${data.dip_buy.quiet.target_pct}% or ${data.dip_buy.quiet.stop_pct}% after costs, else at ${data.dip_buy.quiet.hold_min} minutes. Any name.`] as [string, string]] : []),
+    ...(data.dip_buy ? [["Dip Buy", `${data.dip_buy.entry_s} seconds after graduating, only if the price is ${data.dip_buy.dip_pct[0]}–${data.dip_buy.dip_pct[1]}% below its peak so far and the name has 1–${data.dip_buy.name_max} letters (coins with no name are skipped).`] as [string, string]] : []),
     ...(pool ? [["Only big pools", (top ? `The pool must hold between ${usd(pool).replace(".00", "")} and ${usd(top).replace(".00", "")}.` : `The pool must hold ${usd(pool).replace(".00", "")} or more.`)
       + (data.short_name_pool && data.short_name_pool[0] > pool
         ? ` Below ${usd(data.short_name_pool[0]).replace(".00", "")} only coins with a name of ${data.short_name_pool[1]} letters or fewer (spaces not counted).` : "")] as [string, string]] : []),
@@ -709,7 +715,7 @@ export function RuleBook({ data }: { data: KarthikBook }) {
       ? `${sizeWords(data.tickets_by_pool)}${data.tickets_by_pool.length === 1 ? " on every coin" : ""}, from a ${usd(data.capital_usd)} balance${data.tickets_by_pool.length > 1 ? ": more where the profit is (small pools), less where it is thin" : ""}.${data.quiet_stake && data.quiet_stake[1] !== data.tickets_by_pool[0]?.[1] ? ` A quiet small-pool coin (at most ${data.quiet_stake[0]} buys in the 5 minutes before) gets $${data.quiet_stake[1]}: those earned about five times more.` : ""}`
       : `${usd(data.ticket_usd)} per trade, from a ${usd(data.capital_usd)} balance.`],
     data.pump_catcher
-      ? ["Sells", `The moment it is up ${data.pump_catcher.target_pct}% after fees and price impact (at the next price reading).${data.pump_catcher.check_min ? ` If it is down at ${data.pump_catcher.check_min} minutes it sells then, like Karthik's Lab;` : ""} otherwise ${data.pump_catcher.hold_min} minutes after buying. No stop-loss.`]
+      ? [data.dip_buy ? "Dip Buy sells" : "Sells", `The moment it is up ${data.pump_catcher.target_pct}% after fees and price impact (at the next price reading).${data.pump_catcher.check_min ? ` If it is down at ${data.pump_catcher.check_min} minutes it sells then, like Karthik's Lab;` : ""} otherwise ${data.pump_catcher.hold_min} minutes after buying. No stop-loss.`]
       : ["Always sells", `Exactly ${data.hold_minutes} minutes after buying. No price targets, no stop-loss — the clock decides.`],
     ["The risk", `If a coin's creator drains the pool (a “rug”), that trade loses almost all of it.${rugEvery ? ` So far about 1 in ${rugEvery} trades.` : ""}`],
     ["Paper money", data.dip_buy
@@ -1278,12 +1284,19 @@ function BookBody({ data, variant, archive = false }: {
         <div className="min-[1150px]:col-start-1 min-[1150px]:row-start-2">
         {data.dip_buy ? (
           <p className="mt-1 max-w-[78ch] rounded-lg border border-accent/40 bg-accent/[0.06] px-3 py-2 text-[13px] leading-relaxed text-ink-2" data-testid="dip-buy-rule">
-            <b className="text-ink">From 1 Nov this lab runs the Dip Buy rule:</b> {data.dip_buy.entry_s} seconds after a coin graduates, it buys
+            <b className="text-ink">From 1 Nov this lab runs two rules, one trade per coin.</b>{" "}
+            {data.dip_buy.quiet ? <><b className="text-ink">Quiet Small Pool:</b> {data.dip_buy.quiet.entry_s} seconds after a coin graduates, it buys
+            if the pool holds {data.dip_buy.quiet.pool_sol[0]}–{data.dip_buy.quiet.pool_sol[1]} SOL and nobody has sold into it yet (down no more
+            than {data.dip_buy.quiet.max_drop_pct}% from its high); it sells at +{data.dip_buy.quiet.target_pct}% or {data.dip_buy.quiet.stop_pct}% after
+            costs, else at {data.dip_buy.quiet.hold_min} minutes. Added 8 Nov, so its days from 8 Nov on test it.{" "}</> : null}
+            <b className="text-ink">Dip Buy:</b> {data.dip_buy.entry_s} seconds after a coin graduates, it buys
             if the price is {data.dip_buy.dip_pct[0]}–{data.dip_buy.dip_pct[1]}% below its peak so far and the name has 1–{data.dip_buy.name_max} letters,
-            and sells at +{data.dip_buy.target_pct}% after costs, else at {data.dip_buy.hold_min} minutes.
+            and sells at +{data.dip_buy.target_pct}% after costs, else at {data.dip_buy.hold_min} minutes. Chosen after seeing 1–6 Nov, so its days
+            from 7 Nov on test it.
+            {data.dip_buy.by_rule ? <> So far: Quiet Small Pool {data.dip_buy.by_rule.quiet.trades} trades, {signedUsd(data.dip_buy.by_rule.quiet.pnl_usd)};
+            Dip Buy {data.dip_buy.by_rule.dip.trades} trades, {signedUsd(data.dip_buy.by_rule.dip.pnl_usd)}.</> : null}{" "}
             Priced from the on-chain recorder, giving up {data.pump_catcher?.real_slip_pct ?? 1}% more a trade like the old rule did.
-            Chosen after seeing 1–6 Nov, so only days from 7 Nov on test it. The lab only: USER 1 and the main wallet still
-            buy the old rule&apos;s coins.
+            The lab only: USER 1 and the main wallet still buy the old rule&apos;s coins.
           </p>
         ) : data.pump_catcher ? (
           <p className="mt-1 max-w-[78ch] rounded-lg border border-accent/40 bg-accent/[0.06] px-3 py-2 text-[13px] leading-relaxed text-ink-2">
