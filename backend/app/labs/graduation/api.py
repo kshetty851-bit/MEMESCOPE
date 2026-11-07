@@ -2467,9 +2467,11 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
         "graduations_rugged": await _graduation_rugs(db, start),
         # Who put money into the coins the book bought, graduation to its sell.
         "flows": _flows(took, flow_rows),
-        "rule": (f"Dip Buy — every graduation {dip_buy.DIP_MIN:.0%}-{dip_buy.DIP_MAX:.0%} under its peak "
-                 f"{dip_buy.ENTRY_S} seconds in whose name has 1-{dip_buy.NAME_MAX} letters, "
-                 f"out at +{dip_buy.TARGET:.0%} after costs, else at {dip_buy.HOLD_S // 60}m")
+        "rule": (f"Quiet Small Pool and Dip Buy — at {dip_buy.QUIET_S} s, a {dip_buy.QUIET_POOL_SOL[0]:.0f}-"
+                 f"{dip_buy.QUIET_POOL_SOL[1]:.0f} SOL pool nobody has sold into, out at +{dip_buy.QUIET_TARGET:.0%} or "
+                 f"{dip_buy.QUIET_STOP:.0%}, else {dip_buy.QUIET_HOLD_S // 60}m; at {dip_buy.ENTRY_S} s, a coin "
+                 f"{dip_buy.DIP_MIN:.0%}-{dip_buy.DIP_MAX:.0%} under its peak with a 1-{dip_buy.NAME_MAX} letter name, "
+                 f"out at +{dip_buy.TARGET:.0%}, else {dip_buy.HOLD_S // 60}m")
         if new_rule else (("Pump Catcher — Karthik's coins" if pump else "Karthik's book")
                  + f" — every graduation with a {_pools_words()} pool that is "
                  f"still quiet (under {config.QUIET_MAX_POOL_TXS} trades) when it is bought, "
@@ -2480,7 +2482,14 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
         "dip_buy": {"since": dip_buy.START, "entry_s": dip_buy.ENTRY_S,
                     "dip_pct": [round(100 * dip_buy.DIP_MIN), round(100 * dip_buy.DIP_MAX)],
                     "name_max": dip_buy.NAME_MAX, "hold_min": dip_buy.HOLD_S // 60,
-                    "target_pct": round(100 * dip_buy.TARGET)} if new_rule else None,
+                    "target_pct": round(100 * dip_buy.TARGET),
+                    "quiet": {"entry_s": dip_buy.QUIET_S, "pool_sol": list(dip_buy.QUIET_POOL_SOL),
+                              "max_drop_pct": round(100 * dip_buy.QUIET_MAX_DROP),
+                              "target_pct": round(100 * dip_buy.QUIET_TARGET), "stop_pct": round(100 * dip_buy.QUIET_STOP),
+                              "hold_min": dip_buy.QUIET_HOLD_S // 60},
+                    "by_rule": {k: {"trades": sum(1 for r, _ in took if r.rule == k),
+                                    "pnl_usd": Decimal(str(sum(m for r, m in took if r.rule == k))).quantize(cents)}
+                                for k in ("quiet", "dip")}} if new_rule else None,
         "real_wallet": "USER 1" if pump else "main wallet",
         "pools_usd": list(config.KARTHIK_BOOK_POOLS),
         "short_name_pool": list(config.KARTHIK_SHORT_NAME_POOL),
