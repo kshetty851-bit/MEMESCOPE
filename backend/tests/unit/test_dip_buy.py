@@ -44,3 +44,11 @@ def test_quiet_needs_a_small_pool_nobody_has_sold_into():
     assert db.decide([(1, 1e-7, 50.0), (15, 1e-7, 45.0)], None) is None        # 10% off its high
     assert db.decide([(1, 1e-7, 70.0), (15, 1e-7, 70.0)], None) is None        # too big
     assert db.decide([(1, 1e-7, 25.0), (15, 1e-7, 25.0)], None) is None        # too small
+
+
+def test_a_position_carries_its_price_impact_so_later_wallets_pay_more():
+    t = {"ret": 0.10, "held_s": 300, "pool_sol": 50.0, "exit_pool_sol": 40.0, "graduated_at": "2026-11-01T00:00:00+00:00"}
+    p = db.Position("M", t, 100.0)
+    assert float(p.impact_open) == 0.02 and float(p.impact_close) == 0.025    # $100 on $5,000 and $4,000
+    assert abs(float(p.net_return) - ((1.09) / (1.02 * 1.025) - 1)) < 1e-6
+    assert db.Position("M", t, None).impact_open == 0
