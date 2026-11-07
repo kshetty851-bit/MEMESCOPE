@@ -2389,6 +2389,8 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
         from app.core.redis import init_redis
 
         rows = [r for r in await dip_buy.positions(await init_redis(), sol) if inside(r)]
+        capital = Decimal(dip_buy.CAPITAL_USD)
+        sizing = {"share": 1.0, "share_max": dip_buy.TICKET_USD}     # a flat $20, never more than the balance
     buys_before = dict((await db.execute(_BUYS_BEFORE_SQL, {
         "ids": [p.id for p in rows], "mints": [p.mint for p in rows],
         "ats": [p.opened_at for p in rows]})).all()) if rows and not new_rule else {}
@@ -2606,7 +2608,9 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
         # all tables as per that"): the old rule's filters, its floor test and its
         # refused coins say nothing about these trades, and USER 1 did not trade them.
         out.update({
-            "pump_catcher": {**out["pump_catcher"], "target_pct": round(100 * dip_buy.TARGET),
+            "ticket_usd": Decimal(str(dip_buy.TICKET_USD)), "tickets_by_pool": [],
+            "pump_catcher": {**out["pump_catcher"], "share_pct": None, "share_max_usd": None,
+                             "target_pct": round(100 * dip_buy.TARGET),
                              "hold_min": dip_buy.HOLD_S // 60, "check_min": None, "skip_pools_usd": [],
                              "open_buy_ok": None, "priced": len(took), "settling": 0},
             "real_wallet": None, "floor_test": None,
@@ -2618,6 +2622,8 @@ async def karthik_book(db: AsyncSession = Depends(get_db), exit_rule: str = "5m"
             "skip_no_open_buy": False, "busy_skipped": 0, "no_open_buy_skipped": 0})
         for t in out["trades_list"]:
             t["real"] = None
+        out["wallet_counts"] = {**out["wallet_counts"], "share_pct": None, "share_max_usd": None,
+                                "tickets_by_pool": [[None, dip_buy.TICKET_USD]]}
     return out
 
 
