@@ -38,6 +38,10 @@ START = datetime(2026, 10, 31, 20, tzinfo=UTC)       # 1 Nov, Dubai
 ENTRY_S, HOLD_S, TARGET = 30, 300, 0.60
 DIP_MIN, DIP_MAX, POOL_MIN_SOL, NAME_MAX = 0.20, 0.40, 30.0, 5
 SLIP = 0.005
+#: The lab's money from 1 Nov (Karthik, 2026-11-08: "switch lab to $20 per trade
+#: since nov 1 and start balance 200$"): a flat $20 a trade hardly moves these
+#: ~$5k-a-side pools, so every wallet in the queue pays about the same.
+CAPITAL_USD, TICKET_USD = 200, 20.0
 QUIET_S, QUIET_HOLD_S, QUIET_TARGET, QUIET_STOP = 20, 420, 1.00, -0.35
 QUIET_POOL_SOL, QUIET_MAX_DROP = (30.0, 60.0), 0.05
 #: v2 (2026-11-08): both rules, each trade with its rule and entry second.
