@@ -41,7 +41,8 @@ SLIP = 0.005
 QUIET_S, QUIET_HOLD_S, QUIET_TARGET, QUIET_STOP = 20, 420, 1.00, -0.35
 QUIET_POOL_SOL, QUIET_MAX_DROP = (30.0, 60.0), 0.05
 #: v2 (2026-11-08): both rules, each trade with its rule and entry second.
-KEY, CURSOR = "dipbuy:v2", "dipbuy:v2:cursor"
+#: v3 (2026-11-08): also the pool's SOL side at the sell, for its price impact.
+KEY, CURSOR = "dipbuy:v3", "dipbuy:v3:cursor"
 CHUNK = timedelta(hours=24)
 #: After the hold plus the recorder's slack, a graduation is final.
 SETTLE = timedelta(seconds=max(ENTRY_S + HOLD_S, QUIET_S + QUIET_HOLD_S) + 120)
@@ -95,7 +96,7 @@ def decide(path: list[tuple[float, float, float]], symbol: str | None) -> dict[s
     out, how, ret = _sell(path, i, last(entry_s + hold), buy, target, stop)
     return {"rule": rule, "entry_s": entry_s, "ret": ret, "how": how,
             "held_s": path[out][0] - entry_s if how != "time" else hold,
-            "pool_sol": entry[2], "entry_px": entry[1], "exit_px": path[out][1]}
+            "pool_sol": entry[2], "exit_pool_sol": path[out][2], "entry_px": entry[1], "exit_px": path[out][1]}
 
 
 async def refresh(session, redis, now: datetime | None = None) -> dict[str, int]:
@@ -126,10 +127,12 @@ async def refresh(session, redis, now: datetime | None = None) -> dict[str, int]
 
 class Position:
     """A trade dressed as a book position, so the Pump Catcher page walks it like
-    its own. Priced like the lab's other trades: `REAL_SLIP` comes off, and the
-    walk adds its own size penalty."""
-
-    impact_open = impact_close = Decimal(0)
+    its own. Priced like the lab's other trades: `REAL_SLIP` comes off, and its
+    return is at the book's $100 with that order's price impact on each leg
+    (`impact_open`/`impact_close`, $100 over the pool's SOL side in dollars), so
+    the walk and the wallet queue scale it to each stake like any book row
+    (Karthik, 2026-11-08: "how come all wallets giving same profit").
+    Without a SOL price the impacts are unknown and stay 0."""
 
     def __init__(self, mint: str, t: dict[str, Any], sol_usd: float | None):
         self.id = self.mint = mint
@@ -137,7 +140,13 @@ class Position:
         self.rule = t.get("rule", "dip")
         self.opened_at = datetime.fromisoformat(t["graduated_at"]) + timedelta(seconds=t.get("entry_s", ENTRY_S))
         self.closed_at = self.opened_at + timedelta(seconds=t["held_s"])
-        self.net_return = Decimal(str(round(t["ret"] - pump_catcher.REAL_SLIP, 6)))
+        notional = float(config.PAPER_NOTIONAL_USD)
+        i_open = notional / (t["pool_sol"] * sol_usd) if sol_usd and t["pool_sol"] else 0.0
+        out_sol = t.get("exit_pool_sol") or t["pool_sol"]
+        i_close = notional / (out_sol * sol_usd) if sol_usd and out_sol else 0.0
+        self.impact_open, self.impact_close = Decimal(str(round(i_open, 6))), Decimal(str(round(i_close, 6)))
+        net = (1 + t["ret"] - pump_catcher.REAL_SLIP) / ((1 + i_open) * (1 + i_close)) - 1
+        self.net_return = Decimal(str(round(net, 6)))
         self.liq_open_usd = Decimal(round(2 * t["pool_sol"] * sol_usd)) if sol_usd else None
         self.open_quote, self.close_quote = t.get("entry_px"), t.get("exit_px")
         self.sol_usd_at_open = sol_usd
