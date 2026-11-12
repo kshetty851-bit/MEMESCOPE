@@ -102,6 +102,7 @@ describe("SidebarContent", () => {
     for (const [label, href] of [
       ["Karthik's Lab", "/karthik-lab"],
       ["Boost Lab", "/boost-lab"],
+      ["Mood Lab", "/mood-lab"],
       ["Real wallet", "/real-wallet"],
       ["HQ", "/hq"],
     ] as const) {

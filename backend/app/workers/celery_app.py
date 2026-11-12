@@ -63,6 +63,8 @@ celery_app = Celery(
         "app.track_record.scheduler",
         "app.labs.graduation.pump_catcher_scheduler",
         "app.labs.graduation.fresh_catch_scheduler",
+        # Mood Lab (2026-11-12): meme-coin futures mood, paper only.
+        "app.labs.mood.scheduler",
         "app.services.journey_refresh",
         # Long-watch Lab (2026-10-22): 48-hour readings + Runner / Second Wind books.
     ],
