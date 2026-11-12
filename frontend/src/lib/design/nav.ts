@@ -98,6 +98,14 @@ export const NAV_GROUPS: NavGroup[] = [
         status: "ready",
         note: "Paper only. $10k-$30k pools seen within 30 s with 65% buys, sold at 4 minutes, $1,000 at $50.",
       },
+      // Karthik, 2026-11-12: the crowd's mood on big meme-coin futures.
+      {
+        href: "/mood-lab",
+        label: "Mood Lab",
+        icon: IconSpark,
+        status: "ready",
+        note: "Paper only. Shadow and Contra trade crowd mood on 25 meme-coin futures, each beside a random control.",
+      },
       // Karthik, 2026-10-10: does paying DexScreener (profile, boosts) pay?
       {
         href: "/boost-lab",
