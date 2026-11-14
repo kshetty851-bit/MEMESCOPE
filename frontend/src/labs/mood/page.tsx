@@ -16,12 +16,15 @@ interface Trade {
   entry: number; exit: number | null; funding: number | null; ret: number | null; pnl_usd: number | null; now: number | null;
   top: number | null; retail: number | null;
 }
-interface Pulse { sym: string; day: string; mood: number | null; gap: number | null; shadow: number; contra: number; price: number | null }
+interface Pulse { sym: string; day: string; mood: number | null; gap: number | null; shadow: number; contra: number; price: number | null;
+  buzz?: { now: number | null; h24: number; d7: number } }
+interface Trending { t: string; coins: { symbol: string; name: string; rank: number; mcap_rank: number | null }[] }
 interface Backtest { name: string; hold: number; select: string; test: string; test_trades: number; test_usd: number; verdict: string }
 export interface MoodLab {
   enabled: boolean; start_day: string; capital_usd: number; ticket_usd: number; holds: Record<string, number>;
   updated_at: string | null; books: Record<string, Book>; open: Trade[]; closed: Trade[]; pulse: Pulse[];
   fng: { d: string; v: number; label: string }[]; backtest: Backtest[];
+  trending?: Trending | null; buzz_hours?: number;
 }
 
 const DUBAI = { timeZone: "Asia/Dubai" } as const;
@@ -38,7 +41,7 @@ const TEAM = [
   ["Contra", "Bets against a crowd that is too greedy · 1 day (watch only)"],
   ["Ref", "Same trades on random coins, so luck has a number"],
   ["Orca", "Top traders vs retail (coming)"],
-  ["Buzz", "Retail hype: trending lists, searches (coming)"],
+  ["Buzz", "Retail hype: CoinGecko trending, recording (Reddit coming)"],
   ["Herald", "Daily WhatsApp summary (coming)"],
 ] as const;
 
@@ -117,6 +120,17 @@ export function MoodLabPage() {
           <h2 className="font-brand text-lg font-semibold text-ink">Pulse · today&apos;s mood</h2>
           {fng ? <span className="text-sm text-ink-dim">Fear &amp; Greed: <b className={fng.v < 40 ? "text-down" : fng.v > 60 ? "text-up" : "text-ink"}>{fng.v} · {fng.label}</b></span> : null}
         </div>
+        {d.trending ? (
+          <div className="mt-3 rounded-xl border border-line bg-sunken px-3 py-2.5">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-dim">Buzz · trending on CoinGecko now</div>
+            <div className="mt-1.5 flex flex-wrap gap-1.5 text-xs">
+              {d.trending.coins.map((c) => (
+                <span key={c.symbol + c.rank} className="rounded-full border border-line bg-surface px-2.5 py-0.5"><span className="text-ink-faint">#{c.rank}</span> <b className="text-ink">{c.symbol}</b></span>
+              ))}
+            </div>
+            <div className="mt-1.5 text-[11px] text-ink-faint">Recorded hourly ({d.buzz_hours ?? 0} hours so far). Recording only: no trades on it until there are weeks of history to test fairly.</div>
+          </div>
+        ) : null}
         <p className="mt-1 text-xs text-ink-faint">Mood runs from −100 (panic) to +100 (greed), against each coin&apos;s own last 90 days. The gap is top traders minus retail: positive means the big players are more bullish than the crowd.</p>
         <div className="mt-3 overflow-x-auto">
           <table className="w-full min-w-[34rem] text-sm">
@@ -126,7 +140,8 @@ export function MoodLabPage() {
                 <th className="py-1.5 pr-3 text-left font-normal">Mood</th>
                 <th className="py-1.5 pr-3 text-right font-normal">Gap</th>
                 <th className="py-1.5 pr-3 text-left font-normal">Shadow says</th>
-                <th className="py-1.5 text-left font-normal">Contra says</th>
+                <th className="py-1.5 pr-3 text-left font-normal">Contra says</th>
+                <th className="py-1.5 text-left font-normal">Buzz</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-line-subtle">
@@ -145,7 +160,11 @@ export function MoodLabPage() {
                   </td>
                   <td className={`py-2 pr-3 text-right font-mono tabular-nums ${tone(p.gap ?? 0)}`}>{p.gap === null ? "–" : p.gap.toFixed(2)}</td>
                   <td className={`py-2 pr-3 ${p.shadow ? tone(p.shadow) : "text-ink-faint"}`}>{p.shadow ? side(p.shadow) : "–"}</td>
-                  <td className={`py-2 ${p.contra ? tone(p.contra) : "text-ink-faint"}`}>{p.contra ? side(p.contra) : "–"}</td>
+                  <td className={`py-2 pr-3 ${p.contra ? tone(p.contra) : "text-ink-faint"}`}>{p.contra ? side(p.contra) : "–"}</td>
+                  <td className="py-2 text-ink-dim">
+                    {p.buzz?.now ? <span className="font-semibold text-accent">#{p.buzz.now} trending</span>
+                      : p.buzz?.d7 ? `${p.buzz.h24}h today · ${p.buzz.d7}h this week` : <span className="text-ink-faint">–</span>}
+                  </td>
                 </tr>
               ))}
             </tbody>

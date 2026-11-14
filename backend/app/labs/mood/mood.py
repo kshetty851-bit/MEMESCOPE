@@ -43,6 +43,9 @@ FILES_PER_RUN = 300
 FAPI = "https://fapi.binance.com"
 VISION = "https://data.binance.vision/data/futures/um/daily/metrics"
 FNG = "https://api.alternative.me/fng/?limit=120&format=json"
+TRENDING = "https://api.coingecko.com/api/v3/search/trending"
+BUZZ = "mood:buzz:v1"              # hourly CoinGecko trending snapshots
+BUZZ_KEEP = 24 * 90                # 90 days
 COINS = ("DOGEUSDT", "1000SHIBUSDT", "PEOPLEUSDT", "1000PEPEUSDT", "1000FLOKIUSDT", "MEMEUSDT",
          "1000BONKUSDT", "WIFUSDT", "BOMEUSDT", "TURBOUSDT", "MEWUSDT", "BRETTUSDT", "POPCATUSDT",
          "DOGSUSDT", "NEIROUSDT", "GOATUSDT", "MOODENGUSDT", "1000000MOGUSDT", "ACTUSDT", "PNUTUSDT",
@@ -122,6 +125,38 @@ async def _metrics(c: httpx.AsyncClient, sym: str, d: str) -> dict | None | str:
             "ret_ls": avg("count_long_short_ratio")}
 
 
+async def _buzz(c: httpx.AsyncClient, redis: Any, now: datetime) -> None:
+    """Buzz: CoinGecko's trending list (what people search for), once an hour.
+
+    Recording only: no rule trades on it until weeks of history allow a fair test.
+    Each snapshot is the whole list, so coins outside our 25 are kept too.
+    """
+    snaps = json.loads(await redis.get(BUZZ) or "[]")
+    if snaps and now - datetime.fromisoformat(snaps[-1]["t"]) < timedelta(minutes=55):
+        return
+    try:
+        items = (await _json(c, TRENDING))["coins"]
+    except Exception:
+        return
+    snaps.append({"t": now.isoformat(), "coins": [
+        {"symbol": (x["item"].get("symbol") or "").upper(), "name": x["item"].get("name"),
+         "rank": x["item"].get("score", i) + 1, "mcap_rank": x["item"].get("market_cap_rank")}
+        for i, x in enumerate(items)]})
+    await redis.set(BUZZ, json.dumps(snaps[-BUZZ_KEEP:]))
+
+
+def buzz_for(sym: str, snaps: list[dict]) -> dict[str, Any]:
+    """A coin's trending rank now, and hours on the list in the last 24 h and 7 days."""
+    base = sym.replace("USDT", "").lstrip("0123456789") or sym
+    hits = [(s["t"], next((x["rank"] for x in s["coins"] if x["symbol"] == base), None)) for s in snaps]
+    last = snaps[-1]["t"] if snaps else None
+    if not last:
+        return {"now": None, "h24": 0, "d7": 0}
+    t_last = datetime.fromisoformat(last)
+    within = lambda h: sum(1 for t, r in hits if r and t_last - datetime.fromisoformat(t) < timedelta(hours=h))
+    return {"now": hits[-1][1], "h24": within(24), "d7": within(168)}
+
+
 def _day(ms: int) -> str:
     return datetime.fromtimestamp(ms / 1000, UTC).date().isoformat()
 
@@ -146,6 +181,7 @@ async def refresh(redis: Any, now: datetime | None = None) -> dict[str, Any]:
                              "label": x["value_classification"]} for x in (await _json(c, FNG))["data"][:30]]
         except Exception:
             pass
+        await _buzz(c, redis, now)
         for sym in COINS:
             k = await _json(c, f"{FAPI}/fapi/v1/klines?symbol={sym}&interval=1d&limit={HISTORY_DAYS + 30}")
             f = await _json(c, f"{FAPI}/fapi/v1/fundingRate?symbol={sym}&limit=1000")
@@ -241,8 +277,9 @@ async def refresh(redis: Any, now: datetime | None = None) -> dict[str, Any]:
     return {"fetched": fetched, "opened": opened, "closed": closed, "open": sum(1 for p in pos if not p.get("closed_at"))}
 
 
-def board(state: dict[str, Any]) -> dict[str, Any]:
-    """The page: each book against its control, open and closed trades, Pulse, the backtest."""
+def board(state: dict[str, Any], snaps: list[dict] | None = None) -> dict[str, Any]:
+    """The page: each book against its control, open and closed trades, Pulse + Buzz, the backtest."""
+    snaps = snaps or []
     pos = state.get("positions", [])
     marks = state.get("marks", {})
     books = {}
@@ -265,5 +302,7 @@ def board(state: dict[str, Any]) -> dict[str, Any]:
             "open": [show(p) for p in real if not p.get("closed_at")],
             "closed": [show(p) for p in sorted((p for p in real if p.get("closed_at")),
                                                key=lambda p: p["closed_at"], reverse=True)[:100]],
-            "pulse": sorted(state.get("pulse", []), key=lambda x: -(x["mood"] or 0)),
+            "pulse": sorted(({**x, "buzz": buzz_for(x["sym"], snaps)} for x in state.get("pulse", [])),
+                            key=lambda x: -(x["mood"] or 0)),
+            "trending": snaps[-1] if snaps else None, "buzz_hours": len(snaps),
             "fng": state.get("fng", [])[:14], "backtest": BACKTEST}

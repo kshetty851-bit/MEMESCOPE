@@ -20,6 +20,7 @@ async def board() -> dict[str, Any]:
     global _CACHE
     if _CACHE and time.monotonic() - _CACHE[0] < 60:
         return _CACHE[1]
-    out = mood.board(json.loads(await (await init_redis()).get(mood.KEY) or "{}"))
+    r = await init_redis()
+    out = mood.board(json.loads(await r.get(mood.KEY) or "{}"), json.loads(await r.get(mood.BUZZ) or "[]"))
     _CACHE = (time.monotonic(), out)
     return out
