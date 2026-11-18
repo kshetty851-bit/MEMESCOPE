@@ -28,8 +28,11 @@ interface MinuteLine {
   rugs: number;
   lowest_usd: string;
 }
+interface TwinLine { balance_usd: string; trades: number; wins: number; rugs: number; pnl_usd: string }
 export interface BoostLab {
   computing?: boolean;
+  /** "Boost $15k+" (18 Nov 2026): the same trades, pools under $15k skipped. */
+  twin?: { min_pool_usd: number; start: string; live: TwinLine; base_live: TwinLine; replay: TwinLine };
   started_at: string;
   backtest_from: string;
   boosts_since?: string;
@@ -82,6 +85,36 @@ function useNow(): number {
     return () => clearInterval(id);
   }, []);
   return now;
+}
+
+function BoostTwin({ t }: { t: NonNullable<BoostLab["twin"]> }) {
+  const k = `$${(t.min_pool_usd / 1000).toFixed(0)}k`;
+  const money = (v: string | number) => {
+    const n = Number(v);
+    return `${n < 0 ? "−" : n > 0 ? "+" : ""}$${Math.abs(n).toFixed(2)}`;
+  };
+  const cls = (v: string | number) => (Number(v) > 0 ? "text-up" : Number(v) < 0 ? "text-down" : "text-ink-dim");
+  const line = (label: string, l: TwinLine) => (
+    <div className="rounded-lg border border-line bg-sunken px-3 py-2">
+      <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-dim">{label}</div>
+      <div className={`mt-0.5 text-lg font-semibold tabular-nums ${cls(l.pnl_usd)}`}>{money(l.pnl_usd)}</div>
+      <div className="text-[11px] text-ink-faint">{l.trades} trades · {l.wins} won · {l.rugs} rugs · balance ${Number(l.balance_usd).toFixed(2)}</div>
+    </div>
+  );
+  return (
+    <section className="rounded-xl border border-accent/40 bg-surface p-4" data-testid="boost-twin">
+      <h2 className="font-semibold">Boost {k}+ · new test from {dubai(t.start)}</h2>
+      <p className="mt-1 text-sm text-ink-3">
+        The same trades, skipping pools under {k} at the buy: those lost in all four periods since 8 Oct without their
+        best 3 trades. Each side below starts a fresh $250 at $50 on the same days, so the gap is the rule.
+      </p>
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        {line(`${k}+ since the start`, t.live)}
+        {line("Original rules, same days", t.base_live)}
+        {line(`${k}+ replayed from 8 Oct (hindsight)`, t.replay)}
+      </div>
+    </section>
+  );
 }
 
 export function BoostRuleBook({ d }: { d: BoostLab }) {
@@ -253,6 +286,7 @@ export function BoostLabPage() {
       ) : (
         <>
           <BoostRuleBook d={d} />
+          {d.twin ? <BoostTwin t={d.twin} /> : null}
           <BoostBook d={d} />
           {d.start_dates?.length ? (
             <StartDates book="Boost Lab" lines={d.start_dates} capital={Number(d.capital_usd ?? 250)} ticket={Number(d.ticket_usd ?? 50)} />

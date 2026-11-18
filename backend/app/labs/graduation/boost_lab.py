@@ -62,6 +62,13 @@ MAX_MCAP_POOL_RATIO = Decimal("3.1")
 #: replayed over every trade from the first: the days before 18 Oct are a
 #: look back with them, not what the book did live.
 RULES_SELECTED_ON = "2026-10-18"
+#: "Boost $15k+" twin (Karthik, 2026-11-18: "deep analyze and build profitable lab"):
+#: the same trades, skipping pools under `TWIN_MIN_POOL_USD` at the buy. Under $15k
+#: lost on all four periods without their best 3 trades (8-17 Oct -$90, 18-26 Oct
+#: -$156, 27 Oct-6 Nov -$238, 7-18 Nov -$243). Found by looking, so only trades
+#: from `TWIN_START` (its own fresh $250) are the test; the replay is labelled.
+TWIN_MIN_POOL_USD = 15_000
+TWIN_START = datetime(2026, 11, 18, 8, 0, tzinfo=UTC)   # 12:00 Dubai
 #: Three funded losses in a row pause new buys for an hour (`api._funded_walk`).
 WALK_RULES = {"loss_streak_limit": 3, "cooldown_minutes": 60}
 
@@ -337,6 +344,19 @@ async def build(db: AsyncSession) -> dict[str, Any]:
           float(c.impact_close or 0)) for c in book], sol, ticket=TICKET, start=CAPITAL,
         **WALK_RULES)
     took = [(c, m) for c, m in zip(book, walk.pnl, strict=True) if m is not None]
+
+    def twin(rows: list[GradPaperPosition]) -> dict[str, Any]:
+        w = api._funded_walk([(c.opened_at, c.closed_at, float(c.net_return), float(c.impact_open or 0),
+                               float(c.impact_close or 0)) for c in rows], sol, ticket=TICKET,
+                             start=CAPITAL, **WALK_RULES)
+        t = [(c, m) for c, m in zip(rows, w.pnl, strict=True) if m is not None]
+        return {"balance_usd": Decimal(str(w.cash)).quantize(cents), "trades": len(t),
+                "wins": sum(1 for _, m in t if m > 0),
+                "rugs": sum(1 for c, _ in t if float(c.net_return) <= float(config.OPERATOR_RUG_MOVE)),
+                "pnl_usd": Decimal(str(sum(m for _, m in t))).quantize(cents)}
+
+    big = [c for c in book if float(c.liq_open_usd or 0) >= TWIN_MIN_POOL_USD]
+    base_live = twin([c for c in book if c.opened_at >= TWIN_START])
     rug = float(config.OPERATOR_RUG_MOVE)
     first = took[0][0].opened_at if took else None
     return {
@@ -372,6 +392,10 @@ async def build(db: AsyncSession) -> dict[str, Any]:
                     "profile": paid[c.mint][0], "boosts": paid[c.mint][1],
                     "live": c.opened_at >= START}
                    for c, m in reversed(took)],
+        "twin": {"min_pool_usd": TWIN_MIN_POOL_USD, "start": TWIN_START,
+                 "live": twin([c for c in big if c.opened_at >= TWIN_START]),
+                 "base_live": base_live,          # the original book on the same days, fresh $250
+                 "replay": twin(big)},            # from the first trade: hindsight, labelled
         "minutes": [{"minutes": m, "current": m == HOLD_MINUTES,
                      **{k: v for k, v in api._karthik_line(
                          sorted(sold[m], key=api._opened_order), sol, size=TICKET,
