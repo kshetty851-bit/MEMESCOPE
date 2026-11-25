@@ -28,10 +28,12 @@ interface MinuteLine {
   rugs: number;
   lowest_usd: string;
 }
-interface TwinLine { balance_usd: string; trades: number; wins: number; rugs: number; pnl_usd: string }
+interface MonthLine { month: string; trades: number; wins: number; rugs: number; start_usd: string; pnl_usd: string; pct: string | null }
+interface TwinLine { balance_usd: string; trades: number; wins: number; rugs: number; pnl_usd: string; months?: MonthLine[] }
 export interface BoostLab {
   computing?: boolean;
   /** "Boost $15k+" (18 Nov 2026): the same trades, pools under $15k skipped. */
+  months?: MonthLine[];
   twin?: { min_pool_usd: number; start: string; live: TwinLine; base_live: TwinLine; replay: TwinLine };
   started_at: string;
   backtest_from: string;
@@ -85,6 +87,55 @@ function useNow(): number {
     return () => clearInterval(id);
   }, []);
   return now;
+}
+
+function BoostMonths({ orig, big, k }: { orig: MonthLine[]; big: MonthLine[]; k: number }) {
+  const label = (m: string) => new Date(`${m}-15T12:00:00Z`).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+  const money = (v: string | number) => {
+    const n = Number(v);
+    return `${n < 0 ? "−" : n > 0 ? "+" : ""}$${Math.abs(n).toFixed(2)}`;
+  };
+  const cls = (v: string | number | null) => (Number(v) > 0 ? "text-up" : Number(v) < 0 ? "text-down" : "text-ink-dim");
+  const cell = (l?: MonthLine) =>
+    l ? (
+      <>
+        <td className={`py-2 pr-3 text-right font-mono tabular-nums ${cls(l.pnl_usd)}`}>{money(l.pnl_usd)}</td>
+        <td className={`py-2 pr-3 text-right font-mono tabular-nums ${cls(l.pct)}`}>{l.pct === null ? "–" : `${Number(l.pct) > 0 ? "+" : ""}${l.pct}%`}</td>
+        <td className="py-2 pr-4 text-right text-ink-dim">{l.trades} · {l.wins} won · {l.rugs} rugs</td>
+      </>
+    ) : (
+      <td colSpan={3} className="py-2 pr-4 text-right text-ink-faint">no trades</td>
+    );
+  const months = Array.from(new Set([...orig, ...big].map((m) => m.month))).sort().reverse();
+  return (
+    <section className="rounded-xl border border-line bg-surface p-4" data-testid="boost-months">
+      <h2 className="font-semibold">Month by month</h2>
+      <p className="mt-1 text-sm text-ink-3">
+        Each from $250 at $50 a trade on 8 Oct, carried month to month. % is of the balance the month started with.
+        The ${(k / 1000).toFixed(0)}k+ column before 18 Nov is hindsight: the rule was found on those trades.
+      </p>
+      <div className="mt-3 overflow-x-auto">
+        <table className="w-full min-w-[44rem] text-sm">
+          <thead className="text-[11px] uppercase tracking-wider text-ink-faint">
+            <tr>
+              <th className="py-1.5 pr-3 text-left font-normal">Month (Dubai)</th>
+              <th colSpan={3} className="py-1.5 pr-4 text-right font-normal">Original rules</th>
+              <th colSpan={3} className="py-1.5 pr-4 text-right font-normal">${(k / 1000).toFixed(0)}k+ pools</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-line-subtle">
+            {months.map((m) => (
+              <tr key={m}>
+                <td className="py-2 pr-3 font-medium text-ink">{label(m)}</td>
+                {cell(orig.find((x) => x.month === m))}
+                {cell(big.find((x) => x.month === m))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
 }
 
 function BoostTwin({ t }: { t: NonNullable<BoostLab["twin"]> }) {
@@ -287,6 +338,7 @@ export function BoostLabPage() {
         <>
           <BoostRuleBook d={d} />
           {d.twin ? <BoostTwin t={d.twin} /> : null}
+          {d.months?.length ? <BoostMonths orig={d.months} big={d.twin?.replay.months ?? []} k={d.twin?.min_pool_usd ?? 15000} /> : null}
           <BoostBook d={d} />
           {d.start_dates?.length ? (
             <StartDates book="Boost Lab" lines={d.start_dates} capital={Number(d.capital_usd ?? 250)} ticket={Number(d.ticket_usd ?? 50)} />
