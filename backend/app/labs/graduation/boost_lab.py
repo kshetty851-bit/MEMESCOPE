@@ -345,6 +345,25 @@ async def build(db: AsyncSession) -> dict[str, Any]:
         **WALK_RULES)
     took = [(c, m) for c, m in zip(book, walk.pnl, strict=True) if m is not None]
 
+    def months(t: list[tuple[GradPaperPosition, float]]) -> list[dict[str, Any]]:
+        """Month by month (Dubai calendar): trades, wins, rugs, P/L, and % of the
+        balance the month started with (Karthik, 2026-11-25: "organize as per month wise")."""
+        out: dict[str, dict[str, Any]] = {}
+        bal = CAPITAL
+        for c, m in sorted(t, key=lambda x: x[0].opened_at):
+            k = (c.opened_at + timedelta(hours=4)).strftime("%Y-%m")
+            row = out.setdefault(k, {"month": k, "start_usd": bal, "trades": 0, "wins": 0, "rugs": 0, "pnl": 0.0})
+            row["trades"] += 1
+            row["wins"] += m > 0
+            row["rugs"] += float(c.net_return) <= float(config.OPERATOR_RUG_MOVE)
+            row["pnl"] += m
+            bal += m
+        return [{"month": r["month"], "trades": r["trades"], "wins": r["wins"], "rugs": r["rugs"],
+                 "start_usd": Decimal(str(r["start_usd"])).quantize(cents),
+                 "pnl_usd": Decimal(str(r["pnl"])).quantize(cents),
+                 "pct": Decimal(str(100 * r["pnl"] / r["start_usd"])).quantize(Decimal("0.1")) if r["start_usd"] else None}
+                for r in out.values()]
+
     def twin(rows: list[GradPaperPosition]) -> dict[str, Any]:
         w = api._funded_walk([(c.opened_at, c.closed_at, float(c.net_return), float(c.impact_open or 0),
                                float(c.impact_close or 0)) for c in rows], sol, ticket=TICKET,
@@ -353,7 +372,7 @@ async def build(db: AsyncSession) -> dict[str, Any]:
         return {"balance_usd": Decimal(str(w.cash)).quantize(cents), "trades": len(t),
                 "wins": sum(1 for _, m in t if m > 0),
                 "rugs": sum(1 for c, _ in t if float(c.net_return) <= float(config.OPERATOR_RUG_MOVE)),
-                "pnl_usd": Decimal(str(sum(m for _, m in t))).quantize(cents)}
+                "pnl_usd": Decimal(str(sum(m for _, m in t))).quantize(cents), "months": months(t)}
 
     big = [c for c in book if float(c.liq_open_usd or 0) >= TWIN_MIN_POOL_USD]
     base_live = twin([c for c in book if c.opened_at >= TWIN_START])
@@ -392,6 +411,7 @@ async def build(db: AsyncSession) -> dict[str, Any]:
                     "profile": paid[c.mint][0], "boosts": paid[c.mint][1],
                     "live": c.opened_at >= START}
                    for c, m in reversed(took)],
+        "months": months(took),
         "twin": {"min_pool_usd": TWIN_MIN_POOL_USD, "start": TWIN_START,
                  "live": twin([c for c in big if c.opened_at >= TWIN_START]),
                  "base_live": base_live,          # the original book on the same days, fresh $250
